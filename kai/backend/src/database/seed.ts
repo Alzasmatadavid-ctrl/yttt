@@ -409,6 +409,8 @@ const DEMO_LEADS: DemoLead[] = [
       ['lead', 'Mi salud, quiero cuidarme de verdad', 40],
       ['kai', 'Es la mejor razón. ¿Te parece si lo vemos en una llamada de valoración con David?', 41],
       ['lead', 'Sí', 50],
+      ['kai', '¡Genial! Te he reservado la llamada. Te escribiré un recordatorio antes.', 51],
+      ['human', '¡Bienvenido a Kaizen, Jorge! Ya tienes acceso a tu plan. Vamos paso a paso.', 4400],
     ],
     appointment: { daysOffset: -22, hour: 10, status: 'completed', outcome: 'won' },
     dealValueCents: 44700,
