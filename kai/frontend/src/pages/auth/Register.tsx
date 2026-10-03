@@ -134,7 +134,15 @@ export default function Register() {
           Crear cuenta
         </Button>
         <p className="kai-legal">
-          Al crear tu cuenta aceptas las condiciones de uso y la política de privacidad de KAI. Tú decides qué canales conectas y puedes desconectarlos cuando quieras.
+          Al crear tu cuenta aceptas las{' '}
+          <Link to="/terminos" target="_blank" rel="noopener">
+            condiciones de uso
+          </Link>{' '}
+          y la{' '}
+          <Link to="/privacidad" target="_blank" rel="noopener">
+            política de privacidad
+          </Link>{' '}
+          de KAI. Tú decides qué canales conectas y puedes desconectarlos cuando quieras.
         </p>
       </form>
     </AuthShell>

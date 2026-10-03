@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { useAuth } from './lib/auth';
 import { PageLoading } from './components/ui';
+import { safeNext } from './lib/nav';
 import AppLayout from './layouts/AppLayout';
 import AdminLayout from './layouts/AdminLayout';
 
@@ -31,6 +32,7 @@ const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
 const AdminPlans = lazy(() => import('./pages/admin/AdminPlans'));
 const AdminLogs = lazy(() => import('./pages/admin/AdminLogs'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const Legal = lazy(() => import('./pages/Legal'));
 
 /** Páginas que se pueden abrir con el onboarding a medias (los pasos 13 y 14 llevan a Integraciones, y Google vuelve allí). */
 const OPEN_DURING_ONBOARDING = ['/app/integraciones'];
@@ -58,8 +60,13 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 
 function GuestOnly({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <PageLoading />;
-  if (me?.user) return <Navigate to={me.businesses.length ? '/app' : me.user.platformRole === 'admin' ? '/admin' : '/app'} replace />;
+  if (me?.user) {
+    const next = safeNext(new URLSearchParams(location.search).get('next'));
+    const fallback = me.businesses.length ? '/app' : me.user.platformRole === 'admin' ? '/admin' : '/app';
+    return <Navigate to={next ?? fallback} replace />;
+  }
   return <>{children}</>;
 }
 
@@ -73,6 +80,8 @@ export default function App() {
         <Route path="/recuperar" element={<Forgot />} />
         <Route path="/restablecer" element={<Reset />} />
         <Route path="/invitacion" element={<Invitation />} />
+        <Route path="/privacidad" element={<Legal />} />
+        <Route path="/terminos" element={<Legal />} />
         <Route path="/app/onboarding" element={<RequireAuth allowOnboarding><Onboarding /></RequireAuth>} />
         <Route path="/app" element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route index element={<Dashboard />} />

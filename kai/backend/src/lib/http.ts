@@ -1,13 +1,65 @@
 import { z } from 'zod';
 import { badRequest } from './errors.js';
 
+// Mensajes de validación en español natural (los propios de cada esquema tienen prioridad).
+z.config(z.locales.es());
+z.config({
+  customError: (iss) => {
+    const origin = (iss as { origin?: string }).origin;
+    switch (iss.code) {
+      case 'invalid_type':
+        if (iss.input === undefined || iss.input === null) return 'es obligatorio';
+        return iss.expected === 'int' ? 'debe ser un número entero' : 'el formato no es correcto';
+      case 'too_small': {
+        const min = Number(iss.minimum);
+        if (origin === 'string') return min <= 1 ? 'no puede estar vacío' : `debe tener al menos ${min} caracteres`;
+        if (origin === 'array' || origin === 'set') return `debe tener al menos ${min} ${min === 1 ? 'elemento' : 'elementos'}`;
+        return `debe ser como mínimo ${min}`;
+      }
+      case 'too_big': {
+        const max = Number(iss.maximum);
+        if (origin === 'string') return `admite como máximo ${max} caracteres`;
+        if (origin === 'array' || origin === 'set') return `admite como máximo ${max} elementos`;
+        return `debe ser como máximo ${max}`;
+      }
+      case 'invalid_format': {
+        const format = (iss as { format?: string }).format;
+        if (format === 'email') return 'no es un email válido';
+        if (format === 'url') return 'no es una dirección web válida';
+        if (format === 'uuid') return 'identificador no válido';
+        return 'el formato no es correcto';
+      }
+      case 'invalid_value':
+        return 'no es una opción válida';
+      default:
+        return undefined;
+    }
+  },
+});
+
+/** Nombres legibles de los campos más comunes, para que los errores se entiendan sin conocimientos técnicos. */
+const FIELD_LABELS: Record<string, string> = {
+  email: 'email',
+  password: 'contraseña',
+  newPassword: 'nueva contraseña',
+  currentPassword: 'contraseña actual',
+  name: 'nombre',
+  businessName: 'nombre del negocio',
+  phone: 'teléfono',
+  timezone: 'zona horaria',
+  priceCents: 'precio',
+  text: 'mensaje',
+  question: 'pregunta',
+};
+
 /** Valida datos de entrada con Zod y devuelve un error 400 legible en español. */
 export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
   const result = schema.safeParse(data ?? {});
   if (!result.success) {
     const issues = result.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
     const first = issues[0];
-    throw badRequest(first ? `Dato no válido${first.path ? ` en "${first.path}"` : ''}: ${first.message}` : 'Datos no válidos.', issues);
+    const field = first?.path ? (FIELD_LABELS[first.path.split('.').pop() ?? ''] ?? first.path) : '';
+    throw badRequest(first ? `Revisa ${field ? `el campo «${field}»` : 'los datos'}: ${first.message}` : 'Datos no válidos.', issues);
   }
   return result.data;
 }

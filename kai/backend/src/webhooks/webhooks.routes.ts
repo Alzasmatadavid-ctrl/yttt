@@ -1,3 +1,4 @@
+import { TRIAL_DAYS } from '../config/defaults.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env, isProduction } from '../config/env.js';
@@ -79,5 +80,5 @@ export async function webhookRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.get('/public/plans', async () => ({ plans: await listPublicPlans() }));
+  app.get('/public/plans', async () => ({ plans: await listPublicPlans(), trialDays: TRIAL_DAYS }));
 }

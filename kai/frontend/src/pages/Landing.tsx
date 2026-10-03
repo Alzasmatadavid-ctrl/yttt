@@ -529,7 +529,7 @@ function FaqList() {
   );
 }
 
-function Pricing({ plans, loading, loggedIn }: { plans: PublicPlan[]; loading: boolean; loggedIn: boolean }) {
+function Pricing({ plans, loading, loggedIn, trialDays }: { plans: PublicPlan[]; loading: boolean; loggedIn: boolean; trialDays?: number }) {
   return (
     <section id="precios" className="lp-section" tabIndex={-1} aria-labelledby="precios-title">
       <div className="lp-container">
@@ -577,7 +577,7 @@ function Pricing({ plans, loading, loggedIn }: { plans: PublicPlan[]; loading: b
           )}
           <div className="lp-plans-note">
             <p>
-              <strong>Al crear tu cuenta empiezas con un periodo de prueba.</strong>
+              <strong>{trialDays ? `Al crear tu cuenta empiezas con ${trialDays} días de prueba.` : 'Al crear tu cuenta empiezas con un periodo de prueba.'}</strong>
             </p>
             <p>
               Mensajes de IA: respuestas que KAI escribe por ti y consultas a KAI Copilot. Canal conectado: cada vía por la que te escriben tus leads, como WhatsApp o
@@ -600,7 +600,7 @@ export default function Landing() {
 
   const plansQuery = useQuery({
     queryKey: ['public-plans'],
-    queryFn: () => api.get<{ plans: PublicPlan[] }>('/public/plans'),
+    queryFn: () => api.get<{ plans: PublicPlan[]; trialDays?: number }>('/public/plans'),
     staleTime: 5 * 60_000,
     retry: 1,
   });
@@ -914,7 +914,7 @@ export default function Landing() {
         </section>
 
         {/* ───── Precios (solo si la API responde con planes) ───── */}
-        {showPricing && <Pricing plans={plans} loading={plansQuery.isPending} loggedIn={loggedIn} />}
+        {showPricing && <Pricing plans={plans} loading={plansQuery.isPending} loggedIn={loggedIn} trialDays={plansQuery.data?.trialDays} />}
 
         {/* ───── Preguntas frecuentes ───── */}
         <section id="preguntas" className={`lp-section ${showPricing ? 'lp-band' : ''}`} tabIndex={-1} aria-labelledby="preguntas-title">
@@ -1013,6 +1013,9 @@ export default function Landing() {
           </div>
           <div className="lp-footer-bottom">
             <span>© {year} KAI</span>
+            <span>
+              <Link to="/privacidad">Privacidad</Link> · <Link to="/terminos">Condiciones</Link>
+            </span>
             <span>Hecho para entrenadores personales.</span>
           </div>
         </div>

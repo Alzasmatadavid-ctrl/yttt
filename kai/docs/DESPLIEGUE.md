@@ -97,7 +97,7 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 - [ ] Copias de seguridad de la base de datos activadas (Railway, Neon y Supabase las incluyen).
 - [ ] App de Meta revisada y aprobada, y negocio verificado en Business Manager.
 - [ ] Pantalla de consentimiento de Google publicada (o entrenadores añadidos como usuarios de prueba).
-- [ ] Política de privacidad y condiciones de uso publicadas (mencionando el asistente automatizado y los proveedores: Meta, Anthropic, Google/Calendly y el hosting).
+- [ ] Política de privacidad y condiciones de uso completadas: KAI incluye una plantilla en `/privacidad` y `/terminos` (archivo `frontend/src/pages/Legal.tsx`). Sustituye los datos entre [corchetes] y revísala con un profesional.
 - [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador).
 
 ## Varias instancias
