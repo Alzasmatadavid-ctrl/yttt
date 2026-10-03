@@ -19,6 +19,7 @@ import { webhookRoutes } from './webhooks/webhooks.routes.js';
 import { settingsRoutes } from './settings/settings.routes.js';
 import { analyticsRoutes } from './analytics/analytics.routes.js';
 import { copilotRoutes } from './ai/copilot/copilot.routes.js';
+import { businessRoutes } from './business/business.routes.js';
 import { adminRoutes } from './admin/admin.routes.js';
 import { runDueJobs } from './automation/worker.js';
 import { aiModeInfo } from './ai/providers/index.js';
@@ -127,6 +128,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       await api.register(analyticsRoutes);
       await api.register(copilotRoutes);
       await api.register(adminRoutes);
+      await api.register(businessRoutes);
     },
     { prefix: '/api' },
   );

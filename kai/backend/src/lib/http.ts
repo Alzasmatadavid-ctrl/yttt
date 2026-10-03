@@ -24,3 +24,18 @@ export const boolQuery = z
   .enum(['true', 'false', '1', '0'])
   .optional()
   .transform((v) => (v === undefined ? undefined : v === 'true' || v === '1'));
+
+/** Zona horaria IANA válida (“Europe/Madrid”, “America/Mexico_City”…). */
+export const timezoneSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(64)
+  .refine((tz) => {
+    try {
+      new Intl.DateTimeFormat('es', { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Zona horaria no válida');

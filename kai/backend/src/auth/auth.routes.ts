@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { parse } from '../lib/http.js';
+import { parse, timezoneSchema } from '../lib/http.js';
 import { audit } from '../audit/audit.service.js';
 import { forbidden } from '../lib/errors.js';
 import {
@@ -29,7 +29,7 @@ export async function authRoutes(app: FastifyInstance) {
         email,
         password: z.string().max(200),
         businessName: z.string().trim().min(2, 'Indica el nombre de tu negocio').max(120),
-        timezone: z.string().max(64).optional(),
+        timezone: timezoneSchema.optional(),
       }),
       request.body,
     );

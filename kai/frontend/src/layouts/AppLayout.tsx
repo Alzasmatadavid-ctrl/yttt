@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChartColumn,
   ChevronsUpDown,
+  Plus,
   FlaskConical,
   Inbox,
   LayoutDashboard,
@@ -27,7 +28,7 @@ import { api, errorText } from '../lib/api';
 import { applyTheme, getTheme, type Theme } from '../lib/theme';
 import { timeAgo } from '../lib/format';
 import { Logo } from '../components/brand';
-import { Button, ConfirmDialog, useToast } from '../components/ui';
+import { Button, ConfirmDialog, Field, Input, Modal, useToast } from '../components/ui';
 import CopilotPanel from '../components/CopilotPanel';
 import type { Alert, SettingsResponse } from '../lib/types';
 
@@ -101,6 +102,8 @@ export default function AppLayout() {
   const [bizOpen, setBizOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getTheme());
   const [confirmAutopilot, setConfirmAutopilot] = useState(false);
+  const [newBizOpen, setNewBizOpen] = useState(false);
+  const [newBizName, setNewBizName] = useState('');
   const location = useLocation();
   const qc = useQueryClient();
   const toast = useToast();
@@ -119,6 +122,19 @@ export default function AppLayout() {
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
+
+  const createBusiness = useMutation({
+    mutationFn: (name: string) => api.post<{ business: { id: string } }>('/businesses', { name }),
+    onSuccess: () => {
+      qc.clear();
+      window.location.href = '/app/onboarding';
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const ownedBusinesses = me?.businesses.filter((b) => b.role === 'trainer').length ?? 0;
+  const canAddBusiness =
+    activeBusiness?.role === 'trainer' && (activeBusiness.maxBusinesses === null || ownedBusinesses < (activeBusiness.maxBusinesses ?? 1));
+  const hasBizMenu = (me?.businesses.length ?? 0) > 1 || canAddBusiness;
 
   const pendingCount = inbox.data?.counts.pending ?? 0;
   const nav = [
@@ -155,15 +171,33 @@ export default function AppLayout() {
               </span>
               <span className="subtle xs">{activeBusiness?.planName ?? 'Sin plan'}</span>
             </span>
-            {(me?.businesses.length ?? 0) > 1 && <ChevronsUpDown size={15} className="subtle" />}
+            {hasBizMenu && <ChevronsUpDown size={15} className="subtle" />}
           </button>
-          {bizOpen && (me?.businesses.length ?? 0) > 1 && (
+          {bizOpen && hasBizMenu && (
             <div className="card" style={{ position: 'absolute', top: 54, left: 0, right: 0, zIndex: 5, padding: 6 }}>
               {me!.businesses.map((b) => (
-                <button key={b.businessId} className="nav-link" style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }} onClick={() => switchBusiness(b.businessId)}>
+                <button
+                  key={b.businessId}
+                  className={`nav-link ${b.businessId === activeBusiness?.businessId ? 'active' : ''}`}
+                  style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }}
+                  onClick={() => (b.businessId === activeBusiness?.businessId ? setBizOpen(false) : switchBusiness(b.businessId))}
+                >
                   {b.name}
                 </button>
               ))}
+              {canAddBusiness && (
+                <button
+                  className="nav-link"
+                  style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }}
+                  onClick={() => {
+                    setBizOpen(false);
+                    setNewBizOpen(true);
+                  }}
+                >
+                  <Plus aria-hidden />
+                  Añadir negocio
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -253,6 +287,29 @@ export default function AppLayout() {
           </aside>
         </>
       )}
+
+      <Modal
+        open={newBizOpen}
+        onClose={() => setNewBizOpen(false)}
+        title="Añadir un negocio"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setNewBizOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" loading={createBusiness.isPending} disabled={newBizName.trim().length < 2} onClick={() => createBusiness.mutate(newBizName.trim())}>
+              Crear y configurar
+            </Button>
+          </>
+        }
+      >
+        <p className="muted small" style={{ marginTop: 0 }}>
+          Cada negocio tiene sus propios leads, conversaciones, agenda y configuración de KAI. Después te guiaremos para configurarlo.
+        </p>
+        <Field label="Nombre del negocio" htmlFor="new-business-name">
+          <Input id="new-business-name" value={newBizName} onChange={(e) => setNewBizName(e.target.value)} placeholder="Ej.: Estudio Kaizen Madrid" autoFocus maxLength={120} />
+        </Field>
+      </Modal>
 
       <ConfirmDialog
         open={confirmAutopilot}

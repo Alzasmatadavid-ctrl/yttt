@@ -16,7 +16,7 @@ import {
   trainers,
   users,
 } from '../database/schema.js';
-import { parse, uuidParam } from '../lib/http.js';
+import { parse, uuidParam, timezoneSchema } from '../lib/http.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { requireTenant } from '../auth/guards.js';
 import { audit } from '../audit/audit.service.js';
@@ -149,14 +149,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = parse(
       z.object({
         name: z.string().trim().min(2).max(120),
-        timezone: z.string().trim().min(3).max(64).refine((tz) => {
-          try {
-            new Intl.DateTimeFormat('es', { timeZone: tz });
-            return true;
-          } catch {
-            return false;
-          }
-        }, 'Zona horaria no válida'),
+        timezone: timezoneSchema,
         currency: z.string().length(3),
         monthlyAdSpendCents: z.number().int().min(0).max(100_000_000),
       }),
@@ -187,8 +180,15 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   app.post('/settings/ai/preview', async (request) => {
     const ctx = await requireTenant(request, 'settings:read');
-    const body = parse(z.object({ leadMessage: z.string().trim().min(1).max(500).default('Hola! Vi tu anuncio, quiero perder grasa') }), request.body ?? {});
-    return previewSetterMessage(ctx.businessId, body.leadMessage);
+    const body = parse(
+      z.object({
+        leadMessage: z.string().trim().min(1).max(500).default('Hola! Vi tu anuncio, quiero perder grasa'),
+        /** Cambios todavía sin guardar: permiten ver cómo sonaría KAI antes de guardarlos. */
+        overrides: AiSettingsSchema.partial().optional(),
+      }),
+      request.body ?? {},
+    );
+    return previewSetterMessage(ctx.businessId, body.leadMessage, body.overrides);
   });
 
   app.put('/settings/score-bands', async (request) => {
@@ -291,6 +291,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const [row] = primary
       ? await db.update(services).set({ ...body, updatedAt: new Date() }).where(eq(services.id, primary.id)).returning()
       : await db.insert(services).values({ businessId: ctx.businessId, billingPeriod: 'monthly', priceCents: 0, ...body, isPrimary: true }).returning();
+    await audit({ businessId: ctx.businessId, actorType: 'user', actorUserId: ctx.userId, action: 'settings.primary_service_updated', entityType: 'service', entityId: row.id, metadata: { priceCents: row.priceCents, name: row.name } });
     return { service: row };
   });
 

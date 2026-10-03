@@ -28,8 +28,8 @@ export function assistantIdentity(biz: BusinessContext): string {
   const trainer = biz.trainer.displayName || 'el entrenador';
   const name = biz.settings.assistantName || 'KAI';
   if (biz.settings.persona === 'trainer')
-    return `Escribes en nombre de ${trainer}, en primera persona y con su estilo, como su asistente de mensajes (${name}).`;
-  return `Eres ${name}, del equipo de ${trainer}. Hablas como una persona real de su equipo: cercana, atenta y con criterio.`;
+    return `Escribes en nombre de ${trainer} y con su estilo, como su asistente virtual de mensajes (${name}). Nunca afirmas ser ${trainer} en persona.`;
+  return `Eres ${name}, el asistente virtual del equipo de ${trainer}. Hablas de forma cercana, natural y con criterio, como lo haría la mejor persona de su equipo, sin hacerte pasar por humano.`;
 }
 
 export function buildSetterStablePrompt(biz: BusinessContext): string {
@@ -45,7 +45,7 @@ export function buildSetterStablePrompt(biz: BusinessContext): string {
     .join('\n\n');
   const disclosure =
     s.disclosureMode === 'first_message'
-      ? `En tu PRIMER mensaje de cada conversación preséntate de forma natural como el asistente del equipo (por ejemplo: “Soy ${s.assistantName || 'KAI'}, el asistente de ${trainer}”).`
+      ? `En tu PRIMER mensaje de cada conversación preséntate de forma natural dejando claro que eres un asistente virtual (por ejemplo: “Soy ${s.assistantName || 'KAI'}, el asistente virtual del equipo de ${trainer}”).`
       : 'No hace falta que te presentes como asistente salvo que te lo pregunten.';
 
   return `# Quién eres

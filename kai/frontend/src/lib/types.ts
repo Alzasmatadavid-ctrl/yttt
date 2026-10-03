@@ -22,7 +22,7 @@ import type {
 
 export interface Me {
   user: { id: string; email: string; name: string; platformRole: 'admin' | 'user' } | null;
-  businesses: { businessId: string; name: string; role: BusinessRole; status: string; onboardingCompletedAt: string | null; planName: string | null }[];
+  businesses: { businessId: string; name: string; role: BusinessRole; status: string; onboardingCompletedAt: string | null; planName: string | null; maxBusinesses: number | null }[];
   activeBusinessId: string | null;
 }
 

@@ -199,8 +199,8 @@ export class RuleBasedSetterAgent implements SetterAgent {
     const intro =
       s.disclosureMode === 'first_message'
         ? s.persona === 'trainer'
-          ? `Te escribe ${assistant}, el asistente de ${trainer}.`
-          : `Soy ${assistant}, del equipo de ${trainer}.`
+          ? `Te escribe ${assistant}, el asistente virtual de ${trainer}.`
+          : `Soy ${assistant}, el asistente virtual del equipo de ${trainer}.`
         : '';
     const botNote = input.extraNote?.includes('si eres un bot') ? `Te soy sincero: soy el asistente automatizado del equipo de ${trainer}, y si prefieres hablar directamente con ${trainer} te lo paso. ` : '';
 

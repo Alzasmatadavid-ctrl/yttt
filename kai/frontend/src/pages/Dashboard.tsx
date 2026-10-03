@@ -24,6 +24,7 @@ import { duration, money, pct, timeAgo, timeOnly, dayLabel, dateTime } from '../
 import { Button, Callout, Card, EmptyState, PageHeader, PageLoading, Stat } from '../components/ui';
 import { ScoreBadge } from '../components/lead-bits';
 import { Funnel } from '../components/charts';
+import { InsightsCard, type Insight } from '../components/Insights';
 import type { Alert, Appointment } from '../lib/types';
 import type { LeadStatus, LeadTemperature } from '@shared';
 import { leadStatusLabel } from '@shared';
@@ -49,6 +50,8 @@ interface DashboardData {
     revenue30dCents: number;
     roi30d: { costCents: number; revenueCents: number; roi: number | null; note: string };
   };
+  insights: Insight[];
+  insightsLocked?: boolean;
 }
 
 export default function Dashboard() {
@@ -316,6 +319,8 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      <InsightsCard insights={data.insights ?? []} locked={data.insightsLocked} className="mt-16" />
     </div>
   );
 }

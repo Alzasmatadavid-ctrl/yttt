@@ -19,6 +19,7 @@ import {
   services,
 } from '../database/schema.js';
 import type { LeadStatus } from '../lib/domain.js';
+import { getInsights } from './insights.js';
 
 export type Period = 'today' | '7d' | '30d' | '90d' | 'custom';
 
@@ -233,7 +234,7 @@ export async function getRoi(businessId: string, range: { from: Date; to: Date }
 }
 
 /** Pantalla principal: qué está pasando y qué necesita atención AHORA. */
-export async function getDashboard(businessId: string) {
+export async function getDashboard(businessId: string, opts: { advanced: boolean } = { advanced: true }) {
   const db = getDb();
   const [biz] = await db.select().from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const tz = biz?.timezone ?? 'Europe/Madrid';
@@ -320,6 +321,7 @@ export async function getDashboard(businessId: string) {
   const funnel = await getFunnel(businessId, last30);
   const value = await getPipelineValue(businessId);
   const roi = await getRoi(businessId, last30, funnel.revenueCents);
+  const insights = opts.advanced ? await getInsights(businessId, last30, funnel, await getSourceBreakdown(businessId, last30)) : [];
 
   return {
     timezone: tz,
@@ -337,10 +339,13 @@ export async function getDashboard(businessId: string) {
     upcoming,
     attention: { alerts: openAlerts, atRisk, waiting },
     value: { ...value, revenue30dCents: funnel.revenueCents, roi30d: roi },
+    insights,
+    insightsLocked: !opts.advanced,
   };
 }
 
-export async function getAnalytics(businessId: string, period: Period, custom?: { from?: string; to?: string }) {
+/** `advanced` = el plan incluye analítica avanzada (recomendaciones “Lo que KAI ha aprendido”). */
+export async function getAnalytics(businessId: string, period: Period, custom?: { from?: string; to?: string }, opts: { advanced: boolean } = { advanced: true }) {
   const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const tz = biz?.timezone ?? 'Europe/Madrid';
   const range = periodRange(period, tz, custom);
@@ -350,8 +355,8 @@ export async function getAnalytics(businessId: string, period: Period, custom?: 
     getSourceBreakdown(businessId, range),
     getPipelineValue(businessId),
   ]);
-  const roi = await getRoi(businessId, range, funnel.revenueCents);
-  return { period, range: { from: range.from.toISOString(), to: range.to.toISOString() }, timezone: tz, funnel, series, sources, value, roi };
+  const [roi, insights] = await Promise.all([getRoi(businessId, range, funnel.revenueCents), opts.advanced ? getInsights(businessId, range, funnel, sources) : Promise.resolve([])]);
+  return { period, range: { from: range.from.toISOString(), to: range.to.toISOString() }, timezone: tz, funnel, series, sources, value, roi, insights, insightsLocked: !opts.advanced };
 }
 
 /** Guarda una foto diaria de métricas por negocio (histórico y panel de administración). */

@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, sql, gt, isNull } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { businesses, invitations, memberships, passwordResetTokens, plans, users } from '../database/schema.js';
 import { env, publicAppUrl } from '../config/env.js';
@@ -73,6 +73,8 @@ export async function listUserBusinesses(userId: string) {
       status: businesses.status,
       onboardingCompletedAt: businesses.onboardingCompletedAt,
       planName: plans.name,
+      /** Negocios que permite el plan (null = ilimitados). Sin plan asignado: 1. */
+      maxBusinesses: sql<number | null>`case when ${plans.id} is null then 1 else (${plans.limits}->>'maxBusinesses')::int end`,
     })
     .from(memberships)
     .innerJoin(businesses, eq(businesses.id, memberships.businessId))

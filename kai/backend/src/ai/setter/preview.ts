@@ -4,14 +4,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { analyzeHeuristically } from '../analysis/analyzer.js';
-import { loadBusinessContext, type ConversationContext, type LeadContext, type LeadRow, type MessageRow } from '../context/context.js';
+import { loadBusinessContext, type BusinessContext, type ConversationContext, type LeadContext, type LeadRow, type MessageRow } from '../context/context.js';
 import { getLLMProvider } from '../providers/index.js';
 import { createSetterAgent } from './agents.js';
 import { generateValidatedMessage } from './setter-engine.js';
 import { decideDirective } from './strategy.js';
 
-export async function previewSetterMessage(businessId: string, leadMessage: string) {
-  const biz = await loadBusinessContext(businessId);
+export async function previewSetterMessage(businessId: string, leadMessage: string, overrides?: Partial<BusinessContext['settings']>) {
+  const loaded = await loadBusinessContext(businessId);
+  const biz: BusinessContext = overrides ? { ...loaded, settings: { ...loaded.settings, ...overrides } } : loaded;
   const now = new Date();
   const leadId = randomUUID();
   const conversationId = randomUUID();

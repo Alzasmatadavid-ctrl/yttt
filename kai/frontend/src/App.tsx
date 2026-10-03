@@ -32,6 +32,9 @@ const AdminPlans = lazy(() => import('./pages/admin/AdminPlans'));
 const AdminLogs = lazy(() => import('./pages/admin/AdminLogs'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
+/** Páginas que se pueden abrir con el onboarding a medias (los pasos 13 y 14 llevan a Integraciones, y Google vuelve allí). */
+const OPEN_DURING_ONBOARDING = ['/app/integraciones'];
+
 function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allowOnboarding?: boolean }) {
   const { me, loading, activeBusiness } = useAuth();
   const location = useLocation();
@@ -40,7 +43,8 @@ function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allow
   if (!activeBusiness) {
     return me.user.platformRole === 'admin' ? <Navigate to="/admin" replace /> : <Navigate to="/registro" replace />;
   }
-  if (!allowOnboarding && !activeBusiness.onboardingCompletedAt && activeBusiness.role === 'trainer') return <Navigate to="/app/onboarding" replace />;
+  const openDuringOnboarding = allowOnboarding || OPEN_DURING_ONBOARDING.some((p) => location.pathname.startsWith(p));
+  if (!openDuringOnboarding && !activeBusiness.onboardingCompletedAt && activeBusiness.role === 'trainer') return <Navigate to="/app/onboarding" replace />;
   return <>{children}</>;
 }
 

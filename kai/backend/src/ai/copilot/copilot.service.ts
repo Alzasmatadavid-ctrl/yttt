@@ -224,8 +224,12 @@ class CopilotTools {
         };
       }
       case 'get_metrics': {
-        const a = await getAnalytics(b, (input.period as '7d') ?? '7d');
-        const m = { period: input.period, ...a.funnel, roi: a.roi, pipeline: a.value };
+        const advanced = (await getLimits(b)).advancedAnalytics;
+        const requested = (['today', '7d', '30d', '90d'] as const).find((p) => p === input.period) ?? '7d';
+        // Sin analítica avanzada, el periodo de 90 días se limita a 30 (igual que en la pantalla de Analítica).
+        const period = requested === '90d' && !advanced ? '30d' : requested;
+        const a = await getAnalytics(b, period, undefined, { advanced });
+        const m = { period, ...a.funnel, roi: a.roi, pipeline: a.value, insights: a.insights.map((i) => ({ title: i.title, detail: i.detail })), insightsLocked: a.insightsLocked };
         this.card.metrics = { ...this.card.metrics, funnel: a.funnel, roi: a.roi };
         return m;
       }
@@ -336,6 +340,12 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
       items.atRisk.length ? `A punto de perderse: ${items.atRisk.map((a) => a.lead || 'sin nombre').join(', ')}.` : '',
     ].filter(Boolean);
     return { text: `${parts.join(' ')} Abajo tienes tus leads más calientes ordenados por puntuación.`, data: tools.card };
+  }
+  if (/(que|como) (puedo|podria|deberia) mejorar|que has aprendido|aprendizajes?|recomendaciones|consejos|que funciona mejor|donde (pierdo|se pierden)/.test(n)) {
+    const m = (await tools.run('get_metrics', { period: '30d' })) as { insights: { title: string; detail: string }[]; insightsLocked: boolean };
+    if (m.insightsLocked) return { text: 'Las recomendaciones basadas en tus datos están incluidas en los planes con analítica avanzada (Pro y Agency). Puedes ver tu plan en Ajustes → Plan.', data: tools.card };
+    if (!m.insights.length) return { text: 'Todavía no hay datos suficientes para sacar conclusiones fiables. Cuando tengas más leads y llamadas, te diré qué funciona mejor y dónde se pierden.', data: tools.card };
+    return { text: `Esto es lo que dicen tus datos de los últimos 30 días: ${m.insights.map((i) => `${i.title}. ${i.detail}`).join(' ')}`, data: tools.card };
   }
   if (/calientes|mas cualificados|mejores leads|leads? (mas )?interesados/.test(n)) {
     const r = (await tools.run('search_leads', { temperatures: ['caliente', 'muy_cualificado'], statuses: null, sources: null, no_reply_hours: null, created_within_days: null, text: null, sort: 'score', limit: 10 })) as { total: number };

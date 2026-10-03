@@ -30,6 +30,7 @@ const SUGGESTIONS = [
   'Muéstrame las llamadas de mañana',
   '¿Cuántos leads de Instagram tengo esta semana?',
   'Cambia el tono de KAI para que sea más directo',
+  '¿Qué puedo mejorar según mis datos?',
 ];
 
 function ActionCard({ action, pending }: { action: { id: string; summary: string }; pending: boolean }) {
@@ -199,7 +200,7 @@ export default function CopilotPanel({ compact }: { compact?: boolean }) {
       </div>
       {(messages.length === 0 || !compact) && (
         <div className="suggestions" style={{ padding: '0 14px 10px' }}>
-          {SUGGESTIONS.slice(0, compact ? 4 : 6).map((s) => (
+          {SUGGESTIONS.slice(0, compact ? 4 : 7).map((s) => (
             <button key={s} className="chip" onClick={() => send(s)}>
               {s}
             </button>

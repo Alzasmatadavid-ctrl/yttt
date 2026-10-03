@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarCheck, ChartColumn, Clock, Coins, Filter, MessagesSquare, Target, UserCheck, UserPlus, UserX, Wallet } from 'lucide-react';
+import { CalendarCheck, ChartColumn, Clock, Coins, Filter, Lock, MessagesSquare, Target, UserCheck, UserPlus, UserX, Wallet } from 'lucide-react';
 import { leadSourceLabel, type LeadSource } from '@shared';
 import { api } from '../lib/api';
+import type { SettingsResponse } from '../lib/types';
 import { compact, duration, isoDate, money, pct } from '../lib/format';
-import { Card, Field, Input, PageHeader, PageLoading, Segmented, Stat } from '../components/ui';
+import { Callout, Card, Field, Input, PageHeader, PageLoading, Segmented, Stat } from '../components/ui';
 import { Funnel, SimpleBars, StackedBars } from '../components/charts';
 import { SourceIcon } from '../components/lead-bits';
+import { InsightsCard, type Insight } from '../components/Insights';
 
 interface AnalyticsData {
   period: string;
@@ -33,6 +36,8 @@ interface AnalyticsData {
   sources: { source: LeadSource; leads: number; qualified: number; clients: number }[];
   value: { weightedPipelineCents: number; potentialRevenueCents: number; servicePriceCents: number; currency: string };
   roi: { costCents: number; revenueCents: number; roi: number | null; note: string };
+  insights: Insight[];
+  insightsLocked?: boolean;
 }
 
 type Period = 'today' | '7d' | '30d' | 'custom';
@@ -48,9 +53,14 @@ export default function Analytics() {
   const [period, setPeriod] = useState<Period>('30d');
   const [from, setFrom] = useState(isoDate(new Date(Date.now() - 13 * 86_400_000)));
   const [to, setTo] = useState(isoDate(new Date()));
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings'), staleTime: 30_000 });
+  const advanced = settings.data?.limits.advancedAnalytics ?? true;
+  const customLocked = period === 'custom' && !advanced;
   const { data, isLoading } = useQuery({
     queryKey: ['analytics', period, period === 'custom' ? from : '', period === 'custom' ? to : ''],
     queryFn: () => api.get<AnalyticsData>('/analytics', { period, ...(period === 'custom' ? { from, to } : {}) }),
+    enabled: !customLocked && (period !== 'custom' || (Boolean(from) && Boolean(to) && from <= to)),
+    placeholderData: (prev) => prev,
   });
 
   const sourcesInData = useMemo(() => {
@@ -81,7 +91,7 @@ export default function Analytics() {
                 { value: 'custom', label: 'Personalizado' },
               ]}
             />
-            {period === 'custom' && (
+            {period === 'custom' && advanced && (
               <div className="row">
                 <Field>
                   <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" />
@@ -96,7 +106,14 @@ export default function Analytics() {
         }
       />
 
-      <div className="grid-5">
+      {customLocked && (
+        <Callout tone="info" icon={Lock}>
+          Los periodos personalizados están incluidos en los planes con analítica avanzada. Mientras tanto, se muestran los datos del último periodo consultado.{' '}
+          <Link to="/app/ajustes?tab=plan">Ver mi plan</Link>
+        </Callout>
+      )}
+
+      <div className={`grid-5${customLocked ? ' mt-16' : ''}`}>
         <Stat label="Leads" value={compact(f.leads)} icon={UserPlus} />
         <Stat label="Respondieron" value={compact(f.responded)} sub={`${pct(f.rates.response)} de respuesta`} icon={MessagesSquare} />
         <Stat label="Cualificados" value={compact(f.qualified)} sub={`${pct(f.rates.qualification)} de cualificación`} icon={Target} />
@@ -155,6 +172,8 @@ export default function Analytics() {
           </div>
         </Card>
       </div>
+
+      <InsightsCard insights={data.insights ?? []} locked={data.insightsLocked} className="mt-16" />
 
       <Card title="Rendimiento por origen" className="mt-16" flush>
         <div className="table-wrap" style={{ paddingTop: 8 }}>
