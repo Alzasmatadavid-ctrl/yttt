@@ -1,8 +1,8 @@
 /* Integraciones: estado de la IA, canales de Meta (WhatsApp, Instagram, Lead Ads), calendario y formularios/webhooks. */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BrainCircuit, CalendarDays, Globe, Lock, Megaphone, RefreshCw, Sparkles } from 'lucide-react';
+import { BrainCircuit, CalendarDays, Globe, Lock, Mail, Megaphone, RefreshCw, Sparkles } from 'lucide-react';
 import { api, errorText } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Button, Callout, Card, EmptyState, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
@@ -15,11 +15,26 @@ import '../styles/integrations.css';
 
 type TabKey = 'canales' | 'calendario' | 'web';
 
-const TABS: { value: TabKey; label: string }[] = [
-  { value: 'canales', label: 'WhatsApp, Instagram y anuncios' },
-  { value: 'calendario', label: 'Calendario' },
-  { value: 'web', label: 'Web, formularios y Zapier' },
+const TABS: { value: TabKey; label: string; short: string }[] = [
+  { value: 'canales', label: 'WhatsApp, Instagram y anuncios', short: 'Mensajes' },
+  { value: 'calendario', label: 'Calendario', short: 'Calendario' },
+  { value: 'web', label: 'Formularios y webhooks', short: 'Formularios' },
 ];
+
+const NARROW = '(max-width: 640px)';
+
+/** En pantallas estrechas las pestañas usan nombres cortos para que se vean las tres sin desplazarse. */
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => Boolean(typeof window !== 'undefined' && window.matchMedia?.(NARROW).matches));
+  useEffect(() => {
+    const mq = window.matchMedia?.(NARROW);
+    if (!mq) return;
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return narrow;
+}
 
 const GOOGLE_RESULT: Record<string, { text: string; tone: 'success' | 'error' | 'info' }> = {
   ok: { text: 'Google Calendar conectado. KAI ya tiene en cuenta tus horas ocupadas.', tone: 'success' },
@@ -28,10 +43,14 @@ const GOOGLE_RESULT: Record<string, { text: string; tone: 'success' | 'error' | 
   sesion: { text: 'Al volver de Google no hemos encontrado tu sesión de KAI. Inicia sesión de nuevo y vuelve a intentarlo.', tone: 'error' },
 };
 
+function tabFromHash(): TabKey | null {
+  const hash = window.location.hash.replace('#', '');
+  return TABS.some((t) => t.value === hash) ? (hash as TabKey) : null;
+}
+
 function initialTab(params: URLSearchParams): TabKey {
   if (params.get('google')) return 'calendario';
-  const hash = window.location.hash.replace('#', '');
-  return TABS.some((t) => t.value === hash) ? (hash as TabKey) : 'canales';
+  return tabFromHash() ?? 'canales';
 }
 
 function AiStatusCard({ ai }: { ai: IntegrationsResponse['ai'] }) {
@@ -40,7 +59,13 @@ function AiStatusCard({ ai }: { ai: IntegrationsResponse['ai'] }) {
     <Card
       title="Inteligencia artificial de KAI"
       icon={BrainCircuit}
-      actions={live ? <span className="badge badge-dot badge-success">Activa</span> : <span className="badge badge-dot badge-warning">Modo simulación</span>}
+      actions={
+        live ? (
+          <span className="badge badge-dot badge-success">{/claude/i.test(ai.provider) ? 'IA: Claude' : 'IA activa'}</span>
+        ) : (
+          <span className="badge badge-dot badge-warning">Modo simulado</span>
+        )
+      }
     >
       {live ? (
         <div className="col gap-12">
@@ -60,7 +85,7 @@ function AiStatusCard({ ai }: { ai: IntegrationsResponse['ai'] }) {
         </div>
       ) : (
         <Callout tone="warning" icon={Sparkles}>
-          <strong>KAI está funcionando en modo simulación.</strong> Falta la clave de la IA (<code className="code-inline">ANTHROPIC_API_KEY</code>) en el
+          <strong>KAI está funcionando en modo simulado.</strong> Falta la clave de la IA (<code className="code-inline">ANTHROPIC_API_KEY</code>) en el
           servidor, o el servidor tiene la IA desactivada a propósito (<code className="code-inline">AI_PROVIDER=simulated</code>).
           <ul className="intg-list-plain mt-8">
             <li>
@@ -68,6 +93,9 @@ function AiStatusCard({ ai }: { ai: IntegrationsResponse['ai'] }) {
               básicos y KAI entiende peor lo que escribe el lead.
             </li>
             <li>Copilot solo responde a preguntas básicas sobre tus datos.</li>
+            <li>
+              Puedes ver cómo contesta KAI ahora mismo en el <Link to="/app/simulador">Simulador</Link>, sin escribir a ningún lead real.
+            </li>
             <li>
               Para atender a leads reales, pide a quien administra el servidor que añada la clave <code className="code-inline">ANTHROPIC_API_KEY</code> y
               reinicie KAI. No tienes que cambiar nada de tu configuración.
@@ -89,11 +117,12 @@ function Overview({ data, onGo }: { data: IntegrationsResponse; onGo: (t: TabKey
   const items: { key: string; icon: ReactNode; name: string; state: keyof typeof label | 'internal'; tab: TabKey }[] = [
     { key: 'wa', icon: <WhatsAppIcon size={16} />, name: 'WhatsApp', state: by('whatsapp'), tab: 'canales' },
     { key: 'ig', icon: <InstagramIcon size={16} />, name: 'Instagram', state: by('instagram'), tab: 'canales' },
-    { key: 'ads', icon: <Megaphone size={16} aria-hidden />, name: 'Anuncios (Lead Ads)', state: by('meta_lead_ads'), tab: 'canales' },
+    { key: 'ads', icon: <Megaphone size={16} aria-hidden />, name: 'Meta Lead Ads', state: by('meta_lead_ads'), tab: 'canales' },
     { key: 'cal', icon: <CalendarDays size={16} aria-hidden />, name: cal ? (cal.provider === 'google' ? 'Google Calendar' : 'Calendly') : 'Agenda de KAI', state: cal ? connState([cal]) : 'internal', tab: 'calendario' },
-    { key: 'web', icon: <Globe size={16} aria-hidden />, name: 'Formularios y webhook', state: 'internal', tab: 'web' },
+    { key: 'web', icon: <Globe size={16} aria-hidden />, name: 'Formularios y webhooks', state: 'internal', tab: 'web' },
   ];
   return (
+    <div className="col gap-12">
     <ul className="intg-overview" aria-label="Resumen de integraciones">
       {items.map((it) => (
         <li key={it.key}>
@@ -109,6 +138,15 @@ function Overview({ data, onGo }: { data: IntegrationsResponse; onGo: (t: TabKey
         </li>
       ))}
     </ul>
+    <p className="xs subtle row intg-email">
+      <Mail aria-hidden size={14} />
+      <span>
+        Emails de KAI (recuperar contraseña, invitar al equipo):{' '}
+        {data.server.email ? <strong>activos</strong> : <strong>sin configurar en el servidor</strong>}
+        {!data.server.email && '. Mientras tanto, esos emails no llegan; avisa a quien administra KAI si los necesitas.'}
+      </span>
+    </p>
+    </div>
   );
 }
 
@@ -121,6 +159,7 @@ export default function Integrations() {
   const handledGoogle = useRef(false);
   const query = useQuery({ queryKey: INTEGRATIONS_KEY, queryFn: () => api.get<IntegrationsResponse>('/integrations') });
   const canManage = activeBusiness?.role !== 'team_member';
+  const narrow = useNarrow();
 
   // Vuelta desde Google: ?google=ok|error|cancelado|sesion → aviso y limpiamos la URL.
   useEffect(() => {
@@ -138,6 +177,16 @@ export default function Integrations() {
     void qc.invalidateQueries({ queryKey: ['slots'] });
   }, [params, setParams, toast, qc]);
 
+  // Enlaces a /app/integraciones#web (u otra pestaña) mientras ya estás en la página.
+  useEffect(() => {
+    const onHash = () => {
+      const t = tabFromHash();
+      if (t) setTab(t);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   const goTo = (t: TabKey) => {
     setTab(t);
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${t}`);
@@ -147,7 +196,7 @@ export default function Integrations() {
 
   if (query.isError || !query.data) {
     return (
-      <div className="page">
+      <div className="page intg-page">
         <PageHeader title="Integraciones" />
         <div className="card">
           <EmptyState
@@ -168,7 +217,7 @@ export default function Integrations() {
   const data = query.data;
 
   return (
-    <div className="page">
+    <div className="page intg-page">
       <PageHeader
         title="Integraciones"
         description="Conecta KAI con tus canales de mensajes, tu calendario y tu web. Aquí ves qué funciona y qué falta por configurar."
@@ -195,7 +244,7 @@ export default function Integrations() {
       </div>
 
       <div className="mt-24">
-        <Tabs tabs={TABS} value={tab} onChange={goTo} />
+        <Tabs tabs={TABS.map((t) => ({ value: t.value, label: narrow ? t.short : t.label }))} value={tab} onChange={goTo} />
       </div>
       <div role="tabpanel" aria-label={TABS.find((t) => t.value === tab)?.label}>
         {tab === 'canales' && <ChannelsSection data={data} canManage={canManage} />}

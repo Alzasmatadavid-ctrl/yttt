@@ -135,9 +135,13 @@ describe('nextStatus', () => {
     expect(nextStatus('conversing', 'desconocido' as never)).toBeNull();
   });
 
-  // BUG: un lead marcado como perdido (estado cerrado) vuelve a “seguimiento” si se cancela una cita
-  // de forma automática (p. ej. webhook de Calendly), y KAI podría volver a escribirle.
-  it.fails('BUG: una cancelación automática no debería reabrir un lead perdido', () => {
+  // Regresión: un lead marcado como perdido (estado cerrado) volvía a “seguimiento” si se cancelaba una cita
+  // de forma automática (p. ej. webhook de Calendly), y KAI podía volver a escribirle.
+  it('una cancelación automática no debería reabrir un lead perdido', () => {
     expect(nextStatus('lost', 'appointment_cancelled')).toBeNull();
+  });
+
+  it('el entrenador sí puede reabrir un lead perdido marcando “seguimiento” tras la llamada', () => {
+    expect(nextStatus('lost', 'call_follow_up')).toBe('follow_up');
   });
 });

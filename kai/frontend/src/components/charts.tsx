@@ -141,7 +141,9 @@ export function StackedBars({ data, keys, height = 220, labelFor = (k: string) =
           <Legend items={keys.map((k) => ({ label: labelFor(k), color: colorFor(k) }))} />
         </div>
       )}
-      <table className="sr-only">
+      {/* Tabla accesible: envuelta en un div porque una <table> ignora el alto de 1px y alargaba la página. */}
+      <div className="sr-only">
+      <table>
         <caption>{`${unit} por día`}</caption>
         <thead>
           <tr>
@@ -162,6 +164,7 @@ export function StackedBars({ data, keys, height = 220, labelFor = (k: string) =
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -181,19 +184,21 @@ export function Funnel({ steps }: { steps: { label: string; value: number; hint?
         const pctOfFirst = Math.round((s.value / max) * 1000) / 10;
         const prev = i > 0 ? steps[i - 1].value : null;
         const stepRate = prev ? Math.round((s.value / Math.max(1, prev)) * 1000) / 10 : null;
+        const fmt = (n: number) => `${n.toLocaleString('es-ES', { maximumFractionDigits: 1 })}%`;
         return (
-          <div key={s.label} className="funnel-row">
+          <div key={s.label} className="funnel-row" title={stepRate !== null ? `${s.value} · ${fmt(stepRate)} respecto a «${steps[i - 1].label}» · ${fmt(pctOfFirst)} del total` : `${s.value}`}>
             <span className="muted ellipsis">{s.label}</span>
-            <div className="funnel-track" title={`${s.value} (${pctOfFirst}% del total)`}>
+            <div className="funnel-track">
               <div className="funnel-bar" style={{ width: `${Math.max(s.value > 0 ? 2 : 0, (s.value / max) * 100)}%`, background: `var(--funnel-${Math.min(5, i + 1)})` }} />
             </div>
             <span className="tnum" style={{ textAlign: 'right' }}>
               <strong>{s.value.toLocaleString('es-ES')}</strong>
-              {stepRate !== null && <span className="subtle xs"> · {stepRate}%</span>}
+              {stepRate !== null && <span className="subtle xs"> · {fmt(stepRate)}</span>}
             </span>
           </div>
         );
       })}
+      {steps.length > 1 && <p className="subtle xs">El porcentaje indica cuántos pasan de cada paso al siguiente.</p>}
     </div>
   );
 }

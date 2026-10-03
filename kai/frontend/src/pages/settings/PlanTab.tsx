@@ -1,8 +1,9 @@
 /* Pestaña «Plan y uso»: plan actual, estado de la suscripción, consumo del mes y comparativa de planes. */
 import { useQuery } from '@tanstack/react-query';
-import { Check, CircleAlert, CreditCard, Gauge, Hourglass, LifeBuoy, Minus, RefreshCw, Table2 } from 'lucide-react';
+import { Building2, ChartColumn, Check, CircleAlert, CreditCard, Gauge, Hourglass, LifeBuoy, Minus, RefreshCw, Sparkles, Table2 } from 'lucide-react';
 import { BILLING_PERIOD_LABELS, formatMoney, type PlanLimits } from '@shared';
 import { api, errorText } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { Button, Callout, Card, EmptyState, PageLoading } from '../../components/ui';
 import { Meter } from '../../components/charts';
 import type { Plan } from '../../lib/types';
@@ -24,9 +25,9 @@ const COMPARE_ROWS: { label: string; hint?: string; value: (l: PlanLimits) => nu
   { label: 'Mensajes de KAI al mes', hint: 'Respuestas que KAI envía a tus leads', value: (l) => l.maxAiMessagesPerMonth, unlimited: 'Ilimitados' },
   { label: 'Usuarios del equipo', value: (l) => l.maxTeamMembers, unlimited: 'Ilimitados' },
   { label: 'Canales conectados', hint: 'WhatsApp, Instagram, anuncios de Meta…', value: (l) => l.maxChannels, unlimited: 'Ilimitados' },
-  { label: 'Negocios', value: (l) => l.maxBusinesses, unlimited: 'Ilimitados' },
+  { label: 'Negocios', hint: 'Negocios distintos que puedes gestionar con tu cuenta', value: (l) => l.maxBusinesses, unlimited: 'Ilimitados' },
   { label: 'KAI Copilot', hint: 'Asistente al que puedes preguntar por tus leads y datos', value: (l) => l.copilot },
-  { label: 'Analítica avanzada', value: (l) => l.advancedAnalytics },
+  { label: 'Analítica avanzada', hint: 'Recomendaciones de KAI y periodos de 90 días o a medida', value: (l) => l.advancedAnalytics },
 ];
 
 function CompareCell({ value, unlimited }: { value: number | null | boolean; unlimited?: string }) {
@@ -71,7 +72,59 @@ function UsageMeter({ label, value, max, description, atLimit }: { label: string
   );
 }
 
+/** Funciones del plan que no son un contador (incluidas o no). */
+function FeatureRow({ icon: Icon, title, included, yes, no, badge }: { icon: typeof Sparkles; title: string; included: boolean; yes: string; no: string; badge?: string }) {
+  return (
+    <div className={`settings-feature ${included ? 'is-on' : ''}`}>
+      <span className="settings-feature-icon" aria-hidden>
+        <Icon />
+      </span>
+      <div className="col" style={{ gap: 2, minWidth: 0 }}>
+        <span className="row wrap" style={{ gap: 8 }}>
+          <strong className="small">{title}</strong>
+          <span className={`badge ${included ? 'badge-success' : ''}`}>{badge ?? (included ? 'Incluido en tu plan' : 'No incluido')}</span>
+        </span>
+        <span className="muted xs">{included ? yes : no}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Versión en tarjetas de la comparativa (pantallas estrechas). */
+function PlanCards({ plans, currentId }: { plans: Plan[]; currentId: string | null }) {
+  return (
+    <ul className="settings-plan-cards" aria-label="Planes disponibles">
+      {plans.map((p) => {
+        const isCurrent = currentId === p.id;
+        return (
+          <li key={p.id} className={`settings-plan-card ${isCurrent ? 'is-current' : ''}`}>
+            <div className="row-between" style={{ alignItems: 'flex-start' }}>
+              <div className="col" style={{ gap: 2, minWidth: 0 }}>
+                <strong className="settings-compare-name">{p.name}</strong>
+                <span className="tnum settings-compare-price">{planPrice(p)}</span>
+              </div>
+              {isCurrent && <span className="badge badge-accent">Tu plan</span>}
+            </div>
+            {p.description && <p className="muted xs">{p.description}</p>}
+            <dl className="settings-plan-card-list">
+              {COMPARE_ROWS.map((row) => (
+                <div key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>
+                    <CompareCell value={row.value(p.limits)} unlimited={row.unlimited} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function PlanTab() {
+  const { me, activeBusiness } = useAuth();
   const plan = useQuery({ queryKey: PLAN_QUERY_KEY, queryFn: () => api.get<PlanResponse>('/settings/plan') });
 
   if (plan.isPending) return <PageLoading />;
@@ -100,6 +153,24 @@ export default function PlanTab() {
   const currentInTable = current ? plans.some((p) => p.id === current.id) : false;
   const monthName = new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   const copilotQueries = data.usage.copilot_queries ?? 0;
+  // Igual que el servidor: cuentan los negocios en los que tienes el rol Entrenador.
+  const ownedBusinesses = me?.businesses.filter((b) => b.role === 'trainer').length ?? 0;
+  const maxBusinesses = data.limits.maxBusinesses;
+  const isTrainer = activeBusiness?.role === 'trainer';
+  const businessesBadge = !isTrainer
+    ? maxBusinesses === null
+      ? 'Sin límite'
+      : `Hasta ${fmtNumber(maxBusinesses)}`
+    : maxBusinesses === null
+      ? `${fmtNumber(ownedBusinesses)} · sin límite`
+      : `${fmtNumber(ownedBusinesses)} de ${fmtNumber(maxBusinesses)}`;
+  const businessesText = !isTrainer
+    ? 'Los negocios los añade y gestiona la persona con rol Entrenador.'
+    : maxBusinesses === 1
+      ? 'Tu plan incluye un negocio. Para gestionar varios (por ejemplo, otra marca o un socio) necesitas un plan que lo permita.'
+      : maxBusinesses !== null && ownedBusinesses >= maxBusinesses
+        ? 'Ya gestionas todos los negocios que incluye tu plan.'
+        : 'Puedes añadir otro negocio desde el selector de negocio, arriba en la barra lateral.';
 
   return (
     <>
@@ -134,8 +205,26 @@ export default function PlanTab() {
           {data.subscriptionStatus === 'past_due' && <Callout tone="warning">Hay un pago pendiente en tu suscripción. Contacta con el equipo de soporte de KAI para regularizarlo.</Callout>}
           {data.subscriptionStatus === 'canceled' && <Callout tone="danger">Tu suscripción está cancelada. Si quieres reactivarla, contacta con el equipo de soporte de KAI.</Callout>}
           <Callout tone="accent" icon={LifeBuoy}>
-            <strong>El pago online todavía no está disponible en KAI.</strong> Desde aquí no se te cobra nada ni puedes cambiar de plan por tu cuenta. Si quieres cambiar de plan, contacta con el equipo de soporte de KAI y lo gestionarán por ti.
+            <strong>La facturación todavía no está conectada.</strong> KAI aún no cobra pagos online: desde esta pantalla no se te cobra nada, no tienes que añadir ninguna tarjeta y no puedes cambiar de plan por tu cuenta. Si quieres cambiar de plan, contacta con el equipo de soporte de KAI y lo gestionarán por ti.
           </Callout>
+        </div>
+
+        <div className="settings-features mt-16">
+          <FeatureRow
+            icon={Sparkles}
+            title="KAI Copilot"
+            included={data.limits.copilot}
+            yes="Puedes preguntarle a KAI por tus leads, tus conversaciones y tus datos desde KAI Copilot."
+            no="Tu plan no incluye el asistente al que preguntar por tus leads y tus datos."
+          />
+          <FeatureRow
+            icon={ChartColumn}
+            title="Analítica avanzada"
+            included={data.limits.advancedAnalytics}
+            yes="En Analítica verás las recomendaciones de KAI y podrás consultar los últimos 90 días o elegir fechas a medida."
+            no="En Analítica verás los datos de hasta 30 días, sin las recomendaciones de KAI ni periodos a medida."
+          />
+          <FeatureRow icon={Building2} title="Negocios" included badge={businessesBadge} yes={businessesText} no="" />
         </div>
       </Card>
 
@@ -143,7 +232,7 @@ export default function PlanTab() {
         <p className="muted small" style={{ marginTop: -6, marginBottom: 16 }}>
           Los contadores de leads y mensajes se reinician el día 1 de cada mes. El símbolo ∞ significa que tu plan no tiene límite.
         </p>
-        <div className="grid-2">
+        <div className="grid-2 settings-usage-grid">
           <UsageMeter
             label="Leads nuevos"
             value={data.usage.leads ?? 0}
@@ -165,7 +254,7 @@ export default function PlanTab() {
             value={data.seats}
             max={data.limits.maxTeamMembers}
             description="Personas con acceso a este negocio, incluidas las invitaciones pendientes."
-            atLimit="Has llegado al límite: no puedes invitar a más personas salvo que quites a alguien o canceles una invitación."
+            atLimit="Has llegado al límite: no puedes invitar a más personas salvo que quites a alguien o anules una invitación."
           />
           <UsageMeter
             label="Canales conectados"
@@ -184,7 +273,7 @@ export default function PlanTab() {
           </div>
         ) : (
           <>
-            <div className="table-wrap">
+            <div className="table-wrap settings-compare-wrap">
               <table className="table settings-compare">
                 <caption className="sr-only">Comparativa de los planes disponibles</caption>
                 <thead>
@@ -235,10 +324,11 @@ export default function PlanTab() {
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 18px 16px', borderTop: '1px solid var(--border)' }}>
+            <PlanCards plans={plans} currentId={current?.id ?? null} />
+            <div className="settings-compare-foot">
               <p className="subtle xs">
-                {current && !currentInTable ? 'Tu plan actual es un plan personalizado y no aparece en la tabla. ' : ''}
-                Para cambiar de plan, contacta con el equipo de soporte de KAI: el cambio se gestiona a mano mientras el pago online no esté disponible.
+                {current && !currentInTable ? 'Tu plan actual es un plan personalizado y no aparece en la comparativa. ' : ''}
+                Los precios son mensuales. Para cambiar de plan, contacta con el equipo de soporte de KAI: mientras la facturación no esté conectada, el cambio se gestiona a mano.
               </p>
             </div>
           </>

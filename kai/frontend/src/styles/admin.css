@@ -4,9 +4,39 @@
 .adm-sidebar-intro {
   padding: 0 8px 6px;
 }
-.adm-back-link .adm-back-sub {
-  margin-left: auto;
-  max-width: 96px;
+.adm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.adm-back-link {
+  height: auto;
+  min-height: 44px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.adm-back-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+/* Botón de cerrar el menú: solo cuando la barra lateral es desplegable (mismo corte que layout.css). */
+.adm-menu-close {
+  display: none;
+}
+@media (max-width: 960px) {
+  .adm-menu-close {
+    display: inline-flex;
+  }
+}
+
+/* Los textos solo para lectores de pantalla (p. ej. cabeceras «Acciones») son absolutos:
+   sin un contenedor posicionado escapan del scroll de la tabla y ensanchan la página en móvil. */
+.adm-shell .table-wrap {
+  position: relative;
 }
 
 /* ───────────── Cabecera superior ───────────── */
@@ -22,6 +52,14 @@
   height: 17px;
   color: var(--accent-text);
   flex-shrink: 0;
+}
+.adm-topbar-note {
+  max-width: 280px;
+}
+@media (max-width: 720px) {
+  .adm-topbar-note {
+    display: none;
+  }
 }
 
 /* ───────────── Secciones ───────────── */
@@ -252,4 +290,40 @@
 }
 .adm-switch-row .hint {
   padding-left: 48px;
+}
+
+/* ───────────── Filtro activo por negocio ───────────── */
+.adm-filter-chip {
+  height: 30px;
+  max-width: 100%;
+  padding: 0 4px 0 10px;
+  font-size: 12.5px;
+}
+.adm-filter-chip a {
+  color: inherit;
+  text-decoration: underline;
+}
+.adm-filter-chip button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.adm-filter-chip button:hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.adm-entity-id {
+  margin-left: 6px;
+  overflow-wrap: anywhere;
+}
+
+/* Lista de límites de cada plan: etiqueta más ancha para que no se parta en dos líneas. */
+.adm-plan-card .kv {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
 }

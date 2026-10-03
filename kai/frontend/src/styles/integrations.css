@@ -10,6 +10,19 @@
 .intg-break {
   overflow-wrap: anywhere;
 }
+/* Nombres técnicos (variables, campos…): no se parten por la mitad salvo que no quepan en una línea. */
+.intg-page .code-inline {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.intg-testmode {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
 /* ───────────── Cabecera: IA + resumen ───────────── */
 .intg-top {
@@ -87,13 +100,7 @@
   max-width: 860px;
 }
 .intg-aside {
-  position: sticky;
-  top: calc(var(--topbar-h) + 16px);
-}
-@media (max-width: 1100px) {
-  .intg-aside {
-    position: static;
-  }
+  min-width: 0;
 }
 .intg-grid-top {
   align-items: start;
@@ -376,7 +383,7 @@
 }
 .intg-preview {
   width: 100%;
-  height: 560px;
+  height: 660px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #fff;
@@ -397,4 +404,12 @@
   .intg-switches {
     padding-top: 0;
   }
+}
+.intg-email {
+  align-items: flex-start;
+  gap: 6px;
+}
+.intg-email svg {
+  flex-shrink: 0;
+  margin-top: 1px;
 }

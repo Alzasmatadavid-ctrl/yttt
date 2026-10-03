@@ -17,12 +17,19 @@ interface Ctx {
   tone: AiTone;
 }
 
-const e = (tone: AiTone, emoji: string) => (tone.emojiUsage === 'none' ? '' : ` ${emoji}`);
+/** Cierre de frase: el emoji hace de separador; sin emojis, un punto (“…a las 18:00. Si necesitas…”). */
+const end = (tone: AiTone, emoji: string) => (tone.emojiUsage === 'none' ? '.' : ` ${emoji}`);
+
+/** “Laura, te confirmo…” o, sin nombre, “Te confirmo…”. */
+const withName = (name: string, rest: string) => (name ? `${name}, ${rest}` : rest.charAt(0).toUpperCase() + rest.slice(1));
 
 export function confirmationText(c: Ctx): string {
   const name = firstName(c.leadName);
   const when = formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm");
-  return `${name ? `${name}, ` : ''}te confirmo la ${c.callLabel} con ${c.trainerName} el ${when}${e(c.tone, '✅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} Si necesitas cambiarla, dímelo por aquí.`;
+  return withName(
+    name,
+    `te confirmo la ${c.callLabel} con ${c.trainerName} el ${when}${end(c.tone, '✅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} Si necesitas cambiarla, dímelo por aquí.`,
+  );
 }
 
 export function reminderText(c: Ctx, kind: '24h' | '1h'): string {
@@ -31,10 +38,13 @@ export function reminderText(c: Ctx, kind: '24h' | '1h'): string {
   if (kind === '24h') {
     const label = humanSlotLabel(c.startsAt, c.timezone, new Date());
     const opener = pick(['¡Hola', 'Hola', 'Buenas'], seed);
-    return `${opener}${name ? ` ${name}` : ''}! Te recuerdo que ${label} tienes la ${c.callLabel} con ${c.trainerName}${e(c.tone, '📅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ¿Te sigue viniendo bien?`;
+    return `${opener}${name ? ` ${name}` : ''}! Te recuerdo que ${label} tienes la ${c.callLabel} con ${c.trainerName}${end(c.tone, '📅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ¿Te sigue viniendo bien?`;
   }
   const time = formatInZone(c.startsAt, c.timezone, 'HH:mm');
-  return `${name ? `${name}, ` : ''}en una hora (a las ${time}) es la ${c.callLabel} con ${c.trainerName}${e(c.tone, '🙌')}${c.meetingUrl ? ` Te dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`;
+  return withName(
+    name,
+    `en una hora (a las ${time}) es la ${c.callLabel} con ${c.trainerName}${end(c.tone, '🙌')}${c.meetingUrl ? ` Te dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`,
+  );
 }
 
 export function noShowText(c: Pick<Ctx, 'leadName' | 'callLabel' | 'tone'>): string {

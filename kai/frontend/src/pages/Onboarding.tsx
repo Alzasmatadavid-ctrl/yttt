@@ -37,7 +37,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { BILLING_PERIOD_LABELS, DEFAULT_TONE, WEEKDAY_LABELS, formatMoney, type AiTone, type AvailabilityWeek, type TimeRange } from '@shared';
-import { api, errorText } from '../lib/api';
+import { api, ApiError, errorText } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Logo } from '../components/brand';
 import { InstagramIcon, WhatsAppIcon } from '../components/lead-bits';
@@ -289,6 +289,32 @@ function centsToText(cents: number): string {
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2).replace('.', ',');
 }
 
+/**
+ * Servicio que edita el onboarding: el principal o, si no hay ninguno marcado como principal, el primero activo
+ * (así no se crea un duplicado si el servicio perdió la marca de principal).
+ */
+const onboardingService = (services: Service[]) => services.find((x) => x.isPrimary) ?? services.find((x) => x.isActive) ?? services[0] ?? null;
+
+/**
+ * Cuerpo COMPLETO del servicio principal. Se envía entero en los pasos «Servicio» y «Precio» porque el servidor
+ * rellena con sus valores por defecto los campos que no llegan (descripción vacía, sin elementos incluidos, no principal).
+ * El precio solo se envía cuando hay un importe válido, para no borrar uno ya guardado.
+ */
+function servicePayload(d: Draft) {
+  const cents = parseEurosToCents(d.price);
+  return {
+    name: d.serviceName.trim(),
+    description: d.serviceDescription.trim(),
+    includes: d.includes.map((x) => x.trim()).filter(Boolean),
+    durationWeeks: d.durationWeeks.trim() ? Number(d.durationWeeks) : null,
+    ...(cents !== null && cents > 0 ? { priceCents: cents } : {}),
+    currency: 'EUR',
+    billingPeriod: d.billingPeriod,
+    isPrimary: true,
+    isActive: true,
+  };
+}
+
 function normalizeWeek(w: AvailabilityWeek | undefined): AvailabilityWeek {
   const out = {} as AvailabilityWeek;
   for (const d of DAYS) out[d] = (w?.[d] ?? []).map((r) => ({ start: r.start.slice(0, 5), end: r.end.slice(0, 5) }));
@@ -296,7 +322,7 @@ function normalizeWeek(w: AvailabilityWeek | undefined): AvailabilityWeek {
 }
 
 function buildDraft(s: SettingsResponse): Draft {
-  const svc = s.services.find((x) => x.isPrimary) ?? null;
+  const svc = onboardingService(s.services);
   const t = s.trainer;
   const ai = s.aiSettings;
   return {
@@ -408,6 +434,7 @@ function validateStep(key: StepKey, d: Draft): Errors {
       else if (cents <= 0) e.price = 'El precio debe ser mayor que 0 €.';
       else if (cents > 100_000_000) e.price = 'El importe es demasiado alto.';
       else if (len(d.serviceName) < 2) e.price = 'Antes vuelve al paso «Servicio» y escribe el nombre de tu servicio.';
+      else if (hasErrors(validateStep('service', d))) e.price = 'Antes vuelve al paso «Servicio» y revisa los datos marcados en rojo.';
       break;
     }
     case 'availability': {
@@ -728,6 +755,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
   const [leadMessage, setLeadMessage] = useState('Hola, vi tu anuncio. Quiero perder grasa pero no sé por dónde empezar.');
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstRender = useRef(true);
+  const serviceId = useRef<string | null>(onboardingService(settings.services)?.id ?? null);
 
   const current = STEPS[step - 1];
   const isLast = step === TOTAL;
@@ -764,6 +792,25 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
     setStep(clamp(n, 1, TOTAL));
   };
 
+  /** Guarda el servicio principal. Si ya existe, se actualiza ese mismo servicio (nunca se crea un duplicado). */
+  async function saveService(d: Draft) {
+    const body = servicePayload(d);
+    const id = serviceId.current;
+    let res: { service: Service };
+    if (id) {
+      try {
+        res = await api.patch<{ service: Service }>(`/settings/services/${id}`, body);
+      } catch (e) {
+        // Se borró desde otra pestaña: se vuelve a crear como principal.
+        if (!(e instanceof ApiError && e.status === 404)) throw e;
+        res = await api.put<{ service: Service }>('/settings/primary-service', body);
+      }
+    } else {
+      res = await api.put<{ service: Service }>('/settings/primary-service', body);
+    }
+    serviceId.current = res.service.id;
+  }
+
   async function saveStep(key: StepKey, d: Draft = draft) {
     switch (key) {
       case 'business':
@@ -788,20 +835,10 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
         await api.put('/settings/trainer', { transformation: d.transformation.trim(), methodName: d.methodName.trim(), methodDescription: d.methodDescription.trim() });
         break;
       case 'service':
-        await api.put('/settings/primary-service', {
-          name: d.serviceName.trim(),
-          description: d.serviceDescription.trim(),
-          includes: d.includes.map((x) => x.trim()).filter(Boolean),
-          durationWeeks: d.durationWeeks.trim() ? Number(d.durationWeeks) : null,
-        });
+        await saveService(d);
         break;
       case 'price':
-        await api.put('/settings/primary-service', {
-          name: d.serviceName.trim(),
-          priceCents: parseEurosToCents(d.price) ?? 0,
-          currency: 'EUR',
-          billingPeriod: d.billingPeriod,
-        });
+        await saveService(d);
         await api.put('/settings/ai', { pricePolicy: d.pricePolicy });
         break;
       case 'modality':
@@ -1652,8 +1689,8 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
           <div className="onb-content">{renderStep()}</div>
 
           <div className="onb-actions">
-            <Button icon={ArrowLeft} onClick={() => void navigateTo(step - 1)} disabled={step === 1 || busy}>
-              Atrás
+            <Button className="onb-back" icon={ArrowLeft} onClick={() => void navigateTo(step - 1)} disabled={step === 1 || busy}>
+              <span className="onb-back-label">Atrás</span>
             </Button>
             <div className="onb-actions-right">
               {(current.key === 'channels' || current.key === 'calendar') && (

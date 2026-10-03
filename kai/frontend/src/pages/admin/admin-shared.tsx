@@ -2,11 +2,12 @@
  * Panel de administración: tipos de las respuestas de /api/admin, etiquetas en español
  * y piezas visuales compartidas por las páginas de /admin.
  */
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { ChevronDown, ChevronUp, CircleAlert, RefreshCw } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronDown, ChevronUp, CircleAlert, RefreshCw, X } from 'lucide-react';
 import type { BusinessRole, ChannelKey, PlanLimits } from '@shared';
-import { errorText } from '../../lib/api';
+import { api, errorText } from '../../lib/api';
 import { dateTime } from '../../lib/format';
 import { Button, EmptyState } from '../../components/ui';
 import { InstagramIcon, SourceIcon, WhatsAppIcon } from '../../components/lead-bits';
@@ -231,6 +232,21 @@ export const ADMIN_KEYS = {
   jobs: ['admin', 'jobs'] as const,
 };
 
+/** Máximo de negocios que pide el listado (el servidor admite hasta 200). */
+export const BUSINESS_LIST_LIMIT = 200;
+
+/** Consulta del listado de negocios; misma clave que la página Negocios para compartir caché. */
+export const businessListQuery = (search: string) => ({
+  queryKey: [...ADMIN_KEYS.businesses, search] as const,
+  queryFn: () => api.get<{ businesses: AdminBusinessRow[] }>('/admin/businesses', { search, limit: BUSINESS_LIST_LIMIT }),
+});
+
+/** Nombre de cada negocio por id (para tablas cuya respuesta solo trae el id). */
+export function useBusinessNames(): Map<string, string> {
+  const q = useQuery({ ...businessListQuery(''), staleTime: 60_000 });
+  return useMemo(() => new Map((q.data?.businesses ?? []).map((b) => [b.id, b.name])), [q.data]);
+}
+
 // ───────────── Etiquetas ─────────────
 
 export const BUSINESS_STATUS: Record<BusinessStatus, { label: string; tone: string }> = {
@@ -343,8 +359,33 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'team.role_changed': 'Rol de un miembro cambiado',
   'team.member_removed': 'Miembro del equipo eliminado',
   'copilot.query': 'Consulta a KAI Copilot',
+  // Acciones que el entrenador confirma desde KAI Copilot (copilot.<tipo>).
+  'copilot.send_message': 'Mensaje enviado desde KAI Copilot',
+  'copilot.change_lead_status': 'Etapa de un lead cambiada desde KAI Copilot',
+  'copilot.delete_lead': 'Lead eliminado desde KAI Copilot',
+  'copilot.update_tone': 'Tono de KAI cambiado desde KAI Copilot',
+  'copilot.toggle_automation': 'Automatización activada o desactivada desde KAI Copilot',
+  'copilot.toggle_kai_conversation': 'KAI activado o pausado en una conversación desde KAI Copilot',
+  'copilot.toggle_autopilot': 'Respuestas automáticas de KAI activadas o pausadas desde KAI Copilot',
 };
 export const auditActionLabel = (a: string) => AUDIT_ACTION_LABELS[a] ?? a;
+
+/** Tipo de elemento afectado en la auditoría. */
+export const ENTITY_LABELS: Record<string, string> = {
+  appointment: 'Llamada',
+  business: 'Negocio',
+  calendar_connection: 'Conexión de calendario',
+  channel_connection: 'Conexión de canal',
+  conversation: 'Conversación',
+  invitation: 'Invitación al equipo',
+  job: 'Trabajo programado',
+  lead: 'Lead',
+  pending_action: 'Acción de KAI Copilot',
+  plan: 'Plan',
+  service: 'Servicio',
+  user: 'Usuario',
+};
+export const entityLabel = (t: string) => ENTITY_LABELS[t] ?? t;
 
 /** Familias de acciones para filtrar la auditoría (el servidor filtra por prefijo). */
 export const AUDIT_ACTION_GROUPS: { value: string; label: string }[] = [
@@ -374,6 +415,7 @@ export const ERROR_SOURCE_GROUPS: { value: string; label: string }[] = [
   { value: 'webhook', label: 'Avisos entrantes (webhooks)' },
   { value: 'calendar', label: 'Calendarios (Google, Calendly)' },
   { value: 'email', label: 'Envío de emails' },
+  { value: 'worker', label: 'Tareas programadas (cola de trabajos)' },
   { value: 'http', label: 'Servidor (peticiones a la API)' },
 ];
 
@@ -460,6 +502,20 @@ export function BusinessLink({ id, name }: { id: string | null; name: string | n
     <Link to={`/admin/negocios/${id}`} className="adm-cell-link" onClick={(e) => e.stopPropagation()}>
       {name ?? 'Ver negocio'}
     </Link>
+  );
+}
+
+/** Aviso de filtro activo por negocio, con botón para quitarlo. */
+export function BusinessFilterChip({ id, name, onClear }: { id: string; name: string | undefined; onClear: () => void }) {
+  return (
+    <span className="badge badge-violet adm-filter-chip">
+      <span className="ellipsis">
+        Solo: <Link to={`/admin/negocios/${id}`}>{name ?? 'un negocio'}</Link>
+      </span>
+      <button type="button" onClick={onClear} aria-label="Quitar el filtro por negocio" title="Quitar el filtro por negocio">
+        <X size={12} aria-hidden />
+      </button>
+    </span>
   );
 }
 

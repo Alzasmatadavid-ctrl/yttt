@@ -1,5 +1,5 @@
 /* Pestaña «Tu cuenta»: datos de acceso, cambio de contraseña, apariencia y cierre de sesión. */
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Eye, EyeOff, KeyRound, LogOut, Moon, Palette, Sun, UserRound } from 'lucide-react';
 import { ROLE_LABELS } from '@shared';
@@ -134,6 +134,19 @@ export default function AccountTab() {
     applyTheme(t);
     setTheme(t);
   };
+
+  // Si el tema se cambia desde otro sitio (el botón de la barra lateral), mantener el selector sincronizado.
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => {
+      const t = root.dataset.theme;
+      if (t === 'light' || t === 'dark') setTheme(t);
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
 
   const signOut = async () => {
     setLoggingOut(true);

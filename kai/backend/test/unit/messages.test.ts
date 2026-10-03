@@ -40,14 +40,20 @@ describe('confirmationText', () => {
     expect(countEmojis(text)).toBe(0);
   });
 
-  // BUG (menor): sin emoji y/o sin nombre el texto queda mal puntuado: “…a las 18:00 Si necesitas…”
-  // (falta el punto) y empieza en minúscula (“te confirmo…”).
-  it.fails('BUG: sin emojis la frase de la fecha termina en punto', () => {
+  // Regresión: sin emoji y/o sin nombre el texto quedaba mal puntuado: “…a las 18:00 Si necesitas…”
+  // (faltaba el punto) y empezaba en minúscula (“te confirmo…”).
+  it('sin emojis la frase de la fecha termina en punto', () => {
     expect(confirmationText({ ...base, tone: makeTone({ emojiUsage: 'none' }) })).toContain('a las 18:00. Si necesitas');
   });
 
-  it.fails('BUG: sin nombre del lead el mensaje empieza en mayúscula', () => {
+  it('sin nombre del lead el mensaje empieza en mayúscula', () => {
     expect(confirmationText({ ...base, leadName: '' })).toMatch(/^Te confirmo/);
+  });
+
+  it('sin emojis y con enlace: punto tras la fecha y el enlace después', () => {
+    expect(confirmationText({ ...base, tone: makeTone({ emojiUsage: 'none' }), meetingUrl: 'https://meet.google.com/abc-defg-hij' })).toContain(
+      'a las 18:00. Enlace: https://meet.google.com/abc-defg-hij Si necesitas',
+    );
   });
 });
 
@@ -86,6 +92,18 @@ describe('reminderText', () => {
     const tone = makeTone({ emojiUsage: 'none' });
     expect(countEmojis(reminderText({ ...base, tone }, '24h'))).toBe(0);
     expect(countEmojis(reminderText({ ...base, tone }, '1h'))).toBe(0);
+  });
+
+  it('sin emojis las frases quedan bien puntuadas', () => {
+    const tone = makeTone({ emojiUsage: 'none' });
+    expect(reminderText({ ...base, tone }, '24h')).toContain('con Álex. ¿Te sigue viniendo bien?');
+    expect(reminderText({ ...base, tone }, '1h')).toBe('Laura, en una hora (a las 18:00) es la llamada de valoración con Álex. ¡Hablamos enseguida!');
+    expect(reminderText({ ...base, tone, meetingUrl: 'https://zoom.us/j/1' }, '1h')).toBe('Laura, en una hora (a las 18:00) es la llamada de valoración con Álex. Te dejo el enlace: https://zoom.us/j/1');
+  });
+
+  it('sin nombre del lead, el aviso de 1 h empieza en mayúscula y el de 24 h saluda sin nombre', () => {
+    expect(reminderText({ ...base, leadName: '' }, '1h')).toMatch(/^En una hora \(a las 18:00\)/);
+    expect(reminderText({ ...base, leadName: '' }, '24h')).toMatch(/^(¡Hola|Hola|Buenas)! Te recuerdo/);
   });
 });
 

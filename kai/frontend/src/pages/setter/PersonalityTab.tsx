@@ -7,7 +7,7 @@ import { api, errorText } from '../../lib/api';
 import { Button, Callout, Card, ConfirmDialog, Field, Input, Spinner, Switch, TagInput, Textarea, useToast } from '../../components/ui';
 import { InstagramIcon, WhatsAppIcon } from '../../components/lead-bits';
 import type { AiSettings, SettingsResponse } from '../../lib/types';
-import { CharCount, ChoiceGroup, NumInput, OptionCards, SaveBar, ToneSlider, humanSeconds, useDraft, useReportDirty, type TabProps } from './setter-shared';
+import { CharCount, ChoiceGroup, NumInput, OptionCards, SaveBar, ToneSlider, useDraft, useReportDirty, withUnit, type TabProps } from './setter-shared';
 
 type PersonalityDraft = Pick<
   AiSettings,
@@ -386,7 +386,7 @@ export default function PersonalityTab({ settings, canEdit, onDirtyChange }: Tab
               {TONE_SLIDERS.map((s) => (
                 <ToneSlider key={s.key} label={s.label} hint={s.hint} scale={s.scale} value={draft.tone[s.key]} onChange={(v) => setTone({ [s.key]: v })} />
               ))}
-              <div className="grid-3">
+              <div className="setter-choices">
                 <ChoiceGroup
                   label="Emojis"
                   value={draft.tone.emojiUsage}
@@ -498,10 +498,10 @@ export default function PersonalityTab({ settings, canEdit, onDirtyChange }: Tab
             </p>
             <div className="grid-2">
               <Field label="Espera mínima" htmlFor={ids.delayMin} error={errors.replyDelayMinSeconds}>
-                <NumInput id={ids.delayMin} value={draft.replyDelayMinSeconds} min={0} max={LIMITS.delay} suffix={`segundos · ${humanSeconds(draft.replyDelayMinSeconds)}`} invalid={Boolean(errors.replyDelayMinSeconds)} onChange={(v) => set('replyDelayMinSeconds', v)} />
+                <NumInput id={ids.delayMin} value={draft.replyDelayMinSeconds} min={0} max={LIMITS.delay} suffix={withUnit(draft.replyDelayMinSeconds, 'seconds')} invalid={Boolean(errors.replyDelayMinSeconds)} onChange={(v) => set('replyDelayMinSeconds', v)} />
               </Field>
               <Field label="Espera máxima" htmlFor={ids.delayMax} error={errors.replyDelayMaxSeconds}>
-                <NumInput id={ids.delayMax} value={draft.replyDelayMaxSeconds} min={0} max={LIMITS.delay} suffix={`segundos · ${humanSeconds(draft.replyDelayMaxSeconds)}`} invalid={Boolean(errors.replyDelayMaxSeconds)} onChange={(v) => set('replyDelayMaxSeconds', v)} />
+                <NumInput id={ids.delayMax} value={draft.replyDelayMaxSeconds} min={0} max={LIMITS.delay} suffix={withUnit(draft.replyDelayMaxSeconds, 'seconds')} invalid={Boolean(errors.replyDelayMaxSeconds)} onChange={(v) => set('replyDelayMaxSeconds', v)} />
               </Field>
             </div>
             <p className="subtle xs mt-8">Valores por defecto: entre 20 y 70 segundos.</p>

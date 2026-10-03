@@ -124,11 +124,16 @@ describe('analyzeHeuristically: cualificación', () => {
     expect(analyze('hola, me llamo laura').leadName).toBeNull(); // exige mayúscula para no capturar palabras comunes
   });
 
-  // BUG: la expresión distingue mayúsculas también en “me llamo / soy / mi nombre es”, así que la forma más
-  // habitual de presentarse, al inicio del mensaje, no se reconoce.
-  it.fails('BUG: reconoce el nombre al inicio del mensaje (“Me llamo Laura”, “Soy Íñigo”)', () => {
+  // Regresión: la expresión distinguía mayúsculas también en “me llamo / soy / mi nombre es”, así que la forma más
+  // habitual de presentarse, al inicio del mensaje, no se reconocía.
+  it('reconoce el nombre al inicio del mensaje (“Me llamo Laura”, “Soy Íñigo”)', () => {
     expect(analyze('Me llamo Laura').leadName).toBe('Laura');
     expect(analyze('Soy Íñigo, encantado').leadName).toBe('Íñigo');
+  });
+
+  it('no toma por nombre una palabra en minúscula tras “Soy”', () => {
+    expect(analyze('Soy nueva por aquí').leadName).toBeNull();
+    expect(analyze('Consoy Pedro').leadName).toBeNull();
   });
 
   it('guarda recuerdos útiles (eventos, restricciones)', () => {
@@ -170,17 +175,25 @@ describe('analyzeHeuristically: objeciones solo en fase de decisión', () => {
     expect(analyzeHeuristically(input).objectionKey).toBeNull();
   });
 
-  // BUG: los disparadores se buscan como subcadena y la biblioteca por defecto incluye “solo”:
-  // “Sí, pero solo puedo por la tarde” (aceptando la llamada) se clasifica como objeción “lo quiero probar por mi cuenta”.
-  it.fails('BUG: “solo puedo por la tarde” no es la objeción “por mi cuenta”', () => {
+  // Regresión: los disparadores se buscaban como subcadena y la biblioteca por defecto incluía “solo”:
+  // “Sí, pero solo puedo por la tarde” (aceptando la llamada) se clasificaba como objeción “lo quiero probar por mi cuenta”.
+  it('“solo puedo por la tarde” no es la objeción “por mi cuenta”', () => {
     const a = analyze('Sí, pero solo puedo por la tarde', { state: { callProposedAt: NOW.toISOString() } });
     expect(a.objectionKey).toBeNull();
   });
 
-  // BUG: “caro” se detecta dentro de “Carolina”.
-  it.fails('BUG: un disparador no debe coincidir dentro de otra palabra (“Carolina” ≠ “caro”)', () => {
+  // Regresión: “caro” se detectaba dentro de “Carolina” (ahora se exigen palabras completas).
+  it('un disparador no debe coincidir dentro de otra palabra (“Carolina” ≠ “caro”)', () => {
     const a = analyze('Sí, soy Carolina, la hermana de Marta', { state: { priceShared: true } });
     expect(a.objectionKey).toBeNull();
+  });
+
+  it('los disparadores siguen detectándose como palabras completas (con o sin tildes)', () => {
+    const state = { callProposedAt: NOW.toISOString() };
+    expect(analyze('Uf, es muy caro para mí', { state }).objectionKey).toBe('expensive');
+    expect(analyze('Prefiero intentarlo por mi cuenta', { state }).objectionKey).toBe('diy');
+    expect(analyze('Creo que lo voy a probar yo sola', { state }).objectionKey).toBe('diy');
+    expect(analyze('Déjame pensármelo', { state }).objectionKey).toBe('think_about_it');
   });
 });
 
@@ -254,8 +267,8 @@ describe('resolvePreferredDate', () => {
     expect(r('mañana', MEXICO, lateNight)).toBe('2026-10-06');
   });
 
-  // BUG (menor): “esta tarde” y “esta noche” se resuelven como hoy, pero “esta mañana” se descarta.
-  it.fails('BUG: “esta mañana” debería resolverse como hoy (igual que “esta tarde”)', () => {
+  // Regresión: “esta tarde” y “esta noche” se resolvían como hoy, pero “esta mañana” se descartaba.
+  it('“esta mañana” debería resolverse como hoy (igual que “esta tarde”)', () => {
     expect(r('¿Tienes algo esta mañana?')).toBe('2026-10-05');
   });
 });
@@ -346,27 +359,61 @@ describe('matchOfferedSlot', () => {
     expect(matchOfferedSlot(normalize('a las 18:00'), [mx], MADRID, NOW, [mx.id])).toBeNull();
   });
 
-  // BUG: los ordinales se buscan en cualquier parte del mensaje. Tras ofrecer horarios, frases comunes
-  // eligen (y reservan) un hueco que el lead no ha elegido. El análisis con IA hereda el error porque
+  // Regresión: los ordinales se buscaban en cualquier parte del mensaje. Tras ofrecer horarios, frases comunes
+  // elegían (y reservaban) un hueco que el lead no había elegido. El análisis con IA heredaba el error porque
   // usa el resultado heurístico como “red de seguridad” (analysis.selectedSlotId ||= safety.selectedSlotId).
-  it.fails('BUG: “Dame un segundo, que miro la agenda” no elige el segundo horario', () => {
+  it('“Dame un segundo, que miro la agenda” no elige el segundo horario', () => {
     expect(m('Dame un segundo, que miro la agenda')).toBeNull();
   });
 
-  it.fails('BUG: “Primero dime cuánto cuesta” no elige el primer horario', () => {
+  it('“Primero dime cuánto cuesta” no elige el primer horario', () => {
     expect(m('Primero dime cuánto cuesta')).toBeNull();
   });
 
-  it.fails('BUG: “El jueves no puedo, mejor otro día” no elige el hueco del jueves', () => {
+  it('“El jueves no puedo, mejor otro día” no elige el hueco del jueves', () => {
     expect(m('El jueves no puedo, mejor otro día')).toBeNull();
   });
 
-  it.fails('BUG: “La última vez que lo intenté…” no elige el último horario', () => {
+  it('“La última vez que lo intenté…” no elige el último horario', () => {
     expect(m('La última vez que lo intenté lo dejé al mes')).toBeNull();
   });
 
-  it.fails('BUG: el análisis completo no debe marcar un horario elegido con “dame un segundo”', () => {
+  it('el análisis completo no debe marcar un horario elegido con “dame un segundo”', () => {
     const state = { offeredSlots: all, lastOfferIds: latest };
     expect(analyze('Dame un segundo, que miro la agenda', { state }).selectedSlotId).toBeNull();
+  });
+
+  it('“a primera hora” o “la primera hora libre” son franjas, no la primera opción', () => {
+    expect(m('¿Tienes algo mañana a primera hora?')).toBeNull();
+    expect(m('Me vendría bien la primera hora libre que tengas')).toBeNull();
+    expect(m('La primera vez que entrené fue en el gimnasio')).toBeNull();
+  });
+
+  it('formas naturales de elegir por posición', () => {
+    expect(m('Me quedo con la segunda')).toBe(D.id);
+    expect(m('La primera me viene genial')).toBe(C.id);
+    expect(m('Segunda, gracias')).toBe(D.id);
+    expect(m('Vale, primera porfa')).toBe(C.id);
+    expect(m('El segundo horario')).toBe(D.id);
+    expect(m('Opción 2')).toBe(D.id);
+  });
+
+  it('si rechaza un horario o pide otro, no elige ninguno (mejor preguntar que reservar mal)', () => {
+    expect(m('A las 18:00 no puedo')).toBeNull();
+    expect(m('La primera no me viene bien')).toBeNull();
+    expect(m('¿Tienes otro día?')).toBeNull();
+    expect(m('Ninguna me va bien')).toBeNull();
+    expect(m('Sí, perfecto', [A.id], [A])).toBe(A.id);
+  });
+
+  it('un número que no tiene forma de hora no se toma por un horario', () => {
+    expect(m('Tengo 18 años y a las 10 me va bien')).toBe(C.id);
+    expect(m('Quiero perder 10 kilos, ¿a las cuántas es?')).toBeNull();
+    expect(m('Entreno 10 horas a la semana, ¿a las cuántas sería?')).toBeNull();
+    expect(m('Vale, 10h')).toBe(C.id);
+  });
+
+  it('“prefiero/mejor” solo cuentan como palabra completa al elegir por día', () => {
+    expect(m('El jueves, que tengo la mesa libre')).toBeNull();
   });
 });

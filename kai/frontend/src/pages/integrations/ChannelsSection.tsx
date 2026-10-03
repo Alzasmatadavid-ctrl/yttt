@@ -5,7 +5,7 @@ import { BookOpen, Eye, EyeOff, Info, KeyRound, ListChecks, Megaphone, Pencil, P
 import type { ChannelConfig, TemplateRef } from '@shared';
 import { api, errorText } from '../../lib/api';
 import { timeAgo } from '../../lib/format';
-import { Button, Callout, Card, ConfirmDialog, Field, Input, Modal, Select, TagInput, useToast } from '../../components/ui';
+import { Button, Callout, Card, ConfirmDialog, Field, Input, Modal, Select, Switch, TagInput, useToast } from '../../components/ui';
 import { InstagramIcon, WhatsAppIcon } from '../../components/lead-bits';
 import { cleanConfig, ConnBadge, connState, CopyField, ExtLink, Guide, INTEGRATIONS_KEY, IntegrationHead, Steps, UiLabel, type ChannelRow, type IntegrationsResponse } from './shared';
 
@@ -66,8 +66,8 @@ const DEFS: Record<MetaChannel, ChannelDef> = {
   },
   meta_lead_ads: {
     key: 'meta_lead_ads',
-    title: 'Anuncios de Meta (Lead Ads)',
-    subtitle: 'Formularios de tus anuncios de Facebook e Instagram',
+    title: 'Meta Lead Ads',
+    subtitle: 'Anuncios con formulario de Facebook e Instagram',
     logo: <Megaphone />,
     description: (
       <>
@@ -76,7 +76,7 @@ const DEFS: Record<MetaChannel, ChannelDef> = {
       </>
     ),
     idLabel: 'ID de la página de Facebook',
-    idHint: 'El número que identifica la página de Facebook desde la que publicas los anuncios.',
+    idHint: 'El número de la página de Facebook desde la que publicas los anuncios. Lo ves en tu página → Información → ID de la página.',
     idPlaceholder: 'Ej.: 104000000000000',
     tokenHint: 'Un token de página con los permisos leads_retrieval, pages_manage_metadata, pages_show_list y pages_read_engagement.',
     activityLabel: 'Último lead recibido',
@@ -86,6 +86,9 @@ const DEFS: Record<MetaChannel, ChannelDef> = {
 };
 
 // ───────────── Conectar / editar ─────────────
+
+/** Solo en desarrollo: permite conectar un canal de prueba sin comprobarlo con Meta (el servidor lo ignora en producción). */
+const TEST_MODE_AVAILABLE = import.meta.env.DEV;
 
 function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; existing: ChannelRow | null; onClose: () => void }) {
   const qc = useQueryClient();
@@ -98,31 +101,49 @@ function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; exis
   const [showToken, setShowToken] = useState(false);
   const [displayName, setDisplayName] = useState(existing?.displayName ?? '');
   const [apiHost, setApiHost] = useState<NonNullable<ChannelConfig['apiHost']>>(existing?.config.apiHost ?? 'graph.instagram.com');
+  const [testMode, setTestMode] = useState(false);
   const [touched, setTouched] = useState(false);
 
   const idClean = accountId.replace(/\s+/g, '');
   const tokenClean = token.trim();
-  const idError = !idClean ? 'Escribe el identificador.' : !/^\d+$/.test(idClean) ? 'Solo puede llevar números (sin letras, espacios ni guiones).' : idClean.length < 3 ? 'Es demasiado corto.' : null;
-  const tokenError = !tokenClean ? 'Pega el token de acceso.' : tokenClean.length < 20 ? 'Parece incompleto: un token es un texto muy largo. Cópialo entero.' : null;
   const changingAccount = Boolean(existing && idClean && idClean !== existing.externalAccountId);
+  // Al editar la misma cuenta, el token es opcional: sin token solo se guardan el nombre y los ajustes (sin volver a comprobar con Meta).
+  const tokenOptional = Boolean(existing) && !changingAccount;
+  const onlyRename = tokenOptional && !tokenClean;
+  const idError = !idClean ? 'Escribe el identificador.' : !/^\d+$/.test(idClean) ? 'Solo puede llevar números (sin letras, espacios ni guiones).' : idClean.length < 3 ? 'Es demasiado corto.' : null;
+  const tokenError =
+    !tokenClean && !tokenOptional
+      ? changingAccount
+        ? 'Para conectar otra cuenta, pega su token de acceso.'
+        : 'Pega el token de acceso.'
+      : tokenClean && tokenClean.length < 20
+        ? 'Parece incompleto: un token es un texto muy largo. Cópialo entero.'
+        : null;
+  const submitLabel = !existing ? 'Conectar' : onlyRename || testMode ? 'Guardar' : 'Guardar y comprobar';
 
   const save = useMutation({
     mutationFn: async () => {
       const config = cleanConfig({ ...(existing?.config ?? {}), ...(def.key === 'instagram' ? { apiHost } : {}) });
+      if (existing && onlyRename) {
+        const res = await api.patch<{ connection: ChannelRow }>(`/integrations/channels/${existing.id}`, { config, displayName: displayName.trim() || undefined });
+        return res.connection;
+      }
+      const typedName = displayName.trim() && !(changingAccount && displayName === existing?.displayName) ? displayName.trim() : undefined;
       const res = await api.post<{ connection: ChannelRow }>('/integrations/channels', {
         channel: def.key,
         externalAccountId: idClean,
         accessToken: tokenClean,
         // Al cambiar de cuenta, el nombre anterior no vale: dejamos que Meta dé el de la nueva (salvo que se haya escrito otro).
-        displayName: displayName.trim() && !(changingAccount && displayName === existing?.displayName) ? displayName.trim() : undefined,
+        displayName: typedName ?? (testMode ? `${def.title} (prueba)` : undefined),
         config,
+        ...(testMode ? { skipVerification: true } : {}),
       });
       // Si ha cambiado de cuenta, la anterior se desconecta para que no queden dos activas.
       if (existing && existing.id !== res.connection.id) await api.del(`/integrations/channels/${existing.id}`);
       return res.connection;
     },
     onSuccess: (c) => {
-      toast(existing ? `${def.title}: datos actualizados` : `${def.title} conectado${c.displayName ? ` (${c.displayName})` : ''}`);
+      toast(existing ? `${def.title}: datos guardados` : `${def.title} conectado${c.displayName ? ` (${c.displayName})` : ''}`);
       void qc.invalidateQueries({ queryKey: INTEGRATIONS_KEY });
       onClose();
     },
@@ -146,22 +167,25 @@ function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; exis
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" icon={Plug} loading={save.isPending} onClick={submit}>
-            {existing ? 'Guardar y comprobar' : 'Conectar'}
+          <Button variant="primary" icon={existing ? Save : Plug} loading={save.isPending} onClick={submit}>
+            {submitLabel}
           </Button>
         </>
       }
     >
       <form
         className="col gap-12"
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
         <p className="muted small">
-          Al pulsar «{existing ? 'Guardar y comprobar' : 'Conectar'}», KAI comprueba con Meta que los datos son correctos antes de guardarlos. Si no sabes de dónde
-          sacarlos, cierra esta ventana y abre «Cómo conseguir estos datos» en la tarjeta de {def.title}.
+          {existing
+            ? 'Si pegas un token, KAI lo comprueba con Meta antes de guardarlo. Si solo quieres cambiar el nombre visible, deja el token vacío.'
+            : 'Al pulsar «Conectar», KAI comprueba con Meta que los datos son correctos antes de guardarlos.'}{' '}
+          Si no sabes de dónde sacarlos, cierra esta ventana y abre «Cómo conseguir estos datos» en la tarjeta de {def.title}.
         </p>
         <Field label={def.idLabel} htmlFor={idId} hint={def.idHint} error={touched ? idError : null}>
           <Input id={idId} inputMode="numeric" autoComplete="off" placeholder={def.idPlaceholder} value={accountId} onChange={(e) => setAccountId(e.target.value)} />
@@ -170,11 +194,11 @@ function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; exis
           <Callout tone="warning">Has cambiado el identificador: se conectará esa otra cuenta y la actual ({existing?.displayName || existing?.externalAccountId}) se desconectará.</Callout>
         )}
         <Field
-          label="Token de acceso"
+          label={tokenOptional ? 'Token de acceso (opcional)' : 'Token de acceso'}
           htmlFor={tokenId}
           hint={
             existing ? (
-              <>Por seguridad, KAI nunca muestra el token guardado. Pega el mismo de antes o uno nuevo. {def.tokenHint}</>
+              <>Por seguridad, KAI nunca muestra el token guardado. Pega uno nuevo solo si el anterior ha caducado o quieres cambiarlo. {def.tokenHint}</>
             ) : (
               def.tokenHint
             )
@@ -198,13 +222,22 @@ function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; exis
           </div>
         </Field>
         {def.key === 'instagram' && (
-          <Field label="¿Cómo has creado el token?">
+          <Field label="¿Cómo has creado el token? (servidor de la API)" hint="Si no lo sabes, deja la opción recomendada.">
             <ApiHostPicker value={apiHost} onChange={setApiHost} />
           </Field>
         )}
         <Field label="Nombre visible (opcional)" htmlFor={nameId} hint="Solo para reconocerlo en KAI. Si lo dejas vacío, usaremos el nombre que nos dé Meta.">
           <Input id={nameId} maxLength={120} placeholder={def.key === 'meta_lead_ads' ? 'Ej.: Página de mi estudio' : 'Ej.: WhatsApp del estudio'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
+        {TEST_MODE_AVAILABLE && !onlyRename && (
+          <div className="intg-testmode">
+            <Switch checked={testMode} onChange={setTestMode} label={<strong>Modo de prueba: conectar sin comprobar con Meta</strong>} />
+            <p className="xs muted">
+              Solo aparece en el entorno de desarrollo y el servidor lo ignora en producción. Sirve para probar la pantalla con un identificador y un token
+              inventados (el token debe tener al menos 20 caracteres). Ese canal no podrá enviar ni recibir mensajes reales.
+            </p>
+          </div>
+        )}
       </form>
     </Modal>
   );
@@ -257,14 +290,14 @@ const TEMPLATE_SLOTS: { key: TemplateKey; label: string; when: string; vars: str
   },
   {
     key: 'reminder',
-    label: 'Confirmación y recordatorio de la llamada',
+    label: 'Recordatorio de la llamada',
     when: 'Para confirmar la llamada agendada y recordársela antes, si han pasado más de 24 horas desde su último mensaje.',
-    vars: '{{1}} = nombre del lead · {{2}} = fecha y hora de la llamada',
-    example: 'Hola {{1}}, te recuerdo nuestra llamada del {{2}}. Si te surge algo, respóndeme y buscamos otro momento.',
+    vars: '{{1}} = nombre del lead · {{2}} = día y hora de la llamada (por ejemplo, «martes 14 de octubre a las 18:00»)',
+    example: 'Hola {{1}}, te recuerdo tu llamada de valoración el {{2}}. Si necesitas cambiarla, respóndeme por aquí.',
   },
   {
     key: 'noShow',
-    label: 'No presentado',
+    label: 'No-show (no se presentó)',
     when: 'Cuando el lead no se conecta a la llamada y KAI intenta recuperarlo.',
     vars: '{{1}} = nombre del lead',
     example: 'Hola {{1}}, hoy no hemos podido hablar. ¿Quieres que busquemos otro hueco?',
@@ -424,7 +457,7 @@ function WhatsAppSettings({ row, canManage }: { row: ChannelRow; canManage: bool
           </li>
           <li>
             Pulsa <UiLabel>Crear plantilla</UiLabel>. Como categoría, elige <UiLabel>Utilidad</UiLabel> para la de recordatorio y <UiLabel>Marketing</UiLabel>{' '}
-            para las de primer contacto, seguimiento y no presentado.
+            para las de primer contacto, seguimiento y no-show.
           </li>
           <li>
             Ponle un nombre en minúsculas y con guiones bajos (por ejemplo <code className="code-inline">primer_contacto</code>), elige el idioma y escribe
@@ -473,6 +506,9 @@ function InstagramSettings({ row, canManage }: { row: ChannelRow; canManage: boo
         plantillas, así que KAI no puede escribir pasado ese plazo. Una persona de tu equipo sí puede responder hasta 7 días después si Meta ha aprobado a tu
         app el permiso «Human Agent» (agente humano).
       </Callout>
+      <p className="xs subtle">
+        Si contestas tú desde la app de Instagram, KAI lo detecta y se pausa en esa conversación para no pisarte.
+      </p>
     </div>
   );
 }
@@ -637,8 +673,9 @@ function InstagramGuide() {
           <UiLabel>Cambiar a cuenta profesional</UiLabel> (de empresa o de creador).
         </li>
         <li>
-          En los ajustes de mensajes de Instagram, busca <UiLabel>Herramientas conectadas</UiLabel> y activa <UiLabel>Permitir el acceso a los mensajes</UiLabel>.
-          Sin esto, ninguna herramienta puede leer tus mensajes directos.
+          En la app de Instagram: <UiLabel>Configuración</UiLabel> → <UiLabel>Mensajes y respuestas a historias</UiLabel> →{' '}
+          <UiLabel>Herramientas de mensajes</UiLabel> y activa <UiLabel>Permitir acceso a los mensajes</UiLabel>. Sin esto, ninguna herramienta puede leer tus
+          mensajes directos.
         </li>
       </Steps>
       <h4 className="intg-guide-h">2. Crea la app y conecta tu cuenta</h4>
@@ -663,6 +700,10 @@ function InstagramGuide() {
           <strong>Inicio de sesión con Instagram (recomendado)</strong>.
         </li>
       </Steps>
+      <p className="small muted">
+        ¿Usas el método antiguo, con tu Instagram vinculado a una página de Facebook y un token de Facebook? Entonces elige{' '}
+        <strong>Inicio de sesión con Facebook</strong> (<code className="code-inline">graph.facebook.com</code>) al conectar.
+      </p>
       <h4 className="intg-guide-h">3. Activa los avisos (webhook)</h4>
       <Steps>
         <li>
@@ -900,15 +941,16 @@ function MetaWebhookCard({ data }: { data: IntegrationsResponse }) {
             </li>
             <li>
               <Megaphone size={14} aria-hidden /> <span>
-                <strong>Anuncios:</strong> en tu app → Webhooks → objeto «Page» (página), el campo <code className="code-inline">leadgen</code>.
+                <strong>Lead Ads:</strong> en tu app → Webhooks → objeto «Page» (página), el campo <code className="code-inline">leadgen</code>.
               </span>
             </li>
           </ul>
         </div>
         <Callout tone="info" icon={KeyRound}>
           La app de Meta que uses debe ser la misma cuyo «secreto de la app» está configurado en el servidor de KAI (<code className="code-inline">META_APP_SECRET</code>).
-          Mientras la app esté en modo desarrollo, Meta solo envía los mensajes de personas con un rol en la app; para recibir los de cualquier persona,
-          pásala a modo «Activo» (Live).
+          Mientras la app esté en modo desarrollo, Meta solo envía los mensajes de personas con un rol en la app (administradores o testers). Para usarla con
+          clientes reales hay que pasar la revisión de la app de Meta (App Review) con los permisos de cada guía, verificar el negocio en Business Manager y
+          ponerla en modo «Activo» (Live).
         </Callout>
       </div>
     </Card>

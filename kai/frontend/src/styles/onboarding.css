@@ -123,6 +123,25 @@
   flex-wrap: wrap;
   margin-left: auto;
 }
+/* En móvil «Atrás» se queda solo con la flecha (el texto sigue disponible para lectores de pantalla)
+   para que «Lo haré más tarde» y «Continuar» quepan en la misma fila. */
+@media (max-width: 480px) {
+  .onb-actions .onb-back {
+    position: relative;
+    padding-inline: 11px;
+  }
+  .onb-actions .onb-back-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
 
 /* Sugerencias rápidas */
 .onb-suggest {
@@ -191,8 +210,11 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+/* Ancho suficiente para «10:00» y también para «10:00 AM» (navegadores en inglés), sin desbordar en móvil. */
 .onb-range .input {
-  width: 118px;
+  flex: 0 1 140px;
+  width: 140px;
+  min-width: 104px;
 }
 @media (max-width: 720px) {
   .onb-day {
@@ -200,6 +222,19 @@
   }
   .onb-day-name {
     padding-top: 0;
+  }
+  /* Cada franja en una sola línea: desde · a · hasta · quitar. */
+  .onb-range {
+    flex-wrap: nowrap;
+  }
+  .onb-range .input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: 150px;
+  }
+  .onb-range .btn {
+    flex-shrink: 0;
   }
 }
 

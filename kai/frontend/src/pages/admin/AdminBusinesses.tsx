@@ -8,8 +8,10 @@ import { timeAgo } from '../../lib/format';
 import { Card, EmptyState, PageHeader, Select, Spinner } from '../../components/ui';
 import {
   ADMIN_KEYS,
+  BUSINESS_LIST_LIMIT as LIMIT,
   BusinessStatusBadge,
   QueryError,
+  businessListQuery,
   SubscriptionBadge,
   num,
   shortDate,
@@ -18,8 +20,6 @@ import {
   type AdminPlan,
 } from './admin-shared';
 import '../../styles/admin.css';
-
-const LIMIT = 200;
 
 type Filter = 'all' | 'active' | 'suspended' | 'trialing' | 'paying' | 'past_due' | 'canceled' | 'onboarding';
 
@@ -70,11 +70,7 @@ export default function AdminBusinesses() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const q = useQuery({
-    queryKey: [...ADMIN_KEYS.businesses, debounced],
-    queryFn: () => api.get<{ businesses: AdminBusinessRow[] }>('/admin/businesses', { search: debounced, limit: LIMIT }),
-    placeholderData: (prev) => prev,
-  });
+  const q = useQuery({ ...businessListQuery(debounced), placeholderData: (prev) => prev });
   const plans = useQuery({ queryKey: ADMIN_KEYS.plans, queryFn: () => api.get<{ plans: AdminPlan[] }>('/admin/plans') });
   const planById = useMemo(() => new Map((plans.data?.plans ?? []).map((p) => [p.id, p])), [plans.data]);
 

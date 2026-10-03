@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Calculator, ChevronDown, ChevronUp, ListChecks, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { STANDARD_QUALIFICATION_KEYS } from '@shared';
 import { api, errorText } from '../../lib/api';
-import { Button, Callout, Card, Field, Input, Modal, Switch, Textarea, useToast } from '../../components/ui';
+import { Button, Callout, Card, ConfirmDialog, Field, Input, Modal, Switch, Textarea, useToast } from '../../components/ui';
 import type { QualificationRule } from '../../lib/types';
 import { CharCount, KEY_PATTERN, NumInput, SaveBar, slugify, useDraft, useReportDirty, type TabProps } from './setter-shared';
 
@@ -263,6 +263,7 @@ export default function QualificationTab({ settings, canEdit, onDirtyChange }: T
   useReportDirty(onDirtyChange, dirty);
   const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [confirmRescore, setConfirmRescore] = useState(false);
 
   const active = draft.filter((r) => r.enabled);
   const totalWeight = active.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
@@ -320,7 +321,8 @@ export default function QualificationTab({ settings, canEdit, onDirtyChange }: T
   const rescore = useMutation({
     mutationFn: () => api.post<{ ok: boolean; rescored: number }>('/settings/rescore-all'),
     onSuccess: (r) => {
-      toast(r.rescored === 1 ? 'Puntuación recalculada en 1 lead.' : `Puntuaciones recalculadas en ${r.rescored.toLocaleString('es-ES')} leads.`);
+      setConfirmRescore(false);
+      toast(r.rescored === 0 ? 'No hay leads abiertos que recalcular.' : r.rescored === 1 ? 'Puntuación recalculada en 1 lead.' : `Puntuaciones recalculadas en ${r.rescored.toLocaleString('es-ES')} leads.`);
       for (const key of ['leads', 'lead', 'dashboard', 'inbox', 'conversation', 'analytics']) void qc.invalidateQueries({ queryKey: [key] });
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -390,7 +392,7 @@ export default function QualificationTab({ settings, canEdit, onDirtyChange }: T
           <p className="muted small grow" style={{ minWidth: 240 }}>
             Los cambios en pesos y variables se aplican a cada lead la próxima vez que escriba. Si quieres actualizar ya la puntuación de todos tus leads abiertos (no se tocan clientes ni perdidos), recalcúlalas ahora.
           </p>
-          <Button icon={RefreshCw} loading={rescore.isPending} disabled={!canEdit || dirty} onClick={() => rescore.mutate()}>
+          <Button icon={RefreshCw} loading={rescore.isPending} disabled={!canEdit || dirty} onClick={() => setConfirmRescore(true)}>
             Recalcular puntuaciones
           </Button>
         </div>
@@ -402,6 +404,16 @@ export default function QualificationTab({ settings, canEdit, onDirtyChange }: T
       </Card>
 
       <SaveBar dirty={dirty} saving={save.isPending} canEdit={canEdit} error={globalError} onDiscard={reset} onSave={() => save.mutate()} saveLabel="Guardar cualificación" />
+
+      <ConfirmDialog
+        open={confirmRescore}
+        title="¿Recalcular las puntuaciones?"
+        message="KAI volverá a calcular la puntuación y la temperatura de todos tus leads abiertos con las variables y pesos guardados. Si alguno pasa a estar interesado o cualificado, también avanzará de etapa en tu pipeline. No se envía ningún mensaje a nadie."
+        confirmLabel="Recalcular ahora"
+        loading={rescore.isPending}
+        onConfirm={() => rescore.mutate()}
+        onClose={() => setConfirmRescore(false)}
+      />
 
       <CustomRuleModal
         open={adding}

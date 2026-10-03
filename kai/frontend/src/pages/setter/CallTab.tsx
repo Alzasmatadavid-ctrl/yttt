@@ -6,7 +6,7 @@ import { CalendarClock, Eye, PhoneCall } from 'lucide-react';
 import { api, errorText } from '../../lib/api';
 import { Callout, Card, Field, Input, Textarea, useToast } from '../../components/ui';
 import type { AiSettings } from '../../lib/types';
-import { CharCount, NumInput, SaveBar, humanMinutes, useDraft, useReportDirty, type TabProps } from './setter-shared';
+import { CharCount, NumInput, SaveBar, useDraft, useReportDirty, withUnit, type TabProps } from './setter-shared';
 
 type CallDraft = Pick<AiSettings, 'callLabel' | 'callDurationMinutes' | 'callDescription'>;
 
@@ -104,7 +104,7 @@ export default function CallTab({ settings, canEdit, onDirtyChange }: TabProps) 
                   max={DURATION_MAX}
                   width={90}
                   invalid={Boolean(errors.callDurationMinutes)}
-                  suffix={`minutos${minutes ? ` · ${humanMinutes(minutes)}` : ''}`}
+                  suffix={withUnit(draft.callDurationMinutes, 'minutes')}
                   onChange={(v) => set('callDurationMinutes', v)}
                 />
                 <div className="chips" role="group" aria-label="Duraciones habituales">
@@ -141,8 +141,8 @@ export default function CallTab({ settings, canEdit, onDirtyChange }: TabProps) 
             <div className="phone">
               <div className="msg-row out kai">
                 <div className="bubble">
-                  Creo que tendría sentido que lo vierais en una {label}
-                  {minutes ? ` de ${minutes} minutos` : ''} con {trainer} para valorar tu caso. ¿Te encaja?
+                  Creo que lo mejor sería verlo con calma en una {label}
+                  {minutes ? ` de ${minutes} minutos` : ''} con {trainer}. ¿Te encaja?
                 </div>
                 <div className="msg-meta">Al proponer la llamada</div>
               </div>

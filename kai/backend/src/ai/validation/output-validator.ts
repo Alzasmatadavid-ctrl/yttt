@@ -52,10 +52,33 @@ const RX_MEDICAL =
 const RX_PRESSURE =
   /ultima oportunidad|solo (por )?hoy|quedan (pocas|solo \d+) plazas|plazas limitadas|si no (te )?decides (ahora|hoy)|no lo pienses mas|oferta (exclusiva|limitada|solo para ti)|ahora o nunca|se acaba (hoy|manana)|precio sube (manana|pronto)/;
 const RX_GENERIC_FOLLOWUP = /solo (hago|te hago|queria hacer|para hacer) (un )?seguimiento|solo queria saber si (has visto|viste|leiste)|te escribo para hacer seguimiento|hago seguimiento/;
-const RX_TIME = /\b([01]?\d|2[0-3])[:.]([0-5]\d)\s*(h|hs|horas)?\b|\ba las ([01]?\d|2[0-3])(?![:.\d])(?:\s*(y media|y cuarto|menos cuarto))?\b/g;
+// “A las 17” también al inicio de frase (i) y “a las 17.” con punto final: solo se descarta si sigue “:30”/“.30”.
+const RX_TIME = /\b([01]?\d|2[0-3])[:.]([0-5]\d)\s*(h|hs|horas)?\b|\ba las ([01]?\d|2[0-3])(?![:.]?\d)(?:\s*(?:h|hs|horas)\b)?(?:\s*(y media|y cuarto|menos cuarto))?\b/gi;
 const RX_PRICE = /(\d{1,3}(?:[.\s]\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s?(€|euros?|eur\b)|€\s?(\d+(?:[.,]\d{1,2})?)/gi;
 const RX_URL = /https?:\/\/[^\s)]+/gi;
 const RX_CLAIMED_NUMBERS = /(\+?\d[\d.]*)\s*(clientes|alumnos|personas|transformaciones|anos de experiencia|kilos perdidos|kg perdidos)/g;
+
+const overlapsAny = (m: RegExpMatchArray, spans: RegExpMatchArray[]) =>
+  spans.some((s) => m.index! < s.index! + s[0].length && s.index! < m.index! + m[0].length);
+
+/** Números citados en los datos reales (“1.000” → 1000, “+500” → 500). */
+function numbersIn(text: string): Set<number> {
+  return new Set([...text.matchAll(/\d{1,3}(?:\.\d{3})+(?!\d)|\d+/g)].map((m) => Number(m[0].replace(/\./g, ''))));
+}
+
+/** ¿Es el mismo enlace? Admite que la IA omita los parámetros (?utm_…) o la barra final, pero no otra ruta. */
+function sameUrl(candidate: string, allowed: string): boolean {
+  if (candidate === allowed) return true;
+  try {
+    const a = new URL(candidate);
+    const b = new URL(allowed);
+    const path = (u: URL) => u.pathname.replace(/\/+$/, '');
+    const query = (u: URL) => [...u.searchParams].map(([k, v]) => `${k}=${v}`).sort().join('&');
+    return a.protocol === b.protocol && a.host === b.host && path(a) === path(b) && (!a.search || query(a) === query(b)) && (!a.hash || a.hash === b.hash);
+  } catch {
+    return false;
+  }
+}
 
 function parsePriceToCents(raw: string): number | null {
   let s = raw.replace(/\s/g, '');
@@ -96,9 +119,14 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   if (RX_PRESSURE.test(n)) issues.push('Presiona con urgencia o escasez. Elimina cualquier presión.');
   if (ctx.isFollowUp && RX_GENERIC_FOLLOWUP.test(n)) issues.push('Es un seguimiento genérico. Usa algo concreto de la conversación (su objetivo, lo que contó).');
 
+  // Importes y enlaces: las cifras que contienen no son horas (“19.50 €”, o un enlace de Calendly con “T18:00:00Z”).
+  const urls = [...trimmed.matchAll(RX_URL)];
+  const prices = [...trimmed.matchAll(RX_PRICE)].filter((p) => !overlapsAny(p, urls));
+
   // Horarios: solo los que salen de la agenda real.
   const allowed = ctx.allowedTimes.map((d) => DateTime.fromJSDate(d).setZone(ctx.timezone));
   for (const m of trimmed.matchAll(RX_TIME)) {
+    if (overlapsAny(m, prices) || overlapsAny(m, urls)) continue;
     let hour: number;
     let minute: number;
     if (m[1] !== undefined) {
@@ -106,8 +134,9 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
       minute = Number(m[2]);
     } else {
       hour = Number(m[4]);
-      minute = m[5] === 'y media' ? 30 : m[5] === 'y cuarto' ? 15 : m[5] === 'menos cuarto' ? 45 : 0;
-      if (m[5] === 'menos cuarto') hour -= 1;
+      const fraction = m[5]?.toLowerCase().replace(/\s+/g, ' ');
+      minute = fraction === 'y media' ? 30 : fraction === 'y cuarto' ? 15 : fraction === 'menos cuarto' ? 45 : 0;
+      if (fraction === 'menos cuarto') hour -= 1;
     }
     const matches = allowed.some((a) => a.minute === minute && (a.hour === hour || a.hour % 12 === hour % 12));
     if (!matches) {
@@ -117,7 +146,7 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   }
 
   // Precios: solo los configurados.
-  for (const m of trimmed.matchAll(RX_PRICE)) {
+  for (const m of prices) {
     const cents = parsePriceToCents(m[1] ?? m[3] ?? '');
     if (cents === null) continue;
     if (!ctx.allowedPricesCents.some((p) => Math.abs(p - cents) <= 1)) {
@@ -127,19 +156,19 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   }
 
   // Enlaces.
-  for (const m of trimmed.matchAll(RX_URL)) {
+  for (const m of urls) {
     const url = m[0].replace(/[.,;!?]+$/, '');
-    if (!ctx.allowedUrls.some((u) => u === url || u.startsWith(url) || url.startsWith(u))) {
+    if (!ctx.allowedUrls.some((u) => sameUrl(url, u))) {
       issues.push('Incluye un enlace que no procede de la agenda ni de la configuración. No inventes enlaces.');
       break;
     }
   }
 
   // Cifras de autoridad / testimonios que no estén en los datos reales del entrenador.
-  const facts = normalize(ctx.factsText);
+  const facts = numbersIn(normalize(ctx.factsText));
   for (const m of n.matchAll(RX_CLAIMED_NUMBERS)) {
-    const num = m[1].replace(/[+.]/g, '');
-    if (!facts.includes(num)) {
+    const num = Number(m[1].replace(/[+.]/g, ''));
+    if (!facts.has(num)) {
       issues.push(`Afirma “${m[0]}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
       break;
     }

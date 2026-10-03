@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -41,55 +41,80 @@ function AlertsMenu() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
+  const rootRef = useRef<HTMLDivElement>(null);
   const { data } = useQuery({ queryKey: ['alerts'], queryFn: () => api.get<{ alerts: AlertRow[] }>('/alerts'), refetchInterval: 20_000 });
   const resolve = useMutation({
     mutationFn: (id: string) => api.post(`/alerts/${id}/resolve`, { status: 'dismissed' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['alerts'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['alerts'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (e) => toast(errorText(e), 'error'),
   });
+  // Cerrar al pulsar fuera o con Escape (un fondo “fixed” no sirve aquí: la barra superior usa backdrop-filter).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
   const alerts = data?.alerts ?? [];
-  const go = async (row: AlertRow) => {
+  const go = (row: AlertRow) => {
     setOpen(false);
-    if (row.alert.conversationId) navigate(`/app/inbox/${row.alert.conversationId}`);
+    if (row.alert.type === 'call_outcome' && row.alert.leadId) navigate(`/app/leads/${row.alert.leadId}`);
+    else if (row.alert.conversationId) navigate(`/app/inbox/${row.alert.conversationId}`);
     else if (row.alert.leadId) navigate(`/app/leads/${row.alert.leadId}`);
     else if (row.alert.type === 'no_availability') navigate('/app/agenda');
     else if (row.alert.type === 'integration_error' || row.alert.type === 'delivery_blocked') navigate('/app/integraciones');
   };
   return (
-    <div style={{ position: 'relative' }}>
-      <Button variant="ghost" iconOnly icon={Bell} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        Avisos
-      </Button>
-      {alerts.length > 0 && (
-        <span style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, background: 'var(--hot)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'grid', placeItems: 'center', padding: '0 4px', pointerEvents: 'none' }}>
-          {alerts.length}
-        </span>
-      )}
+    <div ref={rootRef} className="alerts-menu">
+      <span style={{ position: 'relative', display: 'inline-flex' }}>
+        <Button variant="ghost" iconOnly icon={Bell} onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="true">
+          {alerts.length ? `Avisos (${alerts.length})` : 'Avisos'}
+        </Button>
+        {alerts.length > 0 && (
+          <span className="alerts-count" aria-hidden>
+            {alerts.length}
+          </span>
+        )}
+      </span>
       {open && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
-          <div className="card" style={{ position: 'absolute', right: 0, top: 44, width: 360, zIndex: 41, padding: 8, boxShadow: 'var(--shadow-lg)', maxHeight: 460, overflowY: 'auto' }}>
-            <div className="row-between" style={{ padding: '6px 8px 10px' }}>
-              <strong>Avisos</strong>
-              <span className="subtle small">{alerts.length} pendiente(s)</span>
-            </div>
-            {alerts.length === 0 && <p className="muted small" style={{ padding: '8px 8px 12px' }}>Todo en orden. KAI te avisará aquí cuando necesite tu intervención.</p>}
-            {alerts.map((row) => (
-              <div key={row.alert.id} className="row" style={{ alignItems: 'flex-start', padding: 8, borderRadius: 10, gap: 10 }}>
-                <span className={`badge ${row.alert.severity === 'critical' ? 'badge-danger' : row.alert.severity === 'warning' ? 'badge-warning' : 'badge-info'}`} style={{ marginTop: 2 }}>
-                  {row.alert.severity === 'critical' ? 'Urgente' : row.alert.severity === 'warning' ? 'Atención' : 'Info'}
-                </span>
-                <button onClick={() => go(row)} style={{ border: 0, background: 'none', textAlign: 'left', cursor: 'pointer', padding: 0, flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{row.alert.title}</div>
-                  <div className="muted small">{row.alert.body}</div>
-                  <div className="subtle xs mt-4">{timeAgo(row.alert.createdAt)}</div>
-                </button>
-                <Button variant="ghost" size="sm" iconOnly icon={X} onClick={() => resolve.mutate(row.alert.id)}>
-                  Descartar
-                </Button>
-              </div>
-            ))}
+        <div className="card alerts-dropdown" role="dialog" aria-label="Avisos">
+          <div className="row-between" style={{ padding: '6px 8px 10px' }}>
+            <strong>Avisos</strong>
+            <span className="subtle small">{alerts.length === 1 ? '1 pendiente' : `${alerts.length} pendientes`}</span>
           </div>
-        </>
+          {alerts.length === 0 && <p className="muted small" style={{ padding: '8px 8px 12px' }}>Todo en orden. KAI te avisará aquí cuando necesite tu intervención.</p>}
+          {alerts.map((row) => (
+            <div key={row.alert.id} className="alerts-row">
+              <span className={`badge ${row.alert.severity === 'critical' ? 'badge-danger' : row.alert.severity === 'warning' ? 'badge-warning' : 'badge-info'}`} style={{ marginTop: 2 }}>
+                {row.alert.severity === 'critical' ? 'Urgente' : row.alert.severity === 'warning' ? 'Atención' : 'Aviso'}
+              </span>
+              <button type="button" className="alerts-row-main" onClick={() => go(row)}>
+                <div style={{ fontWeight: 600 }}>
+                  {row.alert.title}
+                  {row.leadName && !row.alert.title.includes(row.leadName) ? ` · ${row.leadName}` : ''}
+                </div>
+                <div className="muted small">{row.alert.body}</div>
+                <div className="subtle xs mt-4">{timeAgo(row.alert.createdAt)}</div>
+              </button>
+              <Button variant="ghost" size="sm" iconOnly icon={X} title="Descartar aviso" loading={resolve.isPending && resolve.variables === row.alert.id} onClick={() => resolve.mutate(row.alert.id)}>
+                Descartar aviso
+              </Button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -109,6 +134,29 @@ export default function AppLayout() {
   const toast = useToast();
 
   useEffect(() => setMenuOpen(false), [location.pathname]);
+  const bizRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!bizOpen) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (bizRef.current && !bizRef.current.contains(e.target as Node)) setBizOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setBizOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [bizOpen]);
+  // Cerrar el menú móvil con Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings'), staleTime: 30_000 });
   const inbox = useQuery({ queryKey: ['inbox-counts'], queryFn: () => api.get<{ counts: Record<string, number> }>('/inbox', { filter: 'pending', limit: 1 }), refetchInterval: 20_000 });
@@ -162,8 +210,16 @@ export default function AppLayout() {
           <Logo to="/app" size={26} />
           <span className="badge badge-accent">Setter IA</span>
         </div>
-        <div style={{ position: 'relative' }}>
-          <button className="biz-switch" onClick={() => setBizOpen((o) => !o)} aria-expanded={bizOpen}>
+        <div style={{ position: 'relative' }} ref={bizRef}>
+          <button
+            type="button"
+            className="biz-switch"
+            onClick={() => hasBizMenu && setBizOpen((o) => !o)}
+            aria-expanded={hasBizMenu ? bizOpen : undefined}
+            aria-haspopup={hasBizMenu ? 'true' : undefined}
+            style={hasBizMenu ? undefined : { cursor: 'default' }}
+            title={hasBizMenu ? 'Cambiar de negocio' : activeBusiness?.name}
+          >
             <span className="biz-mark">{(activeBusiness?.name ?? 'K').slice(0, 2).toUpperCase()}</span>
             <span className="grow">
               <span className="ellipsis" style={{ display: 'block', fontWeight: 600 }}>
@@ -180,7 +236,7 @@ export default function AppLayout() {
                   key={b.businessId}
                   className={`nav-link ${b.businessId === activeBusiness?.businessId ? 'active' : ''}`}
                   style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }}
-                  onClick={() => (b.businessId === activeBusiness?.businessId ? setBizOpen(false) : switchBusiness(b.businessId))}
+                  onClick={() => (b.businessId === activeBusiness?.businessId ? setBizOpen(false) : switchBusiness(b.businessId).catch((e: unknown) => toast(errorText(e), 'error')))}
                 >
                   {b.name}
                 </button>

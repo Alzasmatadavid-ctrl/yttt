@@ -219,6 +219,14 @@ function sentenceWith(text: string, rx: RegExp): string | null {
   return i >= 0 ? parts[i].trim().slice(0, 300) : null;
 }
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** ¿Aparece la expresión como palabras completas en el texto normalizado? (“caro” no está en “Carolina”). */
+function containsPhrase(normalizedText: string, phrase: string): boolean {
+  const p = normalize(phrase);
+  return Boolean(p) && new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(p)}(?![\\p{L}\\p{N}])`, 'u').test(normalizedText);
+}
+
 function levelFrom(n: string, high: RegExp, low: RegExp, med?: RegExp): 'high' | 'medium' | 'low' | null {
   if (high.test(n)) return 'high';
   if (low.test(n)) return 'low';
@@ -231,7 +239,7 @@ export function resolvePreferredDate(n: string, now: Date, tz: string): string |
   const withoutPartOfDay = n.replace(/por la manana|de la manana|esta manana/g, ' ');
   if (/pasado manana/.test(withoutPartOfDay)) return today.plus({ days: 2 }).toISODate();
   if (/\bmanana\b/.test(withoutPartOfDay)) return today.plus({ days: 1 }).toISODate();
-  if (/\bhoy\b|esta tarde|esta noche/.test(n)) return today.toISODate();
+  if (/\bhoy\b|esta manana|esta tarde|esta noche/.test(n)) return today.toISODate();
   for (const [name, wd] of Object.entries(WEEKDAYS)) {
     if (new RegExp(`\\b(el )?${name}\\b`).test(n)) {
       let diff = (wd - today.weekday + 7) % 7;
@@ -249,20 +257,51 @@ export function resolvePartOfDay(n: string): 'morning' | 'afternoon' | 'evening'
   return null;
 }
 
+/** Rechaza un horario o pide otro: en ese caso no se elige ninguno (mejor preguntar que reservar mal). */
+const RX_SLOT_REJECTION =
+  /\bno (puedo|podre|podria|me (va|viene|encaja|cuadra|sirve|vendria|iria))\b|\b(imposible|ninguna|ninguno)\b|\bme (va|viene) (fatal|mal)\b|\b(otro|otra) (dia|hora|momento|hueco|franja|semana|opcion)\b/;
+const ORD = '(primer[ao]|1[aªoº]|segund[ao]|2[aªoº]|tercer[ao]|3[aªoº]|ultim[ao])';
+/** Lo que puede seguir a un ordinal cuando el lead elige (“la segunda porfa”, “la primera me viene genial”). */
+const AFTER_CHOICE =
+  '(?=\\s*(?:$|[,.;:!?)]|(?:opcion|hueco|horario|porfa|por favor|gracias|mejor|entonces|pues|vale|perfecto|genial|plis|please|si|me (?:va|viene|encaja|cuadra|sirve|parece|quedo)|es (?:perfect[ao]|mejor|ideal|genial)|esta bien)\\b))';
+/** “la segunda”, “el primero”, “opción tercera” (con artículo; no “un segundo”, “a primera hora” ni “la última vez”). */
+const RX_ORDINAL_WITH_ARTICLE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:(?:la|el)\\s+(?:opcion\\s+)?|opcion\\s+)${ORD}${AFTER_CHOICE}`, 'u');
+/** El mensaje entero es el ordinal (“Segunda”, “vale, primera porfa”); no “Primero dime cuánto cuesta”. */
+const RX_ORDINAL_ALONE = new RegExp(
+  `^(?:(?:pues|vale|ok|okey|si|bueno|genial|perfecto|mejor|prefiero|quiero|elijo|me quedo con)[\\s,.!]+)*${ORD}(?:\\s+opcion)?(?:[\\s,]+(?:porfa|por favor|gracias|please|plis))?[\\s.!]*$`,
+);
+const RX_OPTION_NUMBER = /\bopcion\s+(?:numero\s+)?([1-9])\b/;
+
+/** Índice del horario elegido por su posición (−1 = el último), o null si no hay un ordinal de elección. */
+function ordinalChoice(n: string): number | null {
+  const opt = RX_OPTION_NUMBER.exec(n);
+  if (opt) return Number(opt[1]) - 1;
+  const m = RX_ORDINAL_WITH_ARTICLE.exec(n) ?? RX_ORDINAL_ALONE.exec(n);
+  if (!m) return null;
+  const word = m[1];
+  if (/^(primer|1)/.test(word)) return 0;
+  if (/^(segund|2)/.test(word)) return 1;
+  if (/^(tercer|3)/.test(word)) return 2;
+  return -1;
+}
+
 /** Intenta identificar qué horario de los ofrecidos ha elegido el lead. */
 export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: string, now: Date = new Date(), lastOfferIds: string[] = []): string | null {
   if (!allOffered.length) return null;
+  // Elegir un horario reserva la cita: ante un rechazo (“el jueves no puedo”, “otro día”) no se elige nada.
+  if (RX_SLOT_REJECTION.test(n)) return null;
   // Las referencias ordinales (“la primera”) apuntan a la ÚLTIMA oferta; las horas, preferentemente también.
   const latest = lastOfferIds.map((id) => allOffered.find((s) => s.id === id)).filter((s): s is OfferedSlot => Boolean(s));
   const offered = latest.length ? latest : allOffered;
-  if (/\b(la |el )?(primera|primero|1a|opcion 1)\b/.test(n)) return offered[0]?.id ?? null;
-  if (/\b(la |el )?(segunda|segundo|2a|opcion 2)\b/.test(n)) return offered[1]?.id ?? null;
-  if (/\b(la |el )?(tercera|tercero|3a|opcion 3)\b/.test(n)) return offered[2]?.id ?? null;
-  if (/\b(la |el )?ultima\b/.test(n)) return offered[offered.length - 1]?.id ?? null;
+  const ordinal = ordinalChoice(n);
+  if (ordinal !== null) return (ordinal < 0 ? offered[offered.length - 1] : offered[ordinal])?.id ?? null;
   const times = [...n.matchAll(/\b(?:a las |las |la de las )?([01]?\d|2[0-3])(?:[:.h]([0-5]\d))?\s*(?:h|horas)?\b(?:\s*y media)?/g)];
-  const mentionsTime = /\d/.test(n) && (/(a las|las|:|\bh\b|horas|y media)/.test(n) || /^\s*\d{1,2}([:.]\d{2})?\s*$/.test(n));
+  const onlyNumber = /^\s*\d{1,2}([:.]\d{2})?\s*$/.test(n);
+  const mentionsTime = /\d/.test(n) && (/(a las|las|:|\bh\b|\dh\b|horas|y media)/.test(n) || onlyNumber);
   if (mentionsTime) {
     for (const m of times) {
+      // Solo cuentan los números con forma de hora (“a las 10”, “18:00”, “10h”), no “tengo 18 años” ni “10 horas a la semana”.
+      if (!onlyNumber && !/las|[:.]\d|\dh\b|y media/.test(m[0])) continue;
       const hour = Number(m[1]);
       const minute = /y media/.test(m[0]) ? 30 : m[2] ? Number(m[2]) : null;
       const matches = (pool: OfferedSlot[]) =>
@@ -280,7 +319,7 @@ export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: strin
   const date = resolvePreferredDate(n, now, tz);
   if (date) {
     const sameDay = offered.filter((s) => DateTime.fromISO(s.start).setZone(tz).toISODate() === date);
-    if (sameDay.length === 1 && (RX.affirm.test(n) || /me viene|prefiero|mejor|esa|ese/.test(n))) return sameDay[0].id;
+    if (sameDay.length === 1 && (RX.affirm.test(n) || /\b(me viene|me va|me encaja|me cuadra|prefiero|mejor|esa|ese)\b/.test(n))) return sameDay[0].id;
   }
   if (offered.length === 1 && RX.affirm.test(n)) return offered[0].id;
   return null;
@@ -365,13 +404,15 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   const answeringDiscovery = Object.keys(qualification).length > 0;
   let objectionKey: string | null = null;
   for (const o of decisionStage || !answeringDiscovery ? input.biz.objections : []) {
-    if (o.triggers.some((t) => t.trim() && n.includes(normalize(t)))) {
+    if (o.triggers.some((t) => containsPhrase(n, t))) {
       objectionKey = o.key;
       break;
     }
   }
 
-  const nameMatch = /(?:me llamo|mi nombre es|soy) ([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/.exec(raw);
+  // “me llamo / soy” en cualquier mayúscula (“Me llamo Laura”); el nombre, en cambio, debe ir en mayúscula
+  // para no capturar palabras comunes (“soy nueva”).
+  const nameMatch = /(?<!\p{L})(?:[Mm]e llamo|[Mm]i nombre es|[Ss]oy)\s+(\p{Lu}\p{Ll}+)/u.exec(raw.normalize('NFC'));
 
   return {
     qualification,

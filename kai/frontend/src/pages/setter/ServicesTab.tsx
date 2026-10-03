@@ -249,7 +249,7 @@ export default function ServicesTab({ settings, canEdit, onDirtyChange }: TabPro
         icon={Package}
         actions={
           canEdit && (
-            <Button size="sm" variant="primary" icon={Plus} onClick={() => setEditing('new')}>
+            <Button size="sm" icon={Plus} onClick={() => setEditing('new')}>
               Añadir servicio
             </Button>
           )
@@ -340,13 +340,17 @@ export default function ServicesTab({ settings, canEdit, onDirtyChange }: TabPro
             {
               value: 'contextualize_first',
               title: 'Primero entiende, luego da el precio',
-              description:
-                'Si un lead pregunta el precio nada más empezar, KAI le hace antes una pregunta para entender su situación y recomendarle lo adecuado. Si vuelve a preguntar, se lo da siempre: nunca lo oculta.',
+              badge: 'Recomendado',
+              description: (
+                <>
+                  Si un lead pregunta el precio nada más empezar, KAI primero le hace una pregunta para entender su situación y recomendarle lo adecuado. Por ejemplo: «Claro. Antes de decirte qué opción tendría sentido para ti, quiero entender un poco tu situación para no recomendarte algo que no encaje». Si vuelve a preguntar, o si KAI ya conoce lo esencial de su caso, se lo da siempre: nunca lo oculta.
+                </>
+              ),
             },
             {
               value: 'share_directly',
               title: 'Da el precio directamente',
-              description: 'En cuanto un lead pregunta, KAI le dice el precio con claridad (importe, periodicidad y lo que incluye) y sigue la conversación.',
+              description: 'En cuanto un lead pregunta, KAI le dice el precio con claridad (importe, periodicidad y lo que incluye) y después sigue la conversación con una pregunta.',
             },
           ]}
         />

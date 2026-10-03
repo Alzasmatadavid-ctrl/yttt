@@ -112,7 +112,7 @@ export default function HandoffTab({ settings, canEdit, onDirtyChange }: TabProp
   return (
     <>
       <p className="setter-lead">
-        «Escalar» significa que KAI te pasa la conversación. Cuando ocurre, KAI deja de responder a ese lead y te avisa (en la campana de Avisos) para que sigas tú desde la bandeja. Cuando lo consideres, puedes devolverle la conversación a KAI.
+        «Escalar» significa que KAI te pasa la conversación. Cuando ocurre, KAI deja de responder a ese lead y te avisa en la campana de Avisos con el mensaje «KAI necesita tu intervención», para que sigas tú desde la bandeja. Cuando lo consideres, puedes devolverle la conversación a KAI.
       </p>
 
       <Card title={`¿Cuándo te pasa KAI la conversación? (${activeCount} de ${RULES.length} activados)`} icon={LifeBuoy}>
@@ -170,6 +170,7 @@ export default function HandoffTab({ settings, canEdit, onDirtyChange }: TabProp
           <li>Si KAI no consigue redactar una respuesta que supere su control de calidad, no envía nada y te pasa la conversación.</li>
           <li>Si un lead pide que no le escriban más, KAI se despide y no vuelve a escribirle.</li>
           <li>Si un lead pregunta si está hablando con un bot, KAI nunca lo niega.</li>
+          <li>Si un lead hace una petición excepcional que KAI no puede resolver con lo que le has configurado, te pasa la conversación.</li>
         </ul>
         <p className="subtle xs mt-12 row" style={{ gap: 6 }}>
           <BellRing size={13} aria-hidden /> Puedes tomar el control de cualquier conversación cuando quieras desde la bandeja, aunque no se cumpla ninguno de estos casos.

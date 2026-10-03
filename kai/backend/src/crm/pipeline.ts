@@ -56,7 +56,10 @@ export function nextStatus(current: LeadStatus, event: PipelineEvent, ctx?: Pipe
     case 'followup_sent':
       return ['contacted', 'conversing', 'interested', 'qualified', 'call_proposed', 'no_show'].includes(current) ? 'follow_up' : null;
     case 'appointment_cancelled':
+      // Una cancelación (p. ej. desde Calendly) no reabre un lead cerrado: KAI no debe volver a escribirle.
+      return current === 'client' || current === 'lost' ? null : 'follow_up';
     case 'call_follow_up':
+      // Decisión explícita del entrenador tras la llamada: sí puede reabrir un lead perdido.
       return current === 'client' ? null : 'follow_up';
     case 'won':
       return 'client';

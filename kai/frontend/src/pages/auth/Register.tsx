@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Globe, UserPlus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -25,6 +25,14 @@ export default function Register() {
   const timezone = useMemo(detectTimezone, []);
   const [form, setForm] = useState<FormState>({ name: '', email: '', password: '', businessName: '' });
   const [errors, setErrors] = useState<Errors>({});
+  // Días de prueba reales (misma consulta y caché que la landing). Si no llegan, se habla de «un periodo de prueba».
+  const plans = useQuery({
+    queryKey: ['public-plans'],
+    queryFn: () => api.get<{ plans: unknown[]; trialDays?: number }>('/public/plans'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const trialDays = plans.data?.trialDays;
 
   const register = useMutation({
     mutationFn: () =>
@@ -61,7 +69,7 @@ export default function Register() {
     <AuthShell
       docTitle="Crear cuenta"
       title="Crea tu cuenta"
-      subtitle="Después te guiaremos paso a paso para configurar a KAI. Empiezas con un periodo de prueba."
+      subtitle={`Después te guiaremos paso a paso para configurar a KAI. Empiezas con ${trialDays ? `${trialDays} días de prueba` : 'un periodo de prueba'}.`}
       footer={
         <>
           ¿Ya tienes cuenta? <Link to="/login">Entrar</Link>

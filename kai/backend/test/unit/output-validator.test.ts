@@ -140,16 +140,27 @@ describe('validateReply', () => {
       expectOk('El pack completo son 1.500 €.');
     });
 
-    // BUG: la expresión de horas solo reconoce “a las” en minúscula. “A las 17” al inicio de frase
-    // (hora inventada) pasa el control de calidad.
-    it.fails('BUG: detecta una hora inventada al inicio de frase (“A las 17”)', () => {
+    // Regresión: la expresión de horas solo reconocía “a las” en minúscula. “A las 17” al inicio de frase
+    // (hora inventada) pasaba el control de calidad.
+    it('detecta una hora inventada al inicio de frase (“A las 17”)', () => {
       expectIssue('A las 17 tengo un hueco libre, ¿te encaja?', /no ha salido de la agenda real/);
     });
 
-    // BUG: el “lookahead” (?![:.\d]) que evita leer “18:30” como “a las 18” también descarta
-    // “a las 17.” cuando la hora va seguida del punto final de la frase.
-    it.fails('BUG: detecta una hora inventada seguida de punto final (“a las 17.”)', () => {
+    // Regresión: el “lookahead” (?![:.\d]) que evita leer “18:30” como “a las 18” también descartaba
+    // “a las 17.” cuando la hora iba seguida del punto final de la frase.
+    it('detecta una hora inventada seguida de punto final (“a las 17.”)', () => {
       expectIssue('Perfecto, te llamo mañana a las 17.', /no ha salido de la agenda real/);
+    });
+
+    it('detecta “a las 17h” (hora inventada con “h” pegada)', () => {
+      expectIssue('¿Te va bien mañana a las 17h?', /no ha salido de la agenda real/);
+      expectOk('¿Te va bien mañana a las 18h?');
+      expectOk('A las 18:00 tengo hueco, ¿te encaja?');
+    });
+
+    it('la hora en UTC dentro de un enlace de Calendly no cuenta como horario mencionado', () => {
+      const link = 'https://calendly.com/alex-fit/valoracion/2026-10-06T16:00:00Z?month=2026-10&utm_content=abc';
+      expectOk(`Para confirmarlo, resérvalo aquí: ${link}`, ctx({ allowedUrls: [link] }));
     });
   });
 
@@ -166,8 +177,8 @@ describe('validateReply', () => {
       expectIssue('Son 197 € al mes.', /“197 €”/, ctx({ allowedPricesCents: [] }));
     });
 
-    // BUG: un precio con punto decimal (“19.50 €”) se interpreta además como la hora 19:50.
-    it.fails('BUG: un precio real con punto decimal no debe tomarse por un horario', () => {
+    // Regresión: un precio con punto decimal (“19.50 €”) se interpretaba además como la hora 19:50.
+    it('un precio real con punto decimal no debe tomarse por un horario', () => {
       expectOk('La sesión suelta son 19.50 €.', ctx({ allowedPricesCents: [1950] }));
     });
   });
@@ -186,9 +197,16 @@ describe('validateReply', () => {
       expectIssue('https://calendly.com/alex-fit/valoracion', /enlace/, ctx({ allowedUrls: [] }));
     });
 
-    // BUG (menor): la comparación por prefijo acepta cualquier URL que EMPIECE por una permitida.
-    it.fails('BUG: no acepta una URL que solo comparte prefijo con la permitida', () => {
+    // Regresión: la comparación por prefijo aceptaba cualquier URL que EMPEZARA por una permitida.
+    it('no acepta una URL que solo comparte prefijo con la permitida', () => {
       expectIssue('Entra aquí: https://meet.google.com/abc-defg-hijklmn', /enlace que no procede/, ctx({ allowedUrls: ['https://meet.google.com/abc-defg-hij'] }));
+      expectIssue('Reserva aquí https://calendly.com/alex-fit', /enlace que no procede/);
+    });
+
+    it('admite el mismo enlace sin los parámetros de seguimiento o con barra final, pero no con otros parámetros', () => {
+      expectOk('Reserva aquí: https://calendly.com/alex-fit/valoracion');
+      expectOk('Reserva aquí: https://calendly.com/alex-fit/valoracion/?utm_content=abc');
+      expectIssue('Reserva aquí: https://calendly.com/alex-fit/valoracion?utm_content=otro', /enlace que no procede/);
     });
   });
 
@@ -255,14 +273,16 @@ describe('validateReply', () => {
       expectIssue('Ya son 500 alumnos.', /no aparece en el perfil/, ctx({ factsText: '' }));
     });
 
-    // BUG: una cifra real con separador de miles (“1.000 alumnos”) se marca como inventada.
-    it.fails('BUG: permite una cifra real escrita con separador de miles', () => {
+    // Regresión: una cifra real con separador de miles (“1.000 alumnos”) se marcaba como inventada.
+    it('permite una cifra real escrita con separador de miles', () => {
       expectOk('Ya son más de 1.000 alumnos.', ctx({ factsText: 'Más de 1.000 alumnos formados.' }));
     });
 
-    // BUG: la comprobación es por subcadena: “30 clientes” se da por buena si el perfil dice “300 clientes”.
-    it.fails('BUG: rechaza una cifra inventada contenida dentro de otra real', () => {
+    // Regresión: la comprobación era por subcadena: “30 clientes” se daba por buena si el perfil decía “300 clientes”.
+    it('rechaza una cifra inventada contenida dentro de otra real', () => {
       expectIssue('He trabajado con 30 clientes.', /no aparece en el perfil/, ctx({ factsText: 'Más de 300 clientes.' }));
+      expectIssue('Más de 1.000 alumnos.', /no aparece en el perfil/, ctx({ factsText: 'Más de 100 alumnos y 10 años de experiencia.' }));
+      expectOk('Más de 1000 alumnos.', ctx({ factsText: 'Más de 1.000 alumnos formados.' }));
     });
   });
 

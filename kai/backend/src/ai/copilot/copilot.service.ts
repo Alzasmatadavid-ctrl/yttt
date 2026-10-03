@@ -32,7 +32,7 @@ import { getLLMProvider } from '../providers/index.js';
 import type { ChatBlock, ChatMessage, ToolDefinition, ToolResultBlock } from '../providers/types.js';
 import { textOf } from '../providers/types.js';
 import { composeFollowUp } from '../setter/setter-engine.js';
-import { createPendingAction, type PendingActionType } from './copilot-actions.js';
+import { canPropose, createPendingAction, NOT_ALLOWED_MESSAGE, type PendingActionType } from './copilot-actions.js';
 import { env } from '../../config/env.js';
 
 export interface CopilotCard {
@@ -270,6 +270,7 @@ class CopilotTools {
           if (t.messageLength) tone.messageLength = t.messageLength as AiTone['messageLength'];
           payload.tone = tone;
         }
+        if (!canPropose(this.ctx, type)) return { error: NOT_ALLOWED_MESSAGE, not_allowed: true };
         const action = await createPendingAction(this.ctx, type, payload);
         this.card.actions = [...(this.card.actions ?? []), { id: action.id, type: action.type, summary: action.summary }];
         return { pending_confirmation: true, summary: action.summary };
@@ -403,7 +404,8 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
       }
     }
     if (changes.length === 0) return { text: 'Dime cómo quieres el tono (más directo, más cercano, más formal, sin emojis, mensajes más cortos…) y te preparo el cambio para que lo confirmes.', data: {} };
-    await tools.run('propose_action', { type: 'update_tone', lead_id: null, text: null, status: null, tone, automation: null, enabled: null, summary: changes.join(', ') });
+    const proposed = (await tools.run('propose_action', { type: 'update_tone', lead_id: null, text: null, status: null, tone, automation: null, enabled: null, summary: changes.join(', ') })) as { error?: string };
+    if (proposed.error) return { text: proposed.error, data: tools.card };
     return { text: `Te he preparado el cambio de tono (${changes.join(', ')}). Confírmalo para aplicarlo.`, data: tools.card };
   }
   if (/(escribe|redacta|prepara|haz).*(seguimiento|mensaje)/.test(n)) {
@@ -411,7 +413,8 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
     if (!lead) return { text: 'Dime el nombre del lead para el que quieres el seguimiento (o ábrelo desde la bandeja y pídemelo ahí).', data: {} };
     const r = (await tools.run('draft_follow_up', { lead_id: lead.id })) as { draft?: string; error?: string };
     if (!r.draft) return { text: r.error ?? 'No he podido redactar el seguimiento.', data: tools.card };
-    await tools.run('propose_action', { type: 'send_message', lead_id: lead.id, text: r.draft, status: null, tone: null, automation: null, enabled: null, summary: `Enviar seguimiento a ${lead.name}` });
+    const proposed = (await tools.run('propose_action', { type: 'send_message', lead_id: lead.id, text: r.draft, status: null, tone: null, automation: null, enabled: null, summary: `Enviar seguimiento a ${lead.name}` })) as { error?: string };
+    if (proposed.error) return { text: `Este es el seguimiento que propongo para ${lead.name}: “${r.draft}”. ${proposed.error}`, data: tools.card };
     return { text: `Este es el seguimiento que propongo para ${lead.name}. Si te encaja, confírmalo y se envía.`, data: tools.card };
   }
   if (/metricas|resumen|como vamos|estadisticas|conversion/.test(n)) {

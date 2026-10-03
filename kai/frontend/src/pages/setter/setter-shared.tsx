@@ -121,7 +121,7 @@ export function OptionCards<T extends string>({
       <span className="label" id={id}>
         {label}
       </span>
-      <div className="option-grid" role="group" aria-labelledby={id} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' }}>
+      <div className="option-grid setter-option-grid" role="group" aria-labelledby={id}>
         {options.map((o) => {
           const Icon = o.icon;
           return (
@@ -265,6 +265,17 @@ export function humanMinutes(m: number): string {
   const h = Math.floor(m / 60);
   const r = m % 60;
   return r ? `${h} h ${r} min` : `${h} h`;
+}
+
+/**
+ * Unidad que acompaña a un número: «segundos», «1 minuto»… A partir de 60 añade la lectura humana
+ * («segundos · 1 min 10 s») para que se entienda la cifra sin hacer cuentas.
+ */
+export function withUnit(value: number, unit: 'seconds' | 'minutes'): string {
+  const one = value === 1;
+  const word = unit === 'seconds' ? (one ? 'segundo' : 'segundos') : one ? 'minuto' : 'minutos';
+  if (!Number.isFinite(value) || value < 60) return word;
+  return `${word} · ${unit === 'seconds' ? humanSeconds(value) : humanMinutes(value)}`;
 }
 
 /** Convierte lo que escribe el entrenador («149», «149,90», «1.200») a céntimos. */

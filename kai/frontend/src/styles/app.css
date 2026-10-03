@@ -85,8 +85,13 @@ button {
   position: absolute;
   width: 1px;
   height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .row {
   display: flex;
@@ -808,6 +813,16 @@ input[type='range'].range {
   flex-direction: column;
   gap: 8px;
   max-width: min(380px, calc(100vw - 32px));
+}
+@media (max-width: 720px) {
+  /* En móvil, los avisos arriba: abajo tapaban el cuadro de escritura y los botones de acción. */
+  .toasts {
+    top: calc(var(--topbar-h) + 8px);
+    bottom: auto;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
 }
 .toast {
   display: flex;

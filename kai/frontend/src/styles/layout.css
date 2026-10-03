@@ -215,6 +215,61 @@
   z-index: 25;
 }
 
+/* ───────────── Avisos (campana de la barra superior) ───────────── */
+/* El desplegable se posiciona respecto a la barra superior (sticky), no al botón: así nunca se sale por la izquierda en móvil. */
+.alerts-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--hot);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  pointer-events: none;
+}
+.alerts-dropdown {
+  position: absolute;
+  right: 16px;
+  top: calc(var(--topbar-h) - 6px);
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - var(--topbar-h) - 16px));
+  overflow-y: auto;
+  z-index: 41;
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
+}
+.alerts-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+}
+.alerts-row:hover {
+  background: var(--surface-2);
+}
+.alerts-row-main {
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+}
+@media (max-width: 960px) {
+  .alerts-dropdown {
+    right: 12px;
+  }
+}
+
 /* ───────────── Logo ───────────── */
 .logo {
   display: inline-flex;
@@ -1088,4 +1143,355 @@
 }
 .legal-body ul {
   padding-left: 20px;
+}
+
+/* ───────────── Pantallas de trabajo diario: ajustes responsive ───────────── */
+
+/* Rejilla de KPIs: 5 columnas en escritorio, 3 en tableta y 2 en móvil (una por fila desperdiciaba la pantalla). */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .kpi-grid .stat {
+    padding: 12px;
+  }
+  .kpi-grid .stat-value {
+    font-size: 22px;
+  }
+}
+/* Pares dato/valor dentro de tarjetas (actividad, valor económico, tasas): siempre 2 columnas. */
+.metric-pairs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+.metric-pairs.cols-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  .metric-pairs.cols-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 8px;
+  }
+  .metric-pairs .stat-value {
+    font-size: 21px;
+  }
+}
+
+/* Bandeja: estado vacío y filtros */
+.thread-empty {
+  display: grid;
+  place-items: center;
+  grid-column: 2 / -1;
+  padding: 24px;
+}
+.inbox-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.msg-meta {
+  flex-wrap: wrap;
+}
+.composer-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.inbox-item .badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+@media (max-width: 820px) {
+  .inbox-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -12px;
+    padding: 0 12px 2px;
+  }
+  .inbox-chips::-webkit-scrollbar {
+    display: none;
+  }
+  .inbox-chips .chip {
+    flex-shrink: 0;
+  }
+  .thread-header {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .thread-header .thread-status {
+    display: none;
+  }
+  .thread-messages {
+    padding: 16px 12px;
+  }
+  .msg-row {
+    max-width: 88%;
+  }
+  .composer {
+    padding: 10px 12px;
+  }
+  .handoff-banner {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 520px) {
+  .thread-header .btn-label {
+    display: none;
+  }
+  .thread-header .btn-compact {
+    width: 36px;
+    padding: 0;
+  }
+}
+
+/* Pipeline: navegación por etapas y botón “Mover” en las tarjetas */
+.board-nav {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+}
+.board-nav::-webkit-scrollbar {
+  display: none;
+}
+.board-nav .chip {
+  flex-shrink: 0;
+}
+.board-col {
+  scroll-margin-left: 16px;
+}
+.lead-card .lead-card-move {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.lead-card:hover .lead-card-move,
+.lead-card:focus-within .lead-card-move {
+  opacity: 1;
+}
+@media (hover: none) {
+  .lead-card .lead-card-move {
+    opacity: 1;
+  }
+}
+.stage-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.stage-options .option {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+@media (max-width: 720px) {
+  .board-col {
+    flex-basis: min(280px, 82vw);
+  }
+}
+
+/* Leads: tabla en escritorio, tarjetas en móvil */
+.leads-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.leads-filters .select {
+  width: auto;
+  min-width: 170px;
+}
+.leads-cards {
+  display: none;
+}
+.lead-row-card {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lead-row-card:last-child {
+  border-bottom: 0;
+}
+.lead-row-card:hover {
+  background: var(--surface-2);
+}
+@media (max-width: 720px) {
+  .leads-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+  }
+  .leads-filters .input-group {
+    grid-column: 1 / -1;
+  }
+  .leads-filters .select {
+    min-width: 0;
+    width: 100%;
+  }
+  .leads-table {
+    display: none;
+  }
+  .leads-cards {
+    display: block;
+  }
+}
+
+/* Agenda */
+.week-event {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.week-wrap {
+  overflow-x: auto;
+}
+.agenda-list {
+  display: none;
+}
+.agenda-day {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.agenda-day:last-child {
+  border-bottom: 0;
+}
+.agenda-day.today .agenda-day-title {
+  color: var(--accent-text);
+}
+.agenda-day-title {
+  font-weight: 650;
+  font-size: 13px;
+  text-transform: capitalize;
+  margin-bottom: 6px;
+}
+.agenda-appt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  margin-top: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info);
+  background: var(--surface-2);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agenda-appt.kai {
+  border-left-color: var(--accent);
+}
+.agenda-appt.no_show {
+  border-left-color: var(--danger);
+}
+.agenda-appt.completed {
+  border-left-color: var(--success);
+}
+.avail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+.avail-row .avail-day {
+  width: 96px;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+.avail-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.avail-range .input {
+  width: 118px;
+}
+@media (max-width: 720px) {
+  .week-wrap {
+    display: none;
+  }
+  .agenda-list {
+    display: block;
+  }
+  .avail-row {
+    flex-wrap: wrap;
+  }
+  .avail-row .avail-day {
+    width: 100%;
+    padding-top: 0;
+  }
+  .avail-range .input {
+    width: 112px;
+  }
+}
+
+/* Simulador: tres columnas en escritorio; en pantallas pequeñas, chat primero y paneles debajo */
+.sim-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+.sim-chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 290px);
+  min-height: 420px;
+}
+@media (max-width: 1280px) {
+  .sim-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .sim-layout .sim-side {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+}
+@media (max-width: 820px) {
+  .sim-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sim-layout .sim-chat-card {
+    order: -1;
+  }
+  .sim-chat {
+    height: calc(100vh - 140px);
+    min-height: 380px;
+  }
 }

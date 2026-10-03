@@ -1,6 +1,6 @@
 /* Registros técnicos de la plataforma: errores, auditoría, estado de integraciones y cola de trabajos. */
 import { Fragment, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ChevronDown, ChevronUp, CircleCheck, History, ListTodo, Plug, RefreshCw, RotateCcw, ServerCrash } from 'lucide-react';
 import { api, errorText } from '../../lib/api';
@@ -10,6 +10,7 @@ import {
   ACTOR_LABELS,
   ADMIN_KEYS,
   AUDIT_ACTION_GROUPS,
+  BusinessFilterChip,
   BusinessLink,
   CALENDAR_PROVIDER_LABELS,
   CONNECTION_CHANNEL_LABELS,
@@ -20,8 +21,10 @@ import {
   JOB_STATUS_LABELS,
   QueryError,
   auditActionLabel,
+  entityLabel,
   jobTypeLabel,
   num,
+  useBusinessNames,
   type ActorType,
   type AdminAuditRow,
   type AdminErrorRow,
@@ -33,6 +36,7 @@ import {
 import '../../styles/admin.css';
 
 type Tab = 'errores' | 'auditoria' | 'integraciones' | 'trabajos';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TABS: { value: Tab; label: string }[] = [
   { value: 'errores', label: 'Errores' },
   { value: 'auditoria', label: 'Auditoría' },
@@ -58,11 +62,19 @@ function RefreshButton({ onClick, loading }: { onClick: () => void; loading: boo
 
 // ───────────── Errores ─────────────
 
-function ErrorsTab() {
+/** Filtro opcional por negocio (parámetro «negocio» de la URL, p. ej. desde la ficha del negocio). */
+interface BusinessScope {
+  businessId: string;
+  businessName: string | undefined;
+  clear: () => void;
+}
+
+function ErrorsTab({ scope }: { scope: BusinessScope | null }) {
   const [source, setSource] = useState('');
+  const businessId = scope?.businessId ?? '';
   const q = useQuery({
-    queryKey: [...ADMIN_KEYS.errors, source],
-    queryFn: () => api.get<{ errors: AdminErrorRow[] }>('/admin/errors', { source }),
+    queryKey: [...ADMIN_KEYS.errors, source, businessId],
+    queryFn: () => api.get<{ errors: AdminErrorRow[] }>('/admin/errors', { source, businessId }),
     placeholderData: (prev) => prev,
     refetchInterval: 60_000,
   });
@@ -71,6 +83,7 @@ function ErrorsTab() {
     <Card flush>
       <div className="adm-toolbar">
         <Select aria-label="Filtrar por origen del error" value={source} onChange={(e) => setSource(e.target.value)} options={ERROR_SOURCE_GROUPS} />
+        {scope && <BusinessFilterChip id={scope.businessId} name={scope.businessName} onClear={scope.clear} />}
         <RefreshButton onClick={() => void q.refetch()} loading={q.isFetching && !q.isPending} />
         {!q.isPending && !q.isError && <span className="subtle small adm-toolbar-count">{rows.length >= 200 ? 'Últimos 200 registros' : `${num(rows.length)} registro${rows.length === 1 ? '' : 's'}`}</span>}
       </div>
@@ -79,9 +92,13 @@ function ErrorsTab() {
       ) : q.isError ? (
         <QueryError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={CircleCheck} title="Sin errores" description={source ? 'No hay errores de este origen.' : 'No hay errores registrados. Todo funciona con normalidad.'} />
+        <EmptyState
+          icon={CircleCheck}
+          title="Sin errores"
+          description={source || scope ? 'No hay errores que coincidan con los filtros.' : 'No hay errores registrados. Todo funciona con normalidad.'}
+        />
       ) : (
-        <ErrorTable rows={rows} showBusiness />
+        <ErrorTable rows={rows} showBusiness={!scope} />
       )}
       <p className="subtle xs adm-note">
         Aquí se guardan los fallos técnicos de la plataforma, del más reciente al más antiguo. «Error» indica que una operación no se pudo completar; «Aviso», una incidencia menor. Pulsa «Detalle» para ver la información técnica.
@@ -95,13 +112,14 @@ function ErrorsTab() {
 const ACTOR_OPTIONS = [{ value: '', label: 'Cualquier autor' }, ...(Object.keys(ACTOR_LABELS) as ActorType[]).map((k) => ({ value: k, label: ACTOR_LABELS[k] }))];
 const ACTOR_TONE: Record<ActorType, string> = { user: 'badge-info', kai: 'badge-accent', system: '', integration: 'badge-warning', admin: 'badge-violet' };
 
-function AuditTab() {
+function AuditTab({ scope }: { scope: BusinessScope | null }) {
   const [action, setAction] = useState('');
   const [actorType, setActorType] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const businessId = scope?.businessId ?? '';
   const q = useQuery({
-    queryKey: [...ADMIN_KEYS.audit, action, actorType],
-    queryFn: () => api.get<{ logs: AdminAuditRow[] }>('/admin/audit', { action, actorType }),
+    queryKey: [...ADMIN_KEYS.audit, action, actorType, businessId],
+    queryFn: () => api.get<{ logs: AdminAuditRow[] }>('/admin/audit', { action, actorType, businessId }),
     placeholderData: (prev) => prev,
   });
   const rows = q.data?.logs ?? [];
@@ -110,6 +128,7 @@ function AuditTab() {
       <div className="adm-toolbar">
         <Select aria-label="Filtrar por tipo de acción" value={action} onChange={(e) => setAction(e.target.value)} options={AUDIT_ACTION_GROUPS} />
         <Select aria-label="Filtrar por autor" value={actorType} onChange={(e) => setActorType(e.target.value)} options={ACTOR_OPTIONS} />
+        {scope && <BusinessFilterChip id={scope.businessId} name={scope.businessName} onClear={scope.clear} />}
         <RefreshButton onClick={() => void q.refetch()} loading={q.isFetching && !q.isPending} />
         {!q.isPending && !q.isError && <span className="subtle small adm-toolbar-count">{rows.length >= 300 ? 'Últimos 300 registros' : `${num(rows.length)} registro${rows.length === 1 ? '' : 's'}`}</span>}
       </div>
@@ -172,8 +191,14 @@ function AuditTab() {
                                 <>
                                   <dt>Elemento afectado</dt>
                                   <dd>
-                                    {log.entityType}
-                                    {log.entityId && <span className="code-inline" style={{ marginLeft: 6 }}>{log.entityId}</span>}
+                                    {entityLabel(log.entityType)}
+                                    {log.entityType === 'business' && log.entityId ? (
+                                      <Link to={`/admin/negocios/${log.entityId}`} className="small" style={{ marginLeft: 8 }}>
+                                        Ver negocio
+                                      </Link>
+                                    ) : (
+                                      log.entityId && <span className="code-inline adm-entity-id">{log.entityId}</span>
+                                    )}
                                   </dd>
                                 </>
                               )}
@@ -329,6 +354,7 @@ const STATUS_ORDER: JobStatus[] = ['pending', 'running', 'done', 'failed', 'canc
 function JobsTab() {
   const qc = useQueryClient();
   const toast = useToast();
+  const businessNames = useBusinessNames();
   const [confirm, setConfirm] = useState<AdminJob | null>(null);
   const q = useQuery({ queryKey: ADMIN_KEYS.jobs, queryFn: () => api.get<AdminJobsData>('/admin/jobs'), refetchInterval: 30_000 });
   const retry = useMutation({
@@ -434,7 +460,7 @@ function JobsTab() {
                       <div className="adm-cell-main">{jobTypeLabel(j.type)}</div>
                       <div className="subtle xs">{j.type}</div>
                     </td>
-                    <td>{j.businessId ? <BusinessLink id={j.businessId} name="Ver negocio" /> : <span className="subtle">General</span>}</td>
+                    <td>{j.businessId ? <BusinessLink id={j.businessId} name={businessNames.get(j.businessId) ?? 'Ver negocio'} /> : <span className="subtle">Toda la plataforma</span>}</td>
                     <td className="num">
                       {num(j.attempts)} / {num(j.maxAttempts)}
                     </td>
@@ -481,16 +507,29 @@ function JobsTab() {
 
 export default function AdminLogs() {
   const [params, setParams] = useSearchParams();
+  const businessNames = useBusinessNames();
   const raw = params.get('tab');
   const tab: Tab = TABS.some((t) => t.value === raw) ? (raw as Tab) : 'errores';
+  const scopedId = params.get('negocio');
+  const scope: BusinessScope | null =
+    scopedId && UUID_RE.test(scopedId)
+      ? {
+          businessId: scopedId,
+          businessName: businessNames.get(scopedId),
+          clear: () => setParams({ tab }, { replace: true }),
+        }
+      : null;
+
+  // Cambiar de pestaña conserva el filtro por negocio (solo lo usan Errores y Auditoría).
+  const changeTab = (t: Tab) => setParams(scope ? { tab: t, negocio: scope.businessId } : { tab: t }, { replace: true });
 
   return (
     <div className="page">
       <PageHeader title="Registros" description="Lo que pasa por dentro de KAI: errores técnicos, historial de acciones, estado de las conexiones y tareas programadas." />
-      <Tabs tabs={TABS} value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} />
+      <Tabs tabs={TABS} value={tab} onChange={changeTab} />
       <div className="mt-16">
-        {tab === 'errores' && <ErrorsTab />}
-        {tab === 'auditoria' && <AuditTab />}
+        {tab === 'errores' && <ErrorsTab scope={scope} />}
+        {tab === 'auditoria' && <AuditTab scope={scope} />}
         {tab === 'integraciones' && <IntegrationsTab />}
         {tab === 'trabajos' && <JobsTab />}
       </div>

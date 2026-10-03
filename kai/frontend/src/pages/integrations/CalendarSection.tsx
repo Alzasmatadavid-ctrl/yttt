@@ -132,12 +132,13 @@ function GoogleCard({ data, google, calendly, canManage }: { data: IntegrationsR
           )}
           <div className="row wrap">
             <Button variant="primary" icon={Plug} loading={connect.isPending} disabled={!canManage || !available} onClick={start}>
-              Conectar con Google
+              Conectar Google Calendar
             </Button>
           </div>
           {available && (
             <p className="xs subtle">
-              Te llevaremos a Google para que elijas tu cuenta y aceptes los permisos. Después volverás aquí automáticamente.
+              Te llevaremos a Google para que elijas tu cuenta y aceptes los permisos. Después volverás aquí automáticamente. Si Google te dice que la app no
+              está verificada o que no tienes acceso, pide a quien administra KAI que añada tu email como usuario de prueba.
             </p>
           )}
         </div>
@@ -272,7 +273,13 @@ function CalendlyCard({
               </dd>
               <dt>Tipo de evento</dt>
               <dd>
-                {selectedType ? `${selectedType.name} (${selectedType.duration} min)` : calendly.calendarId ? 'Elegido' : <span className="subtle">Sin elegir</span>}
+                {selectedType ? (
+                  `${selectedType.name} (${selectedType.duration} min)`
+                ) : calendly.calendarId ? (
+                  calendly.schedulingUrl ? 'Elegido (es el del enlace de reserva)' : 'Elegido'
+                ) : (
+                  <span className="subtle">Sin elegir</span>
+                )}
               </dd>
               {calendly.schedulingUrl && (
                 <>
@@ -287,9 +294,10 @@ function CalendlyCard({
           <CalendarErrorBox row={calendly} />
           {webhookError && (
             <Callout tone="warning">
-              <strong>Calendly no ha permitido crear el aviso automático de reservas (webhook).</strong> Normalmente es porque los webhooks solo están
-              disponibles en los planes de pago de Calendly. Sin él, KAI puede enviar tu enlace de reserva, pero no se enterará solo cuando alguien reserve o
-              cancele: tendrás que apuntar esas llamadas tú. <span className="xs subtle intg-break">Detalle: {webhookError}</span>
+              <strong>Calendly no ha permitido crear el aviso automático de reservas (webhook).</strong> Suele pasar por dos motivos: tu plan de Calendly
+              no incluye webhooks (hace falta el plan Standard o superior) o KAI todavía no está publicado en una dirección pública de internet. KAI seguirá
+              enviando tu enlace de reserva, pero no se enterará solo cuando alguien reserve o cancele: tendrás que apuntar esas llamadas tú en la Agenda.
+              Cuando lo soluciones, pulsa «Volver a conectar». <span className="xs subtle intg-break">Detalle: {webhookError}</span>
             </Callout>
           )}
           {eventTypes && eventTypes.length === 0 && (
@@ -345,6 +353,7 @@ function CalendlyCard({
           {calendly && (
             <p className="small muted">
               Por seguridad, KAI no muestra tu token guardado. Para ver tus tipos de evento o cambiar de cuenta, pega de nuevo tu token (el mismo u otro nuevo).
+              Ten en cuenta que la conexión actual se sustituye: si el token no es válido, Calendly quedará desconectado hasta que pegues uno correcto.
             </p>
           )}
           <Field label="Token de acceso personal de Calendly" htmlFor={tokenId} error={touched ? tokenError : null} hint="Lo generas en Calendly en un minuto: abre la guía de abajo.">
@@ -397,8 +406,9 @@ function CalendlyCard({
             </li>
             <li>Pégalo aquí y pulsa «Conectar Calendly». Si tienes varios tipos de evento, elige después cuál debe ofrecer KAI.</li>
             <li>
-              Para que KAI se entere solo de las reservas y cancelaciones, Calendly debe permitir webhooks (avisos automáticos), que solo están en sus planes
-              de pago.
+              Para que KAI se entere solo de las reservas y cancelaciones, KAI crea un webhook (aviso automático) en tu Calendly. Para eso tu plan de Calendly
+              tiene que incluir webhooks (Standard o superior) y KAI debe estar publicado en una dirección pública. Si no se puede crear, aquí te lo
+              indicaremos.
             </li>
           </Steps>
         </Guide>

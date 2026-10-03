@@ -149,7 +149,8 @@ function FormGenerator({ endpoint, publicKey }: { endpoint: string; publicKey: s
   const html = useMemo(() => buildFormHtml(endpoint, o, uid), [endpoint, o, uid]);
   const preview = useMemo(
     () =>
-      `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:20px;background:#fff;color:#111;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}</style></head><body>${html}</body></html>`,
+      // Sin el <script>: la vista previa solo enseña el aspecto (el iframe no permite ejecutar código ni enviar nada).
+      `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:20px;background:#fff;color:#111;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}</style></head><body>${html.replace(/<script>[\s\S]*<\/script>/, '')}</body></html>`,
     [html],
   );
   const privacyInvalid = o.privacyUrl.trim() !== '' && !isHttpUrl(o.privacyUrl);
@@ -288,7 +289,7 @@ function SecretBox({ canManage }: { canManage: boolean }) {
       setSecret(r.secret);
       setVisible(true);
       setConfirmRotate(false);
-      toast('Clave cambiada. Recuerda ponerla en Zapier o Make.');
+      toast('Secreto regenerado. Recuerda ponerlo en Zapier, Make o la herramienta que lo use.');
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
@@ -296,12 +297,12 @@ function SecretBox({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="field">
-      <label htmlFor={inputId}>Clave secreta (cabecera X-KAI-Key)</label>
+      <label htmlFor={inputId}>Secreto del webhook (cabecera X-KAI-Key)</label>
       <div className="intg-copy">
         <Input id={inputId} readOnly className="intg-mono" value={shown ? secret : 'kai_sk_••••••••••••••••••••'} onFocus={(e) => shown && e.currentTarget.select()} />
         {shown ? (
           <>
-            <CopyButton text={secret} what="Clave secreta copiada" />
+            <CopyButton text={secret} what="Secreto copiado" />
             <Button size="sm" variant="ghost" icon={EyeOff} onClick={() => setVisible(false)}>
               Ocultar
             </Button>
@@ -312,19 +313,22 @@ function SecretBox({ canManage }: { canManage: boolean }) {
           </Button>
         )}
       </div>
-      <span className="hint">Trátala como una contraseña: no la pongas en el código de tu web (para eso está el formulario de arriba). Por seguridad, cada vez que alguien la ve queda registrado.</span>
+      <span className="hint">
+        Trátalo como una contraseña: no lo pongas en el código de tu web (para eso está el formulario de arriba). Por seguridad, cada vez que alguien lo ve
+        queda registrado.
+      </span>
       {canManage && (
         <div className="row wrap mt-8">
           <Button size="sm" variant="ghost" icon={RotateCw} onClick={() => setConfirmRotate(true)}>
-            Cambiar la clave
+            Regenerar secreto
           </Button>
         </div>
       )}
       <ConfirmDialog
         open={confirmRotate}
-        title="¿Cambiar la clave secreta?"
-        message="Se creará una clave nueva y la actual dejará de funcionar al momento. Las herramientas que la usen (Zapier, Make…) no podrán enviar leads hasta que pongas la nueva. Hazlo si crees que alguien más la conoce."
-        confirmLabel="Cambiar la clave"
+        title="¿Regenerar el secreto?"
+        message="Se creará un secreto nuevo y el actual dejará de funcionar al momento. Las herramientas que lo usen (Zapier, Make…) no podrán enviar leads hasta que pongas el nuevo. Hazlo si crees que alguien más lo conoce."
+        confirmLabel="Regenerar secreto"
         danger
         loading={rotate.isPending}
         onConfirm={() => rotate.mutate()}
@@ -347,7 +351,13 @@ export function WebSection({ data, canManage }: { data: IntegrationsResponse; ca
           protección contra el spam. Tienes dos opciones: usar el formulario que generamos aquí abajo o enviar los datos de tu propio formulario a esta
           dirección.
         </p>
-        <div className="mt-16">
+        <div className="grid-2 intg-grid-top mt-16">
+          <CopyField
+            label="Tu clave pública"
+            value={endpoints.publicKey}
+            what="Clave pública copiada"
+            hint="Identifica tu negocio en las direcciones de esta página. No es secreta: puede ir en el código de tu web."
+          />
           <CopyField
             label="Dirección del formulario público"
             value={endpoints.publicFormUrl}
@@ -377,15 +387,16 @@ export function WebSection({ data, canManage }: { data: IntegrationsResponse; ca
         <IntegrationHead logo={<Webhook />} title={<span id="intg-hook">Webhook para Zapier o Make</span>} subtitle="Para conectar otras herramientas" status={<span className="badge badge-dot badge-success">Siempre disponible</span>} />
         <p className="intg-desc">
           Zapier y Make son herramientas que conectan aplicaciones entre sí sin programar. Úsalas si tus contactos llegan por otra vía (Typeform, Google
-          Forms, Tally, tu CRM…) y quieres que entren solos en KAI. Este acceso sí está protegido con una clave secreta.
+          Forms, Tally, tu CRM…) y quieres que entren solos en KAI. Este acceso sí está protegido con un secreto (empieza por{' '}
+          <code className="code-inline">kai_sk_</code>).
         </p>
         <div className="grid-2 intg-grid-top mt-16">
           <div className="col gap-12">
             <CopyField label="Dirección del webhook (URL)" value={endpoints.leadsWebhookUrl} what="Dirección del webhook copiada" hint="Método POST · Cabecera Content-Type: application/json" />
             <SecretBox canManage={canManage} />
             <Callout tone="info" icon={KeyRound}>
-              Cada petición debe llevar la cabecera <code className="code-inline">X-KAI-Key</code> con tu clave secreta. Si no la lleva o no coincide, KAI
-              la rechaza.
+              Cada petición debe llevar la cabecera <code className="code-inline">X-KAI-Key</code> con tu secreto. Si no la lleva o no coincide, KAI la
+              rechaza.
             </Callout>
           </div>
           <div className="col">
@@ -443,7 +454,7 @@ export function WebSection({ data, canManage }: { data: IntegrationsResponse; ca
                 <code className="code-inline">phone</code>, <code className="code-inline">email</code>…) y asígnales las respuestas de tu formulario.
               </li>
               <li>
-                En <UiLabel>Headers</UiLabel> añade <code className="code-inline">X-KAI-Key</code> con tu clave secreta como valor.
+                En <UiLabel>Headers</UiLabel> añade <code className="code-inline">X-KAI-Key</code> con tu secreto como valor.
               </li>
               <li>Prueba el paso: el lead aparecerá en KAI. Después, activa el Zap.</li>
             </Steps>
@@ -455,7 +466,7 @@ export function WebSection({ data, canManage }: { data: IntegrationsResponse; ca
                 <UiLabel>URL</UiLabel>: la dirección del webhook. <UiLabel>Method</UiLabel>: <UiLabel>POST</UiLabel>.
               </li>
               <li>
-                En <UiLabel>Headers</UiLabel> añade uno con nombre <code className="code-inline">X-KAI-Key</code> y tu clave secreta como valor.
+                En <UiLabel>Headers</UiLabel> añade uno con nombre <code className="code-inline">X-KAI-Key</code> y tu secreto como valor.
               </li>
               <li>
                 <UiLabel>Body type</UiLabel>: <UiLabel>Raw</UiLabel>; <UiLabel>Content type</UiLabel>: <UiLabel>JSON (application/json)</UiLabel>. En{' '}
@@ -465,8 +476,8 @@ export function WebSection({ data, canManage }: { data: IntegrationsResponse; ca
             </Steps>
           </Guide>
           <p className="xs subtle">
-            Opción avanzada: en lugar de <code className="code-inline">X-KAI-Key</code> puedes firmar el cuerpo con HMAC-SHA256 usando la clave secreta y
-            enviarlo en la cabecera <code className="code-inline">X-KAI-Signature: sha256=&lt;firma&gt;</code>. Más información sobre las herramientas en{' '}
+            Opción avanzada: en lugar de <code className="code-inline">X-KAI-Key</code> puedes firmar el cuerpo con HMAC-SHA256 usando el secreto y
+            enviar la firma en hexadecimal en la cabecera <code className="code-inline">X-KAI-Signature: sha256=&lt;firma&gt;</code>. Más información sobre las herramientas en{' '}
             <ExtLink href="https://zapier.com">zapier.com</ExtLink> y <ExtLink href="https://www.make.com">make.com</ExtLink>.
           </p>
         </div>

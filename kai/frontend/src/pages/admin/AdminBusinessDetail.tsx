@@ -11,6 +11,7 @@ import {
   CreditCard,
   Eye,
   Gauge,
+  History,
   MessagesSquare,
   Plug,
   Power,
@@ -597,15 +598,21 @@ export default function AdminBusinessDetail() {
           </span>
         }
         actions={
-          suspended ? (
-            <Button variant="primary" icon={Power} onClick={() => setConfirmStatus(true)}>
-              Reactivar negocio
-            </Button>
-          ) : (
-            <Button variant="danger" icon={Ban} onClick={() => setConfirmStatus(true)}>
-              Suspender negocio
-            </Button>
-          )
+          <>
+            <Link to={`/admin/registros?tab=auditoria&negocio=${business.id}`} className="btn">
+              <History aria-hidden />
+              Ver actividad
+            </Link>
+            {suspended ? (
+              <Button variant="primary" icon={Power} onClick={() => setConfirmStatus(true)}>
+                Reactivar negocio
+              </Button>
+            ) : (
+              <Button variant="danger" icon={Ban} onClick={() => setConfirmStatus(true)}>
+                Suspender negocio
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -630,7 +637,18 @@ export default function AdminBusinessDetail() {
 
         <ConversationsCard conversations={conversations} onOpen={setOpenConv} />
 
-        <Card title="Errores recientes" icon={ServerCrash} flush>
+        <Card
+          title="Errores recientes"
+          icon={ServerCrash}
+          flush
+          actions={
+            errors.length > 0 ? (
+              <Link to={`/admin/registros?tab=errores&negocio=${business.id}`} className="small">
+                Ver todos en Registros
+              </Link>
+            ) : undefined
+          }
+        >
           {errors.length === 0 ? (
             <EmptyState icon={CircleCheck} title="Sin errores" description="No hay errores registrados para este negocio." />
           ) : (

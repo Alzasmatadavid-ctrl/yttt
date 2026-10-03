@@ -34,6 +34,13 @@ const REQUIRED_PERMISSION: Record<PendingActionType, Permission> = {
 
 const ACTION_TTL_MS = 24 * 3600_000;
 
+/** ¿Puede este usuario proponer (y luego confirmar) este tipo de acción con su rol? */
+export function canPropose(ctx: TenantContext, type: PendingActionType): boolean {
+  return ctx.permissions.includes(REQUIRED_PERMISSION[type]);
+}
+
+export const NOT_ALLOWED_MESSAGE = 'Tu rol no tiene permiso para esta acción. Pídesela a la persona titular de la cuenta.';
+
 export async function createPendingAction(ctx: TenantContext, type: PendingActionType, payload: Record<string, unknown>) {
   if (!ctx.permissions.includes(REQUIRED_PERMISSION[type])) throw forbidden('No tienes permiso para proponer esta acción.');
   const summary = await summarize(ctx.businessId, type, payload);

@@ -138,7 +138,7 @@ export default function ScoringTab({ settings, canEdit, onDirtyChange }: TabProp
               const c = BAND_COLORS[b.key];
               return (
                 <div key={b.key} className="setter-bandbar-seg" style={{ flexGrow: width, flexBasis: 0, background: c.bg, color: c.fg }} title={`${b.label}: ${b.min}–${b.max}`}>
-                  {width >= 12 && b.label}
+                  {width >= 12 && <strong>{b.label}</strong>}
                   {width >= 8 && (
                     <span>
                       {b.min}–{b.max}
@@ -163,27 +163,57 @@ export default function ScoringTab({ settings, canEdit, onDirtyChange }: TabProp
           </div>
         </div>
 
-        <div className="mt-16">
+        <div className="setter-band-table mt-16" role="group" aria-label="Límites de cada banda">
+          <div className="setter-band-row setter-band-head" aria-hidden>
+            <span>Temperatura</span>
+            <span>Desde</span>
+            <span>Hasta</span>
+            <span>Amplitud</span>
+          </div>
           {draft.bands.map((b, i) => {
             const size = b.max - b.min + 1;
+            const first = i === 0;
+            const last = i === draft.bands.length - 1;
             return (
               <div key={b.key} className="setter-band-row">
-                <div className="setter-band-name col gap-4" style={{ alignItems: 'flex-start' }}>
+                <div className="setter-band-name">
                   <TemperatureBadge temperature={b.key} />
                   <span className="subtle xs">{BAND_MEANING[b.key]}</span>
                 </div>
-                <Field label="Desde" htmlFor={`band-${b.key}-min`} hint={i === 0 ? 'Siempre empieza en 0.' : undefined}>
-                  <NumInput id={`band-${b.key}-min`} value={b.min} min={0} max={100} width={90} disabled={i === 0} onChange={(v) => setLimit(i, 'min', v)} />
-                </Field>
-                <Field label="Hasta" htmlFor={`band-${b.key}-max`} hint={i === draft.bands.length - 1 ? 'Siempre termina en 100.' : undefined}>
-                  <NumInput id={`band-${b.key}-max`} value={b.max} min={0} max={100} width={90} disabled={i === draft.bands.length - 1} onChange={(v) => setLimit(i, 'max', v)} />
-                </Field>
+                <div className="setter-band-cell">
+                  <span className="setter-band-cell-label" aria-hidden>
+                    Desde
+                  </span>
+                  <NumInput
+                    value={b.min}
+                    min={0}
+                    max={100}
+                    width={84}
+                    disabled={first}
+                    ariaLabel={first ? `«${b.label}» empieza siempre en 0` : `«${b.label}»: desde`}
+                    onChange={(v) => setLimit(i, 'min', v)}
+                  />
+                </div>
+                <div className="setter-band-cell">
+                  <span className="setter-band-cell-label" aria-hidden>
+                    Hasta
+                  </span>
+                  <NumInput
+                    value={b.max}
+                    min={0}
+                    max={100}
+                    width={84}
+                    disabled={last}
+                    ariaLabel={last ? `«${b.label}» termina siempre en 100` : `«${b.label}»: hasta`}
+                    onChange={(v) => setLimit(i, 'max', v)}
+                  />
+                </div>
                 <div className="setter-band-size">{Number.isFinite(size) && size > 0 ? `${size} ${size === 1 ? 'punto' : 'puntos'}` : '—'}</div>
               </div>
             );
           })}
         </div>
-        <p className="subtle xs mt-12">Al cambiar el límite de una banda, ajustamos la siguiente para que no queden huecos. Al guardar, la temperatura de tus leads se actualiza con las nuevas bandas.</p>
+        <p className="subtle xs mt-12">La primera banda siempre empieza en 0 y la última termina en 100. Al cambiar el límite de una banda, ajustamos la de al lado para que no queden huecos. Al guardar, la temperatura de tus leads se actualiza con las nuevas bandas.</p>
         {bandsErr && (
           <div className="mt-12">
             <Callout tone="danger">{bandsErr}</Callout>

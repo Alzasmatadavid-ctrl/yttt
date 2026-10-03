@@ -136,11 +136,31 @@ export class LlmSetterAgent implements SetterAgent {
   }
 }
 
+const CLOSING_QUOTE: Record<string, string> = { '"': '"', '“': '”', '«': '»' };
+
+/**
+ * ¿El texto entero va entre un mismo par de comillas? Un mensaje que empieza y termina con dos citas
+ * distintas (“"Poco a poco" es mi lema… "lo conseguí"”) no está envuelto: no se debe recortar.
+ */
+function isWrappedInQuotes(t: string): boolean {
+  const close = CLOSING_QUOTE[t.charAt(0)];
+  if (!close || t.length < 2 || !/["”»]$/.test(t)) return false;
+  const open = t.charAt(0);
+  const inner = t.slice(1, -1);
+  if (open === close) return !inner.includes(open);
+  let depth = 0;
+  for (const ch of inner) {
+    if (ch === open) depth++;
+    else if (ch === close && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
 /** Limpia artefactos típicos (comillas envolventes, prefijos tipo “KAI:”). */
 export function cleanReply(text: string): string {
   let t = text.trim();
   t = t.replace(/^(kai|asistente|respuesta|mensaje)\s*:\s*/i, '');
-  if (/^["“«].*["”»]$/s.test(t)) t = t.slice(1, -1).trim();
+  if (isWrappedInQuotes(t)) t = t.slice(1, -1).trim();
   return t;
 }
 
@@ -165,7 +185,7 @@ function cap(s: string) {
 
 /** “pasado mañana a las 10:00 o a las 17:00” en vez de repetir el día. */
 export function joinLabels(labels: string[]): string {
-  if (labels.length === 1) return labels[0];
+  if (labels.length <= 1) return labels[0] ?? '';
   const parts = labels.map((l) => /^(.*) a las (\d{1,2}:\d{2})$/.exec(l));
   if (parts.every(Boolean) && parts.every((p) => p![1] === parts[0]![1])) {
     const times = parts.map((p) => `a las ${p![2]}`);
@@ -187,13 +207,17 @@ export class RuleBasedSetterAgent implements SetterAgent {
     const emoji = (e: string) => (s.tone.emojiUsage === 'none' ? '' : ` ${e}`);
     const seed = hashString(`${lead.id}:${input.convCtx.history.length}:${input.feedback.length}`);
     const pendingText = input.convCtx.pendingInbound.map((m) => m.content.toLowerCase()).join(' ');
-    const eventAck = /\b(me caso|boda|casarme)\b/.test(pendingText)
-      ? `¡Enhorabuena por la boda!${emoji('🎉')}`
-      : /\b(vacaciones|viaje)\b/.test(pendingText)
-        ? '¡Qué buen plan!'
-        : /\b(hij[oa]s?|beb[eé])\b/.test(pendingText)
-          ? 'Qué bonito motivo.'
-          : null;
+    // Felicitar o reconocer un acontecimiento solo la primera vez: repetirlo en cada mensaje suena a robot.
+    const previousOut = input.convCtx.history.filter((m) => m.direction === 'outbound').map((m) => m.content.toLowerCase());
+    const alreadySaid = (phrase: string) => previousOut.some((t) => t.includes(phrase));
+    const eventAck =
+      /\b(me caso|boda|casarme)\b/.test(pendingText) && !alreadySaid('enhorabuena por la boda')
+        ? `¡Enhorabuena por la boda!${emoji('🎉')}`
+        : /\b(vacaciones|viaje)\b/.test(pendingText) && !alreadySaid('qué buen plan')
+          ? '¡Qué buen plan!'
+          : /\b(hij[oa]s?|beb[eé])\b/.test(pendingText) && !alreadySaid('qué bonito motivo')
+            ? 'Qué bonito motivo.'
+            : null;
     const ack = eventAck ?? pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed);
     const greeting = s.tone.formality <= 2 && s.tone.energy >= 4 ? '¡Ey' : '¡Hola';
     const intro =
@@ -286,12 +310,17 @@ export class RuleBasedSetterAgent implements SetterAgent {
       case 'clarify_slot': {
         const ids = state.lastOfferIds ?? [];
         const labels = ids.map((id) => (state.offeredSlots ?? []).find((x) => x.id === id)?.label).filter((l): l is string => Boolean(l));
+        if (!labels.length) {
+          text = '¿Qué día y franja te vendría mejor para la llamada?';
+          break;
+        }
+        const options = joinLabels(labels);
         const variants = [
-          `¡Genial! Entonces, ¿te va mejor ${joinLabels(labels)}?`,
-          `Perfecto. ¿Cuál de las opciones te encaja más: ${joinLabels(labels)}?`,
-          `Genial. Dime cuál prefieres, ${joinLabels(labels)}, o si te viene mejor otro día.`,
+          `¡Genial! Entonces, ¿te va mejor ${options}?`,
+          `Perfecto. ¿Cuál de las opciones te encaja más: ${options}?`,
+          `Genial. Dime cuál prefieres, ${options}, o si te viene mejor otro día.`,
         ];
-        text = labels.length ? pick(variants, seed) : '¿Qué día y franja te vendría mejor para la llamada?';
+        text = pick(variants, seed);
         break;
       }
       case 'book_slot': {

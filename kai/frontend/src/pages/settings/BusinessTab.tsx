@@ -7,7 +7,7 @@ import { api, errorText } from '../../lib/api';
 import { money } from '../../lib/format';
 import { Button, Callout, Card, EmptyState, Field, Input, PageLoading, Select, Textarea, useToast } from '../../components/ui';
 import type { SettingsResponse, Trainer } from '../../lib/types';
-import { CharCount, SaveRow, centsToInput, parseEurosToCents, useDraft, type SettingsTabProps } from './settings-shared';
+import { FieldFoot, SaveRow, centsToInput, parseEurosToCents, useDraft, type SettingsTabProps } from './settings-shared';
 
 // ───────────── Opciones ─────────────
 
@@ -163,7 +163,7 @@ function BusinessCard({ settings, canEdit, onDirtyChange }: { settings: Settings
             error={errors.adSpend}
             hint="Lo que gastas al mes en publicidad (Meta, Google…). Solo sirve para estimar tu ROI (retorno de la inversión) en Analítica. Si no haces anuncios, déjalo en 0."
           >
-            <div className="input-group">
+            <div className="input-group settings-money">
               <Input
                 id={ids.adSpend}
                 inputMode="decimal"
@@ -171,7 +171,6 @@ function BusinessCard({ settings, canEdit, onDirtyChange }: { settings: Settings
                 disabled={!canEdit}
                 aria-invalid={Boolean(errors.adSpend) || undefined}
                 placeholder="0"
-                style={{ paddingRight: 64 }}
                 onChange={(e) => set('adSpend', e.target.value)}
               />
               <span className="input-suffix">€ / mes</span>
@@ -295,7 +294,7 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
           </Field>
         </div>
 
-        <Field label="Tu cliente ideal" htmlFor={ids.idealClient} error={errors.idealClient} hint="Cuanto más concreto, mejor sabrá KAI con quién merece la pena proponer una llamada.">
+        <Field label="Tu cliente ideal" htmlFor={ids.idealClient} error={errors.idealClient}>
           <Textarea
             id={ids.idealClient}
             rows={3}
@@ -306,10 +305,10 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
             placeholder="Ej.: Mujeres de 35 a 50 años que trabajan fuera de casa y quieren perder grasa sin dietas extremas."
             onChange={(e) => set('idealClient', e.target.value)}
           />
-          <CharCount value={draft.idealClient} max={LIMITS.idealClient} />
+          <FieldFoot hint="Cuanto más concreto, mejor sabrá KAI con quién merece la pena proponer una llamada." value={draft.idealClient} max={LIMITS.idealClient} />
         </Field>
 
-        <Field label="El cambio que consiguen tus clientes" htmlFor={ids.transformation} error={errors.transformation} hint="Descríbelo sin cifras garantizadas: KAI nunca promete resultados.">
+        <Field label="El cambio que consiguen tus clientes" htmlFor={ids.transformation} error={errors.transformation}>
           <Textarea
             id={ids.transformation}
             rows={3}
@@ -320,7 +319,7 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
             placeholder="Ej.: Que pierdan grasa de forma sostenible, ganen energía y aprendan a comer sin depender de una dieta."
             onChange={(e) => set('transformation', e.target.value)}
           />
-          <CharCount value={draft.transformation} max={LIMITS.transformation} />
+          <FieldFoot hint="Descríbelo sin cifras garantizadas: KAI nunca promete resultados." value={draft.transformation} max={LIMITS.transformation} />
         </Field>
 
         <div className="grid-2">
@@ -343,7 +342,7 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
           </div>
         </div>
 
-        <Field label="¿En qué consiste tu método? (opcional)" htmlFor={ids.methodDescription} error={errors.methodDescription} hint="Explícalo como se lo contarías a un cliente en una llamada.">
+        <Field label="¿En qué consiste tu método? (opcional)" htmlFor={ids.methodDescription} error={errors.methodDescription}>
           <Textarea
             id={ids.methodDescription}
             rows={4}
@@ -354,7 +353,7 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
             placeholder="Ej.: Entrenamiento de fuerza tres días por semana, nutrición flexible y seguimiento semanal para ajustar el plan."
             onChange={(e) => set('methodDescription', e.target.value)}
           />
-          <CharCount value={draft.methodDescription} max={LIMITS.methodDescription} />
+          <FieldFoot hint="Explícalo como se lo contarías a un cliente en una llamada." value={draft.methodDescription} max={LIMITS.methodDescription} />
         </Field>
 
         <div className="settings-credentials">
@@ -362,7 +361,6 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
             label="Tu formación y experiencia (opcional)"
             htmlFor={ids.credentials}
             error={errors.credentials}
-            hint="Escribe solo datos reales y comprobables: titulaciones, certificaciones, años de experiencia…"
           >
             <Textarea
               id={ids.credentials}
@@ -374,7 +372,7 @@ function TrainerCard({ settings, canEdit, onDirtyChange }: { settings: SettingsR
               placeholder="Ej.: Graduado en Ciencias de la Actividad Física y del Deporte. Formación en nutrición deportiva."
               onChange={(e) => set('credentials', e.target.value)}
             />
-            <CharCount value={draft.credentials} max={LIMITS.credentials} />
+            <FieldFoot hint="Escribe solo datos reales y comprobables: titulaciones, certificaciones, años de experiencia…" value={draft.credentials} max={LIMITS.credentials} />
           </Field>
           <Callout tone="accent" icon={ShieldCheck}>
             <strong>KAI nunca se inventa tu trayectoria.</strong> Cuando quiera transmitir confianza, solo usará lo que escribas en este campo, tal cual. No añadirá títulos, años de experiencia, número de clientes ni resultados que no estén aquí.

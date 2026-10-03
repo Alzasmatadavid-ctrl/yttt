@@ -25,10 +25,11 @@ describe('joinLabels', () => {
     expect(joinLabels(['el lunes por la mañana', 'el martes por la tarde'])).toBe('el lunes por la mañana o el martes por la tarde');
   });
 
-  // BUG (latente): joinLabels([]) lanza TypeError. En RuleBasedSetterAgent (caso clarify_slot) las variantes se
-  // calculan ANTES de comprobar labels.length, así que el texto alternativo para “sin etiquetas” nunca llega a usarse.
-  it.fails('BUG: una lista vacía no debería lanzar una excepción', () => {
+  // Regresión: joinLabels([]) lanzaba TypeError y, en RuleBasedSetterAgent (caso clarify_slot), las variantes se
+  // calculaban ANTES de comprobar labels.length, así que el texto para “sin etiquetas” nunca llegaba a usarse.
+  it('una lista vacía no debería lanzar una excepción', () => {
     expect(() => joinLabels([])).not.toThrow();
+    expect(joinLabels([])).toBe('');
   });
 });
 
@@ -56,9 +57,15 @@ describe('cleanReply', () => {
     expect(cleanReply('Kaizen es mi filosofía')).toBe('Kaizen es mi filosofía');
   });
 
-  // BUG (menor): si el mensaje EMPIEZA y TERMINA con citas distintas, se recortan sus comillas y queda descuadrado.
-  it.fails('BUG: no recorta un mensaje que empieza y termina con dos citas distintas', () => {
+  // Regresión: si el mensaje EMPEZABA y TERMINABA con citas distintas, se recortaban sus comillas y quedaba descuadrado.
+  it('no recorta un mensaje que empieza y termina con dos citas distintas', () => {
     const text = '"Poco a poco" es mi lema, y el tuyo será "lo conseguí"';
     expect(cleanReply(text)).toBe(text);
+    expect(cleanReply('«Poco a poco» es mi lema, y el tuyo será «lo conseguí»')).toBe('«Poco a poco» es mi lema, y el tuyo será «lo conseguí»');
+  });
+
+  it('sí recorta las comillas envolventes aunque dentro haya otra cita bien cerrada', () => {
+    expect(cleanReply('«Me dijiste «sin prisa», ¿verdad?»')).toBe('Me dijiste «sin prisa», ¿verdad?');
+    expect(cleanReply('“Me dijiste “sin prisa”, ¿verdad?”')).toBe('Me dijiste “sin prisa”, ¿verdad?');
   });
 });

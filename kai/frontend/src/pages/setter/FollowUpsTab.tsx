@@ -4,9 +4,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BellRing, CalendarCheck, ClipboardCheck, Moon, Plus, Repeat, Trash2, UserX, type LucideIcon } from 'lucide-react';
 import { AUTOMATION_LABELS, type AutomationConfig, type AutomationType, type FollowUpStep } from '@shared';
 import { api, errorText } from '../../lib/api';
-import { Button, Callout, Card, Field, Input, Select, Switch, Textarea, useToast } from '../../components/ui';
+import { Button, Callout, Card, Field, Select, Switch, Textarea, useToast } from '../../components/ui';
 import type { Automation } from '../../lib/types';
-import { CharCount, NumInput, SaveBar, humanHours, humanMinutes, isTime, useDraft, useReportDirty, type TabProps } from './setter-shared';
+import { CharCount, NumInput, SaveBar, humanHours, isTime, useDraft, useReportDirty, withUnit, type TabProps } from './setter-shared';
 
 interface AutoDraft {
   enabled: boolean;
@@ -126,8 +126,8 @@ function DelayInput({ id, hours, onChange, invalid }: { id: string; hours: numbe
         value={unit}
         style={{ width: 110 }}
         options={[
-          { value: 'hours', label: 'horas' },
-          { value: 'days', label: 'días' },
+          { value: 'hours', label: shown === 1 ? 'hora' : 'horas' },
+          { value: 'days', label: shown === 1 ? 'día' : 'días' },
         ]}
         onChange={(e) => {
           const next = e.target.value as Unit;
@@ -138,6 +138,13 @@ function DelayInput({ id, hours, onChange, invalid }: { id: string; hours: numbe
       />
     </div>
   );
+}
+
+/** Horas en formato 24 h cada 15 minutos (siempre igual, sea cual sea el idioma del navegador). */
+const QUARTERS = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`);
+function timeOptions(current: string) {
+  const list = isTime(current) && !QUARTERS.includes(current) ? [...QUARTERS, current].sort() : QUARTERS;
+  return list.map((t) => ({ value: t, label: t }));
 }
 
 function QuietHoursEditor({
@@ -184,11 +191,11 @@ function QuietHoursEditor({
             <label className="small muted" htmlFor={ids.start}>
               No escribir desde las
             </label>
-            <Input id={ids.start} type="time" value={value.start} aria-invalid={Boolean(error) || undefined} onChange={(e) => onChange({ ...value, start: e.target.value })} />
+            <Select id={ids.start} value={value.start} options={timeOptions(value.start)} aria-invalid={Boolean(error) || undefined} onChange={(e) => onChange({ ...value, start: e.target.value })} />
             <label className="small muted" htmlFor={ids.end}>
               hasta las
             </label>
-            <Input id={ids.end} type="time" value={value.end} aria-invalid={Boolean(error) || undefined} onChange={(e) => onChange({ ...value, end: e.target.value })} />
+            <Select id={ids.end} value={value.end} options={timeOptions(value.end)} aria-invalid={Boolean(error) || undefined} onChange={(e) => onChange({ ...value, end: e.target.value })} />
           </div>
           {error ? <span className="error-text">{error}</span> : <span className="hint">Hora de tu negocio ({timezone}). Si la hora de inicio es posterior a la de fin, el silencio cruza la medianoche (por ejemplo, de 21:30 a 09:00).</span>}
         </div>
@@ -456,7 +463,7 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
                   max={MAX_DELAY_MINUTES}
                   width={100}
                   invalid={Boolean(errors.delay.no_show_recovery)}
-                  suffix={`minutos · ${humanMinutes(noShow.config.delayMinutes ?? 15)}`}
+                  suffix={withUnit(noShow.config.delayMinutes ?? 15, 'minutes')}
                   onChange={(delayMinutes) => patchConfig('no_show_recovery', { delayMinutes })}
                 />
               </Field>
@@ -479,7 +486,7 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
                   max={MAX_DELAY_MINUTES}
                   width={100}
                   invalid={Boolean(errors.delay.post_call)}
-                  suffix={`minutos · ${humanMinutes(post.config.delayMinutes ?? 10)}`}
+                  suffix={withUnit(post.config.delayMinutes ?? 10, 'minutes')}
                   onChange={(delayMinutes) => patchConfig('post_call', { delayMinutes })}
                 />
               </Field>

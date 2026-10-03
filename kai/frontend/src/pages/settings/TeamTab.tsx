@@ -1,7 +1,7 @@
 /* Pestaña «Equipo»: personas con acceso al negocio, invitaciones pendientes y roles. */
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, CircleAlert, Copy, Link2, Lock, Mail, MailX, Minus, RefreshCw, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Check, CircleAlert, Copy, Link2, Lock, Mail, MailX, RefreshCw, Send, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { ROLE_LABELS, type BusinessRole } from '@shared';
 import { api, errorText } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -35,23 +35,28 @@ function RoleGuide() {
               <RoleBadge role={role} />
             </div>
             <p className="muted small mt-4">{info.summary}</p>
-            <ul className="settings-checklist mt-8" aria-label={`Qué puede hacer el rol ${info.title}`}>
+            <p className="settings-role-heading mt-12">Puede</p>
+            <ul className="settings-checklist mt-4" aria-label={`Qué puede hacer el rol ${info.title}`}>
               {info.can.map((c) => (
                 <li key={c} className="settings-check-item">
                   <Check aria-hidden className="ok" />
                   <span>{c}</span>
                 </li>
               ))}
-              {info.cannot.map((c) => (
-                <li key={c} className="settings-check-item subtle">
-                  <Minus aria-hidden />
-                  <span>
-                    <span className="sr-only">No puede: </span>
-                    {c}
-                  </span>
-                </li>
-              ))}
             </ul>
+            {info.cannot.length > 0 && (
+              <>
+                <p className="settings-role-heading mt-12">No puede</p>
+                <ul className="settings-checklist mt-4" aria-label={`Qué no puede hacer el rol ${info.title}`}>
+                  {info.cannot.map((c) => (
+                    <li key={c} className="settings-check-item is-no">
+                      <X aria-hidden />
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
         );
       })}
@@ -150,7 +155,7 @@ function InviteModal({ open, onClose, members, invitations }: { open: boolean; o
           <Callout tone="warning" icon={MailX}>
             No hemos podido enviar el email a <strong>{result.invitation.email}</strong> (el envío de emails no está configurado o ha fallado). Copia este enlace y envíaselo tú por WhatsApp, email o como prefieras.
           </Callout>
-          <Field label="Enlace de invitación" htmlFor={ids.link} hint={`Válido hasta el ${longDate(result.invitation.expiresAt)}. Por seguridad, solo se muestra ahora: si lo pierdes, cancela esta invitación y crea otra.`}>
+          <Field label="Enlace de invitación" htmlFor={ids.link} hint={`Válido hasta el ${longDate(result.invitation.expiresAt)}. Por seguridad, solo se muestra ahora: si lo pierdes, anula esta invitación y crea otra.`}>
             <div className="row">
               <Input id={ids.link} readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="grow" />
               <Button icon={copied ? Check : Copy} onClick={() => void copy()}>
@@ -214,6 +219,15 @@ function InviteModal({ open, onClose, members, invitations }: { open: boolean; o
                         <span>{c}</span>
                       </span>
                     ))}
+                    {info.cannot.map((c) => (
+                      <span key={c} className="settings-check-item is-no">
+                        <X aria-hidden />
+                        <span>
+                          <span className="sr-only">No puede: </span>
+                          {c}
+                        </span>
+                      </span>
+                    ))}
                   </span>
                 </button>
               );
@@ -241,9 +255,11 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [roleChange, setRoleChange] = useState<{ member: TeamMember; role: BusinessRole } | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
+  const [cancelling, setCancelling] = useState<TeamInvitation | null>(null);
   const closeInvite = useCallback(() => setInviteOpen(false), []);
   const closeRoleChange = useCallback(() => setRoleChange(null), []);
   const closeRemoving = useCallback(() => setRemoving(null), []);
+  const closeCancelling = useCallback(() => setCancelling(null), []);
 
   const refreshTeam = () => {
     void qc.invalidateQueries({ queryKey: TEAM_QUERY_KEY });
@@ -273,7 +289,8 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
   const cancelInvite = useMutation({
     mutationFn: (inv: TeamInvitation) => api.del(`/team/invitations/${inv.id}`),
     onSuccess: (_d, inv) => {
-      toast(`Invitación a ${inv.email} cancelada`);
+      toast(`Invitación a ${inv.email} anulada`);
+      setCancelling(null);
       refreshTeam();
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -321,7 +338,7 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
         icon={Users}
         actions={
           canEdit && (
-            <Button variant="primary" size="sm" icon={UserPlus} disabled={atLimit} onClick={() => setInviteOpen(true)}>
+            <Button variant="primary" size="sm" icon={UserPlus} disabled={atLimit} title={atLimit ? 'Has llegado al máximo de usuarios de tu plan' : undefined} onClick={() => setInviteOpen(true)}>
               Invitar a alguien
             </Button>
           )
@@ -329,147 +346,130 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
       >
         <div className="settings-seats">
           {plan.data ? (
-            <Meter label="Usuarios de tu plan (incluye invitaciones pendientes)" value={seats} max={plan.data.limits.maxTeamMembers} />
+            <>
+              <Meter label="Usuarios de tu plan" value={seats} max={plan.data.limits.maxTeamMembers} />
+              <p className="subtle xs mt-4">Cuentan las personas del equipo y las invitaciones pendientes.</p>
+            </>
           ) : plan.isError ? (
             <p className="subtle xs">No hemos podido cargar el límite de usuarios de tu plan.</p>
           ) : null}
           {atLimit && canEdit && (
             <p className="small muted mt-8">
-              Has llegado al máximo de usuarios de tu plan. Para invitar a alguien más, quita a una persona o cancela una invitación, o cambia de plan (consulta la pestaña «Plan y uso»).
+              Has llegado al máximo de usuarios de tu plan. Para invitar a alguien más, quita a una persona o anula una invitación, o cambia de plan (consulta la pestaña «Plan y uso»).
             </p>
           )}
         </div>
 
-        <div className="table-wrap mt-16">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Persona</th>
-                <th>Rol</th>
-                <th>Último acceso</th>
-                <th>En el equipo desde</th>
+        <ul className="settings-people mt-16" aria-label="Personas con acceso a este negocio">
+          {sortedMembers.map((m) => {
+            const isMe = m.userId === myId;
+            const who = m.name || m.email;
+            return (
+              <li key={m.userId} className="settings-person">
+                <div className="settings-person-main">
+                  <LeadAvatar name={who} size={36} />
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row" style={{ gap: 6, minWidth: 0 }}>
+                      <strong className="ellipsis">{m.name || 'Sin nombre'}</strong>
+                      {isMe && <span className="badge">Tú</span>}
+                    </div>
+                    <div className="subtle xs ellipsis">{m.email}</div>
+                  </div>
+                </div>
+                <div className="settings-person-role">
+                  {canEdit && !isMe ? (
+                    <Select
+                      aria-label={`Rol de ${who}`}
+                      value={m.role}
+                      options={ROLE_OPTIONS}
+                      className="settings-role-select"
+                      disabled={changeRole.isPending}
+                      onChange={(e) => {
+                        const next = e.target.value as BusinessRole;
+                        if (next !== m.role) setRoleChange({ member: m, role: next });
+                      }}
+                    />
+                  ) : (
+                    <RoleBadge role={m.role} />
+                  )}
+                </div>
+                <div className="settings-person-meta xs">
+                  <span>
+                    <span className="subtle">Último acceso: </span>
+                    {isMe ? 'ahora' : m.lastLoginAt ? timeAgo(m.lastLoginAt) : 'todavía no ha entrado'}
+                  </span>
+                  <span>
+                    <span className="subtle">En el equipo desde el </span>
+                    {longDate(m.joinedAt)}
+                  </span>
+                </div>
                 {canEdit && (
-                  <th>
-                    <span className="sr-only">Acciones</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedMembers.map((m) => {
-                const isMe = m.userId === myId;
-                return (
-                  <tr key={m.userId}>
-                    <td>
-                      <div className="row" style={{ minWidth: 200 }}>
-                        <LeadAvatar name={m.name || m.email} size={32} />
-                        <div style={{ minWidth: 0 }}>
-                          <div className="row" style={{ gap: 6 }}>
-                            <strong className="ellipsis">{m.name || 'Sin nombre'}</strong>
-                            {isMe && <span className="badge">Tú</span>}
-                          </div>
-                          <div className="subtle xs ellipsis">{m.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      {canEdit && !isMe ? (
-                        <Select
-                          aria-label={`Rol de ${m.name || m.email}`}
-                          value={m.role}
-                          options={ROLE_OPTIONS}
-                          style={{ width: 200, height: 34 }}
-                          disabled={changeRole.isPending}
-                          onChange={(e) => {
-                            const next = e.target.value as BusinessRole;
-                            if (next !== m.role) setRoleChange({ member: m, role: next });
-                          }}
-                        />
-                      ) : (
-                        <RoleBadge role={m.role} />
-                      )}
-                    </td>
-                    <td className="muted">{isMe ? 'Ahora' : m.lastLoginAt ? timeAgo(m.lastLoginAt) : 'Sin datos todavía'}</td>
-                    <td className="muted">{longDate(m.joinedAt)}</td>
-                    {canEdit && (
-                      <td style={{ textAlign: 'right' }}>
-                        {isMe ? (
-                          <span className="subtle xs">—</span>
-                        ) : (
-                          <Button variant="ghost" size="sm" iconOnly icon={Trash2} title="Quitar del equipo" onClick={() => setRemoving(m)}>
-                            {`Quitar a ${m.name || m.email} del equipo`}
-                          </Button>
-                        )}
-                      </td>
+                  <div className="settings-person-actions">
+                    {isMe ? (
+                      <span className="subtle xs" title="No puedes quitarte a ti mismo ni cambiar tu propio rol">
+                        Tu cuenta
+                      </span>
+                    ) : (
+                      <Button variant="ghost" size="sm" iconOnly icon={Trash2} title="Quitar del equipo" onClick={() => setRemoving(m)}>
+                        {`Quitar a ${who} del equipo`}
+                      </Button>
                     )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
         {members.length === 1 && canEdit && <p className="muted small mt-12">De momento trabajas tú solo. Invita a quien te ayude con los leads para que pueda responder conversaciones y agendar llamadas.</p>}
       </Card>
 
       <Card title="Invitaciones pendientes" icon={Mail}>
         {invitations.length === 0 ? (
-          <p className="muted small">No hay invitaciones pendientes. Las invitaciones aceptadas o caducadas desaparecen de esta lista.</p>
+          <p className="muted small">No hay invitaciones pendientes. Cuando alguien acepta una invitación pasa a la lista de arriba; las caducadas desaparecen solas.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Rol</th>
-                  <th>Caduca</th>
+          <>
+            <ul className="settings-people" aria-label="Invitaciones pendientes">
+              {invitations.map((inv) => (
+                <li key={inv.id} className="settings-person is-invite">
+                  <div className="settings-person-main">
+                    <span className="settings-invite-icon" aria-hidden>
+                      <Link2 size={16} />
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <strong className="ellipsis" style={{ display: 'block' }}>
+                        {inv.email}
+                      </strong>
+                      <div className="subtle xs">Pendiente de aceptar</div>
+                    </div>
+                  </div>
+                  <div className="settings-person-role">
+                    <RoleBadge role={inv.role} />
+                  </div>
+                  <div className="settings-person-meta xs">
+                    <span>
+                      <span className="subtle">Caduca el </span>
+                      {longDate(inv.expiresAt)}
+                    </span>
+                    <span className="subtle">({timeAgo(inv.expiresAt)})</span>
+                  </div>
                   {canEdit && (
-                    <th>
-                      <span className="sr-only">Acciones</span>
-                    </th>
+                    <div className="settings-person-actions">
+                      <Button variant="ghost" size="sm" icon={X} onClick={() => setCancelling(inv)} aria-label={`Anular la invitación a ${inv.email}`}>
+                        Anular
+                      </Button>
+                    </div>
                   )}
-                </tr>
-              </thead>
-              <tbody>
-                {invitations.map((inv) => (
-                  <tr key={inv.id}>
-                    <td>
-                      <div className="row">
-                        <Link2 size={15} className="subtle" aria-hidden />
-                        <span className="ellipsis">{inv.email}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <RoleBadge role={inv.role} />
-                    </td>
-                    <td className="muted">
-                      {longDate(inv.expiresAt)} <span className="subtle xs">({timeAgo(inv.expiresAt)})</span>
-                    </td>
-                    {canEdit && (
-                      <td style={{ textAlign: 'right' }}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={X}
-                          loading={cancelInvite.isPending && cancelInvite.variables?.id === inv.id}
-                          onClick={() => cancelInvite.mutate(inv)}
-                          aria-label={`Cancelar la invitación a ${inv.email}`}
-                        >
-                          Cancelar
-                        </Button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {invitations.length > 0 && (
-          <p className="subtle xs mt-12">Si alguien no encuentra el email, revisa que la dirección es correcta. Si la has perdido, cancela la invitación y crea otra: obtendrás un enlace nuevo.</p>
+                </li>
+              ))}
+            </ul>
+            <p className="subtle xs mt-12">
+              El enlace de cada invitación solo se muestra al crearla. Si la persona no lo encuentra o lo has perdido, anula la invitación y crea otra: obtendrás un enlace nuevo.
+            </p>
+          </>
         )}
       </Card>
 
-      <Card title="Qué puede hacer cada rol" icon={Users}>
+      <Card title="Qué puede hacer cada rol" icon={ShieldCheck}>
         <RoleGuide />
       </Card>
 
@@ -481,8 +481,8 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
         message={
           roleChange
             ? roleChange.role === 'trainer'
-              ? `${roleChange.member.name || roleChange.member.email} pasará a ser «Entrenador»: podrá cambiar cualquier ajuste de KAI, conectar canales, eliminar leads y gestionar el equipo (incluido quitarte acceso).`
-              : `${roleChange.member.name || roleChange.member.email} pasará a ser «Miembro del equipo»: seguirá trabajando con leads, conversaciones y agenda, pero ya no podrá cambiar la configuración ni gestionar el equipo.`
+              ? `${roleChange.member.name || roleChange.member.email} pasará a ser «Entrenador»: podrá cambiar cualquier ajuste de KAI, conectar canales, gestionar el plan, eliminar leads y gestionar el equipo (incluido quitarte acceso).`
+              : `${roleChange.member.name || roleChange.member.email} pasará a ser «Miembro del equipo»: seguirá trabajando con leads, conversaciones y agenda, pero ya no podrá cambiar la configuración, las integraciones, el equipo ni el plan, ni eliminar leads.`
             : ''
         }
         confirmLabel={roleChange?.role === 'trainer' ? 'Dar acceso completo' : 'Cambiar rol'}
@@ -496,7 +496,7 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
         title="¿Quitar a esta persona del equipo?"
         message={
           removing
-            ? `${removing.name || removing.email} dejará de tener acceso a este negocio inmediatamente. Sus datos y los leads con los que ha trabajado se conservan. Podrás volver a invitarla cuando quieras.`
+            ? `${removing.name || removing.email} dejará de tener acceso a este negocio inmediatamente. Los leads y las conversaciones en los que ha trabajado se conservan. Podrás volver a invitarla cuando quieras.`
             : ''
         }
         confirmLabel="Quitar del equipo"
@@ -504,6 +504,17 @@ export default function TeamTab({ canEdit }: SettingsTabProps) {
         loading={removeMember.isPending}
         onConfirm={() => removing && removeMember.mutate(removing)}
         onClose={closeRemoving}
+      />
+
+      <ConfirmDialog
+        open={cancelling !== null}
+        title="¿Anular esta invitación?"
+        message={cancelling ? `El enlace enviado a ${cancelling.email} dejará de funcionar. Si cambias de idea, tendrás que enviarle una invitación nueva.` : ''}
+        confirmLabel="Anular invitación"
+        danger
+        loading={cancelInvite.isPending}
+        onConfirm={() => cancelling && cancelInvite.mutate(cancelling)}
+        onClose={closeCancelling}
       />
     </>
   );

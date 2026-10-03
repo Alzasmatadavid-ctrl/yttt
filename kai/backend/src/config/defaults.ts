@@ -167,7 +167,7 @@ export const DEFAULT_OBJECTIONS: ObjectionTemplate[] = [
   {
     key: 'diy',
     label: 'Lo quiero probar por mi cuenta',
-    triggers: ['por mi cuenta', 'solo', 'yo solo', 'probar primero'],
+    triggers: ['por mi cuenta', 'yo solo', 'yo sola', 'hacerlo solo', 'hacerlo sola', 'probar primero'],
     strategy:
       'Validar la autonomía. Preguntar cuánto tiempo lleva intentándolo solo y qué resultado ha tenido.',
     exampleResponse: 'Es totalmente válido. ¿Cuánto tiempo llevas intentándolo por tu cuenta y qué tal te ha ido?',

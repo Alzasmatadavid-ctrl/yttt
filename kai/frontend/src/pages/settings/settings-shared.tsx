@@ -1,5 +1,5 @@
 /* Piezas comunes de Ajustes: tipos de las respuestas de la API, borradores con “cambios sin guardar” y barra de guardado. */
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { RotateCcw, Save } from 'lucide-react';
 import type { BusinessRole, PlanLimits, UsageMetric } from '@shared';
 import { Button } from '../../components/ui';
@@ -70,11 +70,11 @@ export const ROLE_INFO: Record<BusinessRole, { title: string; summary: string; c
     summary: 'Acceso completo al negocio. Pensado para la persona titular o un socio de máxima confianza.',
     can: [
       'Todo lo que puede hacer un miembro del equipo',
-      'Configurar a KAI (tono, cualificación, servicios, seguimientos…)',
-      'Cambiar la disponibilidad de la agenda',
-      'Conectar canales y calendario',
-      'Eliminar leads',
+      'Cambiar la configuración: datos del negocio, setter, agenda y seguimientos',
+      'Conectar canales y calendario (integraciones)',
       'Invitar o quitar personas del equipo y cambiar sus roles',
+      'Gestionar el plan y añadir negocios',
+      'Eliminar leads',
     ],
     cannot: [],
   },
@@ -82,7 +82,7 @@ export const ROLE_INFO: Record<BusinessRole, { title: string; summary: string; c
     title: 'Miembro del equipo',
     summary: 'Para quien te ayuda en el día a día con los leads y las conversaciones.',
     can: ['Ver y gestionar leads', 'Responder conversaciones', 'Agendar llamadas', 'Consultar la analítica', 'Usar KAI Copilot', 'Ver la configuración (sin cambiarla)'],
-    cannot: ['Cambiar la configuración de KAI', 'Conectar canales o calendario', 'Eliminar leads', 'Gestionar el equipo'],
+    cannot: ['Cambiar la configuración', 'Conectar o desconectar integraciones', 'Gestionar el equipo', 'Gestionar el plan y la facturación', 'Eliminar leads'],
   },
 };
 
@@ -165,9 +165,19 @@ export function SaveRow({
 export function CharCount({ value, max }: { value: string; max: number }) {
   const n = value.length;
   return (
-    <span className={`xs ${n > max ? 'error-text' : 'subtle'}`} style={{ alignSelf: 'flex-end' }}>
+    <span className={`xs tnum ${n > max ? 'error-text' : 'subtle'}`} style={{ alignSelf: 'flex-end' }} aria-label={`${n} de ${max} caracteres`}>
       {n.toLocaleString('es-ES')}/{max.toLocaleString('es-ES')}
     </span>
+  );
+}
+
+/** Pie de un campo de texto largo: explicación a la izquierda y contador de caracteres a la derecha. */
+export function FieldFoot({ hint, value, max }: { hint: ReactNode; value: string; max: number }) {
+  return (
+    <div className="settings-field-foot">
+      <span className="hint">{hint}</span>
+      <CharCount value={value} max={max} />
+    </div>
   );
 }
 
