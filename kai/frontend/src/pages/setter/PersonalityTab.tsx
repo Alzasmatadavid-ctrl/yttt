@@ -142,36 +142,33 @@ function PreviewCard({
   ai,
   assistantName,
   dirty,
-  canEdit,
-  saveFirst,
+  overrides,
+  skipped,
 }: {
   ai: SettingsResponse['ai'];
   assistantName: string;
   dirty: boolean;
-  canEdit: boolean;
-  saveFirst: () => Promise<boolean>;
+  /** Cambios todavía sin guardar (solo los campos válidos). */
+  overrides: Partial<PersonalityDraft>;
+  /** Campos con errores que no se tienen en cuenta en la vista previa. */
+  skipped: number;
 }) {
   const toast = useToast();
   const inputId = useId();
   const [message, setMessage] = useState(DEFAULT_LEAD_MESSAGE);
-  const [preparing, setPreparing] = useState(false);
+  const [usedDraft, setUsedDraft] = useState(false);
   const preview = useMutation({
-    mutationFn: (leadMessage: string) => api.post<PreviewResponse>('/settings/ai/preview', { leadMessage }),
+    mutationFn: (vars: { leadMessage: string; overrides?: Partial<PersonalityDraft> }) => api.post<PreviewResponse>('/settings/ai/preview', vars),
     onError: (e) => toast(errorText(e), 'error'),
   });
-  const run = async () => {
+  const run = () => {
     const text = message.trim();
     if (!text) {
       toast('Escribe un mensaje de ejemplo como si fueras un lead.', 'error');
       return;
     }
-    if (dirty && canEdit) {
-      setPreparing(true);
-      const ok = await saveFirst();
-      setPreparing(false);
-      if (!ok) return;
-    }
-    preview.mutate(text.slice(0, 500));
+    setUsedDraft(dirty);
+    preview.mutate({ leadMessage: text.slice(0, 500), overrides: dirty ? overrides : undefined });
   };
   const result = preview.data;
   const bubbles = result?.reply
@@ -180,19 +177,18 @@ function PreviewCard({
         .map((b) => b.trim())
         .filter(Boolean)
     : [];
-  const busy = preparing || preview.isPending;
+  const busy = preview.isPending;
 
   return (
     <Card title="Vista previa" icon={Eye} className="setter-preview">
       <p className="muted small" style={{ marginBottom: 12 }}>
-        Escribe un mensaje como si fueras un lead (simulamos que se llama Carlos y te escribe por Instagram) y mira cómo respondería KAI con tu configuración. No se envía nada a nadie ni se guarda ninguna conversación.
+        Escribe un mensaje como si fueras un lead (simulamos que se llama Carlos y te escribe por Instagram) y mira cómo respondería KAI. No se envía nada a nadie ni se guarda ninguna conversación.
       </p>
       {dirty && (
         <div style={{ marginBottom: 12 }}>
-          <Callout tone="warning">
-            {canEdit
-              ? 'La vista previa usa la configuración guardada. Al generar el ejemplo guardaremos antes tus cambios.'
-              : 'La vista previa usa la configuración guardada, no los cambios que tienes en pantalla.'}
+          <Callout tone="info">
+            La vista previa ya tiene en cuenta los cambios que aún no has guardado, para que puedas probarlos antes. Recuerda pulsar «Guardar personalidad» para que KAI los use con tus leads.
+            {skipped > 0 && ` Hay ${skipped === 1 ? 'un campo con errores que no se ha' : `${skipped} campos con errores que no se han`} tenido en cuenta.`}
           </Callout>
         </div>
       )}
@@ -206,19 +202,19 @@ function PreviewCard({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                void run();
+                run();
               }
             }}
           />
         </Field>
-        <Button variant="primary" icon={Sparkles} loading={busy} onClick={() => void run()}>
-          {dirty && canEdit ? 'Guardar y generar' : result ? 'Generar otra' : 'Generar respuesta'}
+        <Button variant="primary" icon={Sparkles} loading={busy} onClick={run}>
+          {result ? 'Generar otra' : 'Generar respuesta'}
         </Button>
       </div>
       <div className="mt-16" aria-live="polite">
         {busy && (
           <div className="row muted small">
-            <Spinner size={16} /> {preparing ? 'Guardando tus cambios…' : 'KAI está escribiendo…'}
+            <Spinner size={16} /> KAI está escribiendo…
           </div>
         )}
         {!busy && !result && <p className="subtle small">Aquí aparecerá la respuesta de ejemplo.</p>}
@@ -263,6 +259,7 @@ function PreviewCard({
               ) : (
                 <span className="badge">Reglas internas (modo simulación)</span>
               )}
+              <span className="badge">{usedDraft ? 'Con tus cambios sin guardar' : 'Con la configuración guardada'}</span>
             </div>
             {result.engine === 'rules' && <p className="subtle xs">Sin inteligencia artificial externa, KAI responde con frases predefinidas: las respuestas reales serán más naturales y se adaptarán mejor a tu tono.</p>}
           </div>
@@ -310,18 +307,11 @@ export default function PersonalityTab({ settings, canEdit, onDirtyChange }: Tab
     onError: (e) => toast(errorText(e), 'error'),
   });
 
-  const saveFirst = async () => {
-    if (firstError) {
-      toast(firstError, 'error');
-      return false;
-    }
-    try {
-      await save.mutateAsync();
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  /** Cambios sin guardar que se envían a la vista previa (se omiten los campos con errores). */
+  const previewOverrides = Object.fromEntries(
+    (Object.keys(draft) as (keyof PersonalityDraft)[]).filter((k) => !errors[k]).map((k) => [k, k === 'assistantName' ? draft.assistantName.trim() : draft[k]]),
+  ) as Partial<PersonalityDraft>;
+  const skippedFields = Object.keys(errors).length;
 
   return (
     <>
@@ -518,7 +508,7 @@ export default function PersonalityTab({ settings, canEdit, onDirtyChange }: Tab
           </Card>
         </div>
 
-        <PreviewCard ai={settings.ai} assistantName={draft.assistantName} dirty={dirty} canEdit={canEdit} saveFirst={saveFirst} />
+        <PreviewCard ai={settings.ai} assistantName={draft.assistantName} dirty={dirty} overrides={previewOverrides} skipped={skippedFields} />
       </div>
 
       <SaveBar dirty={dirty} saving={save.isPending} canEdit={canEdit} error={firstError} onDiscard={reset} onSave={() => save.mutate()} saveLabel="Guardar personalidad" />

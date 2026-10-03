@@ -1,0 +1,255 @@
+/* KAI — estilos propios del panel de administración (/admin) */
+
+/* ───────────── Barra lateral ───────────── */
+.adm-sidebar-intro {
+  padding: 0 8px 6px;
+}
+.adm-back-link .adm-back-sub {
+  margin-left: auto;
+  max-width: 96px;
+}
+
+/* ───────────── Cabecera superior ───────────── */
+.adm-topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  min-width: 0;
+}
+.adm-topbar-title svg {
+  width: 17px;
+  height: 17px;
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+
+/* ───────────── Secciones ───────────── */
+.adm-section + .adm-section {
+  margin-top: 24px;
+}
+.adm-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.adm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ───────────── Barra de filtros sobre tablas ───────────── */
+.adm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.adm-toolbar .input-group {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.adm-toolbar .select {
+  width: auto;
+  min-width: 190px;
+}
+.adm-toolbar-count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .adm-toolbar > * {
+    flex: 1 1 100%;
+  }
+  .adm-toolbar .select {
+    width: 100%;
+  }
+  .adm-toolbar-count {
+    margin-left: 0;
+  }
+}
+
+/* ───────────── Tablas ───────────── */
+.adm-cell-main {
+  font-weight: 600;
+  color: var(--text);
+}
+.adm-cell-link {
+  font-weight: 600;
+  color: var(--text);
+}
+.adm-cell-link:hover {
+  color: var(--accent-text);
+}
+.adm-cell-message {
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+.adm-cell-preview {
+  max-width: 320px;
+}
+.adm-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.adm-detail-row > td {
+  background: var(--surface-2);
+}
+.adm-pre {
+  max-height: 300px;
+  overflow: auto;
+  margin: 0;
+}
+.adm-error-text {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.adm-biz-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.adm-biz-link {
+  text-decoration: none !important;
+}
+.adm-biz-link:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.adm-note {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* ───────────── Ficha del negocio ───────────── */
+.adm-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.adm-kv {
+  grid-template-columns: 150px minmax(0, 1fr);
+}
+@media (max-width: 520px) {
+  .adm-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+  .adm-kv dd {
+    margin-bottom: 8px;
+  }
+}
+.adm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.adm-list > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.adm-list > li:first-child {
+  padding-top: 0;
+}
+.adm-list > li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.adm-list-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+.adm-list-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ───────────── Conversación (solo lectura) ───────────── */
+.adm-thread {
+  max-height: min(60vh, 560px);
+  min-height: 160px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 12px;
+}
+
+/* ───────────── Planes ───────────── */
+.adm-plan-price {
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+.adm-plan-card {
+  display: flex;
+  flex-direction: column;
+}
+.adm-plan-card .adm-plan-body {
+  flex: 1;
+}
+.adm-plan-card.is-inactive {
+  opacity: 0.72;
+}
+.adm-limit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.adm-limit:last-child {
+  border-bottom: 0;
+}
+.adm-limit-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+@media (max-width: 620px) {
+  .adm-limit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.adm-form-section + .adm-form-section {
+  margin-top: 20px;
+}
+.adm-form-section > .section-title {
+  margin-bottom: 10px;
+}
+.adm-price-input {
+  padding-right: 34px !important;
+}
+.adm-switch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.adm-switch-row:last-child {
+  border-bottom: 0;
+}
+.adm-switch-row .hint {
+  padding-left: 48px;
+}

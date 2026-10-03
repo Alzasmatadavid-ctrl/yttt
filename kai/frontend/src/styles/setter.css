@@ -384,3 +384,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ───────────── Pestañas de la página ───────────── */
+.setter-tab-dot {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.setter-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-2);
+}
