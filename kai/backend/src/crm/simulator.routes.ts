@@ -11,7 +11,8 @@ import { getDb } from '../database/client.js';
 import { conversations, followUps, leads, scheduledJobs } from '../database/schema.js';
 import { parse, uuidParam } from '../lib/http.js';
 import { badRequest } from '../lib/errors.js';
-import { requireTenant } from '../auth/guards.js';
+import { perBusinessRateLimit, requireTenant } from '../auth/guards.js';
+import { env } from '../config/env.js';
 import { createLead, deleteLead, getLeadProfile } from './leads.service.js';
 import { getConversationDetail, getOrCreateConversation } from './conversations.service.js';
 import { runFirstContact, runSetterReply } from '../ai/setter/setter-engine.js';
@@ -20,6 +21,9 @@ import { scheduleNoReplyFollowUp } from '../automation/followups.js';
 import { runJob } from '../automation/worker.js';
 
 export async function simulatorRoutes(app: FastifyInstance) {
+  // Cada prueba gasta IA: límite por negocio (no por IP), además del límite mensual de mensajes del plan.
+  const aiLimit = perBusinessRateLimit(() => env.SIMULATOR_MAX_PER_MINUTE);
+
   app.get('/simulator/conversations', async (request) => {
     const ctx = await requireTenant(request, 'conversations:reply');
     const rows = await getDb()
@@ -41,7 +45,7 @@ export async function simulatorRoutes(app: FastifyInstance) {
   });
 
   /** Simula un lead que deja sus datos en un formulario: KAI le escribe primero. */
-  app.post('/simulator/form-lead', async (request) => {
+  app.post('/simulator/form-lead', aiLimit, async (request) => {
     const ctx = await requireTenant(request, 'conversations:reply');
     const body = parse(z.object({ name: z.string().trim().min(1).max(80), goal: z.string().trim().max(300).optional() }), request.body);
     const { lead, conversationId } = await ingestExternalLead({ businessId: ctx.businessId, source: 'simulator', sourceDetail: 'Formulario simulado', name: body.name, goal: body.goal, firstContactChannel: 'web', isTest: true });
@@ -66,7 +70,7 @@ export async function simulatorRoutes(app: FastifyInstance) {
   });
 
   /** El “lead” escribe y KAI responde al instante (sin el retardo humano). */
-  app.post('/simulator/conversations/:id/messages', async (request) => {
+  app.post('/simulator/conversations/:id/messages', aiLimit, async (request) => {
     const ctx = await requireTenant(request, 'conversations:reply');
     const { id } = parse(uuidParam, request.params);
     const body = parse(z.object({ text: z.string().trim().min(1).max(2000) }), request.body);
@@ -78,7 +82,7 @@ export async function simulatorRoutes(app: FastifyInstance) {
   });
 
   /** Fuerza el siguiente seguimiento ahora (para ver cómo sería sin esperar horas). */
-  app.post('/simulator/conversations/:id/follow-up', async (request) => {
+  app.post('/simulator/conversations/:id/follow-up', aiLimit, async (request) => {
     const ctx = await requireTenant(request, 'conversations:reply');
     const { id } = parse(uuidParam, request.params);
     const detail = await getConversationDetail(ctx.businessId, id);

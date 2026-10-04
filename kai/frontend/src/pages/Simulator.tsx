@@ -30,7 +30,9 @@ const SKIP_REASONS: Record<string, string> = {
   already_client: 'Este lead ya es cliente: KAI no le escribe como setter.',
   nothing_to_answer: 'No había ningún mensaje nuevo del lead al que responder.',
   superseded: 'Llegó otro mensaje mientras KAI escribía: responderá a todos juntos.',
-  business_suspended: 'La cuenta está suspendida: KAI no responde a ningún lead.',
+  business_suspended: 'La cuenta está desactivada: KAI no responde a ningún lead.',
+  limit_reached: 'Se ha alcanzado el límite del plan este mes: KAI no responde hasta que amplíes el plan o empiece el mes que viene.',
+  opted_out: 'Este lead pidió no recibir más mensajes, así que KAI no le escribe.',
   disabled: 'KAI está en pausa en esta conversación.',
   conversation_started: 'La conversación ya había empezado, así que KAI no envía el primer mensaje.',
 };
@@ -53,6 +55,11 @@ const DIRECTIVE_LABELS: Record<string, string> = {
   continue_without_call: 'Seguir sin llamada',
   reassure_call: 'Resolver dudas sobre la llamada',
   first_contact: 'Primer contacto',
+  cancel_booking: 'Cancelar la llamada',
+  handoff: 'Pasar a una persona',
+  medical_notice: 'Aviso por tema médico',
+  medical_redirect: 'Derivar a un profesional sanitario',
+  opt_out_ack: 'Confirmar la baja',
 };
 
 function NewConversation({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
@@ -127,10 +134,12 @@ export default function Simulator() {
     enabled: Boolean(conversationId),
   });
   const sendMsg = useMutation({
-    mutationFn: (t: string) => api.post<{ result: { status: string; reason?: string } }>(`/simulator/conversations/${conversationId}/messages`, { text: t }),
+    mutationFn: (t: string) => api.post<{ result: { status: string; reason?: string; messageId?: string } }>(`/simulator/conversations/${conversationId}/messages`, { text: t }),
     onSuccess: (r) => {
       setText('');
-      if (r.result.status === 'skipped' && r.result.reason && !['opted_out'].includes(r.result.reason)) toast(`KAI no respondió. ${skipReasonText(r.result.reason)}`, 'info');
+      // Si el lead acaba de pedir la baja, KAI se despide (hay mensaje) y no hace falta avisar; si ya estaba de baja, sí.
+      const justOptedOut = r.result.reason === 'opted_out' && Boolean(r.result.messageId);
+      if (r.result.status === 'skipped' && r.result.reason && !justOptedOut) toast(`KAI no respondió. ${skipReasonText(r.result.reason)}`, 'info');
       void qc.invalidateQueries({ queryKey: ['sim', conversationId] });
       void qc.invalidateQueries({ queryKey: ['sim-list'] });
     },

@@ -278,16 +278,8 @@ export function withUnit(value: number, unit: 'seconds' | 'minutes'): string {
   return `${word} · ${unit === 'seconds' ? humanSeconds(value) : humanMinutes(value)}`;
 }
 
-/** Convierte lo que escribe el entrenador («149», «149,90», «1.200») a céntimos. */
-export function parseEurosToCents(raw: string): number | null {
-  let s = raw.replace(/[€\s]/g, '');
-  if (!s) return null;
-  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
-  else if (s.includes(',')) s = s.replace(',', '.');
-  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
-  return Math.round(Number(s) * 100);
-}
+/** Convierte lo que escribe el entrenador («149», «149,90», «1.200») a céntimos (la misma función que el resto de la app). */
+export { parseEurosToCents } from '../../lib/format';
 
 /** 14990 → «149,90»; 15000 → «150». */
 export function centsToText(cents: number): string {

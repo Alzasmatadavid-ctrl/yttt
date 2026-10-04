@@ -481,3 +481,86 @@
 .setter-panel .card-header h2 svg {
   flex-shrink: 0;
 }
+
+/* ───────────── Seguimientos: textos de la llamada (confirmación, recordatorios y no-show) ───────────── */
+.fu-msg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.fu-msg-group:first-child {
+  padding-top: 0;
+}
+.fu-msg-group:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.fu-msg-group > .setter-toggle-row {
+  padding: 0;
+  border-bottom: 0;
+}
+.fu-msg {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.fu-msg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fu-msg-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.fu-msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.fu-msg-body .textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+.fu-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fu-var {
+  height: auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.fu-var code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent-text);
+}
+.fu-var-label {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.fu-msg-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fu-phone {
+  padding: 10px;
+  border-radius: 16px;
+}
+.fu-phone .msg-row {
+  max-width: 100%;
+}

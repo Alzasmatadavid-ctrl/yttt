@@ -9,7 +9,7 @@
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { aiSettings, appointments, businesses, conversations, followUps, leads, trainers } from '../database/schema.js';
+import { aiSettings, appointments, businesses, conversations, leads, trainers } from '../database/schema.js';
 import { CALL_STATUSES, CLOSED_STATUSES } from '../lib/domain.js';
 import { errorMessage } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
@@ -18,7 +18,6 @@ import { logError } from '../audit/audit.service.js';
 import { env } from '../config/env.js';
 import {
   cancelClaimedJob,
-  cancelJobsForBusiness,
   claimDueJobs,
   completeJob,
   failJob,
@@ -31,7 +30,7 @@ import {
 } from './jobs.js';
 import { composeFollowUp, runFirstContact, runSetterReply } from '../ai/setter/setter-engine.js';
 import { expireOldActions } from '../ai/copilot/copilot-actions.js';
-import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp } from './followups.js';
+import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp, stopBusinessAutomations } from './followups.js';
 import { sendMessage } from '../crm/messaging.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { getAutomation } from './reminders.js';
@@ -39,6 +38,7 @@ import { configuredMessage, confirmationText, noShowText, reminderTemplateParams
 import { requestOutcomeAlert } from '../calendar/calendar.service.js';
 import { rollupAnalyticsForAll } from '../analytics/analytics.service.js';
 import { purgeExpiredSessions } from '../auth/sessions.js';
+import { retryFailedLeadgenEvents } from '../webhooks/meta.webhook.js';
 import { DEFAULT_TONE } from '../lib/domain.js';
 
 type Handler = (job: Job) => Promise<void>;
@@ -134,6 +134,8 @@ const handlers: Record<string, Handler> = {
     if (!step) return markFollowUp(fu.id, 'cancelled', { note: 'Paso no configurado' });
     const hoursSilent = (Date.now() - (lead.lastOutboundAt ?? fu.createdAt).getTime()) / 3_600_000;
     const composed = await composeFollowUp(businessId, fu.conversationId, { step: fu.step, totalSteps: steps.length, angle: step.angle, hoursSilent });
+    // Cuenta desactivada o límite de mensajes agotado: no es un fallo de calidad, simplemente no se envía.
+    if (composed.skipped) return markFollowUp(fu.id, 'cancelled', { note: composed.skipped.note });
     if (!composed.text) {
       await markFollowUp(fu.id, 'failed', { note: `Control de calidad: ${composed.issues.join(' · ')}`.slice(0, 500) });
       return;
@@ -156,7 +158,8 @@ const handlers: Record<string, Handler> = {
   async appointment_confirmation(job) {
     const businessId = job.businessId!;
     const ctx = await appointmentContext(businessId, (job.payload as { appointmentId: string }).appointmentId);
-    if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || !ctx.conversationId) return;
+    // Lead dado de baja: no se le escribe (sendMessage también lo bloquearía, pero dejaría un aviso de «no enviado»).
+    if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || !ctx.conversationId || ctx.lead.optedOut) return;
     if (ctx.appointment.startsAt.getTime() <= Date.now()) return; // la llamada ya empezó: no tiene sentido confirmarla
     const automation = await getAutomation(businessId, 'appointment_reminders');
     const sent = await sendMessage({
@@ -175,7 +178,7 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const { appointmentId, kind } = job.payload as { appointmentId: string; kind: '24h' | '1h' };
     const ctx = await appointmentContext(businessId, appointmentId);
-    if (!ctx || ctx.appointment.status !== 'scheduled' || !ctx.conversationId) return;
+    if (!ctx || ctx.appointment.status !== 'scheduled' || !ctx.conversationId || ctx.lead.optedOut) return;
     if (kind === '24h' && ctx.appointment.reminder24hSentAt) return;
     if (kind === '1h' && ctx.appointment.reminder1hSentAt) return;
     // Trabajo ejecutado tarde: si ya no queda margen, el recordatorio sería falso o inútil.
@@ -242,22 +245,17 @@ const handlers: Record<string, Handler> = {
     await purgeExpiredSessions();
     await releaseStaleJobs();
     await expireOldActions();
+    // Avisos de Lead Ads que fallaron (Meta caída, token caducado un momento…): se reintentan cada 6 h
+    // durante 7 días aunque Meta deje de reenviarlos. Un fallo aquí no impide reprogramar el mantenimiento.
+    try {
+      await retryFailedLeadgenEvents();
+    } catch (err) {
+      await logError('worker.leadgen_retry', err);
+    }
     await scheduleJob({ type: 'maintenance', runAt: new Date(Date.now() + 6 * 3600_000), dedupeKey: 'system:maintenance' });
     void job;
   },
 };
-
-/**
- * Cuenta suspendida (o eliminada): no se envía nada en su nombre. Se cancelan todos sus trabajos pendientes
- * y sus seguimientos programados, para que no salga una avalancha de mensajes antiguos si se reactiva.
- */
-async function stopBusinessAutomations(businessId: string, note: string) {
-  await cancelJobsForBusiness(businessId, note);
-  await getDb()
-    .update(followUps)
-    .set({ status: 'cancelled', note })
-    .where(and(eq(followUps.businessId, businessId), eq(followUps.status, 'scheduled')));
-}
 
 async function businessIsActive(businessId: string): Promise<boolean> {
   const [biz] = await getDb().select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1);

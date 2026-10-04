@@ -575,7 +575,8 @@ async function seed() {
   await db.insert(services).values({
     businessId: business.id,
     name: 'Programa Kaizen · 12 semanas',
-    description: 'Acompañamiento online de pérdida de grasa con el método Kaizen. (Precio de EJEMPLO: cámbialo por el tuyo en Configurar KAI → Servicio).',
+    // La descripción la lee la IA (y podría repetírsela a un lead): nada de notas internas aquí.
+    description: 'Acompañamiento online de pérdida de grasa con el método Kaizen.',
     priceCents: 14900,
     currency: 'EUR',
     billingPeriod: 'monthly',
@@ -611,6 +612,7 @@ async function seed() {
   console.log(`  Email:      ${DEMO_EMAIL}`);
   console.log(`  Contraseña: ${DEMO_PASSWORD}`);
   console.log('  Los leads demo no tienen teléfono ni cuentas reales: nunca se les enviará nada.');
+  console.log('  El precio del servicio demo es de ejemplo: cámbialo en Setter IA → Servicio y precio.');
 }
 
 async function createDemoLead(businessId: string, userId: string, spec: DemoLead) {

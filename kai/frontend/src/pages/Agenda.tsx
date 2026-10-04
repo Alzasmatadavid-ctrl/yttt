@@ -12,7 +12,8 @@ import type { Appointment, AvailabilityConfig, CalendarConnection } from '../lib
 
 interface ApptRow {
   appointment: Appointment;
-  lead: { id: string; name: string; score: number; goalSummary: string | null };
+  /** isTest: cita de una conversación de prueba del simulador (no es un lead real). */
+  lead: { id: string; name: string; score: number; goalSummary: string | null; isTest?: boolean };
 }
 
 /** Partes de una fecha en la zona horaria del negocio. */
@@ -99,12 +100,17 @@ function WeekView({ timezone, weekly, offset, onPick }: { timezone: string; week
                     className={`week-event ${a.appointment.bookedBy === 'kai' ? 'kai' : ''} ${a.appointment.status}`}
                     style={{ top, height: Math.max(22, (minutes / 60) * HOUR_H - 2) }}
                     onClick={() => onPick(a)}
-                    title={`${a.lead.name} · ${dateTime(a.appointment.startsAt, timezone)}`}
+                    title={`${a.lead.name}${a.lead.isTest ? ' (prueba)' : ''} · ${dateTime(a.appointment.startsAt, timezone)}`}
                   >
                     <strong>
                       {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
                     </strong>{' '}
                     {a.lead.name}
+                    {a.lead.isTest && (
+                      <span className="badge" style={{ marginLeft: 4, padding: '0 5px', fontSize: 10 }}>
+                        Prueba
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -260,7 +266,8 @@ export default function Agenda() {
     );
   }
   const tz = availability.data.config.timezone;
-  const needOutcome = (pending.data?.appointments ?? []).filter((a) => a.appointment.status === 'scheduled' && new Date(a.appointment.endsAt) < new Date());
+  // Las citas de prueba (simulador) no se registran: no son leads reales ni cuentan en las estadísticas.
+  const needOutcome = (pending.data?.appointments ?? []).filter((a) => !a.lead.isTest && a.appointment.status === 'scheduled' && new Date(a.appointment.endsAt) < new Date());
 
   return (
     <div className="page">
@@ -321,6 +328,7 @@ export default function Agenda() {
             <div className="modal-header">
               <h2 className="row">
                 <CalendarClock size={18} /> {picked.lead.name}
+                {picked.lead.isTest && <span className="badge">Prueba</span>}
               </h2>
               <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
                 Cerrar

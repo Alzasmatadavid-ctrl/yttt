@@ -37,7 +37,7 @@ Documento técnico para quien mantenga o amplíe KAI.
 |---|---|
 | `config/` | Variables de entorno validadas (Zod) y valores por defecto de cada negocio nuevo (cualificación, objeciones, automatizaciones, planes). |
 | `database/` | Esquema (32 tablas), cliente (Postgres o PGlite), migraciones SQL, datos mínimos (`bootstrap`) y demo (`seed`). |
-| `auth/` | Registro, login, sesiones (cookie `kai_session`, 30 días deslizantes, token guardado como SHA-256), recuperación de contraseña, invitaciones, guardas de rol/permiso y aislamiento por negocio. |
+| `auth/` | Registro, login, sesiones (cookie `kai_session`, 30 días deslizantes, token guardado como SHA-256), recuperación de contraseña, invitaciones, «Crear mi negocio» para cuentas que se han quedado sin ninguno, guardas de rol/permiso, aislamiento por negocio y límite de peticiones por negocio en las pruebas que gastan IA. |
 | `business/`, `plans/` | Creación de negocios con su configuración inicial; límites por plan (leads/mes, mensajes IA/mes, miembros, canales) y contadores de uso. |
 | `crm/` | Leads (deduplicación por canal, email y teléfono), pipeline de 12 etapas con transiciones automáticas, puntuación determinista, conversaciones, envío de mensajes, bandeja, avisos y escalado a humano. |
 | `ai/` | Proveedor de IA intercambiable, contexto, memoria por lead, análisis, estrategia, agente, herramientas, validación, Copilot. |

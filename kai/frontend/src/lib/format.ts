@@ -43,10 +43,16 @@ export const money = (cents: number | null | undefined, currency = 'EUR') => for
  * «1.500» → 150000 · «1.500,50» → 150050 · «1500.5» → 150050 · «97,50» → 9750 · «297 €» → 29700 · «1,500.50» → 150050.
  * Un separador seguido de exactamente tres cifras se toma como separador de miles («1.500», «12.000»);
  * seguido de una o dos cifras, como decimales («97,5», «1500.50»).
+ * Ignora el símbolo o el código de la moneda escrito junto al importe («$300», «149 MXN», «USD 99»): el negocio
+ * puede trabajar en otra moneda distinta del euro.
  * Devuelve null si el texto está vacío o no es un importe válido (letras, negativos, más de dos decimales…).
+ * Es la única versión de esta conversión en la app: el resto de pantallas la reutilizan.
  */
 export function parseEurosToCents(raw: string): number | null {
-  const s = raw.replace(/\s| |€|eur(os?)?/gi, '');
+  const s = raw
+    .replace(/\s|\p{Sc}|eur(os?)?/giu, '')
+    .replace(/^[a-z]{3}(?=\d)/i, '')
+    .replace(/(\d)[a-z]{3}$/i, '$1');
   if (!s) return null;
   let integer: string;
   let decimals = '';

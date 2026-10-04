@@ -1,5 +1,5 @@
 import { and, eq, sql, gt, isNull } from 'drizzle-orm';
-import { getDb } from '../database/client.js';
+import { getDb, type Database } from '../database/client.js';
 import { businesses, invitations, memberships, passwordResetTokens, plans, users } from '../database/schema.js';
 import { publicAppUrl } from '../config/env.js';
 import { hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto.js';
@@ -60,6 +60,24 @@ export async function registerTrainer(input: { name: string; email: string; pass
   });
   await audit({ businessId: business.id, actorType: 'user', actorUserId: user.id, action: 'auth.registered', entityType: 'user', entityId: user.id });
   return { user, business };
+}
+
+/**
+ * Negocio propio para una cuenta que no pertenece a ninguno (p. ej. la quitaron del único equipo en el que estaba).
+ * Se crea con el plan por defecto y su periodo de prueba, como en el registro. Si ya pertenece a alguno → 409:
+ * los negocios adicionales se crean desde la app (POST /businesses), donde se aplica el límite del plan.
+ */
+export async function createOwnBusiness(userId: string, input: { name: string; timezone?: string }) {
+  const business = await getDb().transaction(async (tx) => {
+    // Bloquea la fila del usuario: dos clics seguidos no crean dos negocios.
+    const [user] = await tx.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, userId)).for('update');
+    if (!user) throw notFound('Cuenta no encontrada.');
+    const [membership] = await tx.select({ id: memberships.id }).from(memberships).where(eq(memberships.userId, userId)).limit(1);
+    if (membership) throw conflict('Ya perteneces a un negocio.');
+    return createBusiness({ name: input.name.trim(), ownerUserId: userId, ownerName: user.name, timezone: input.timezone }, tx as unknown as Database);
+  });
+  await audit({ businessId: business.id, actorType: 'user', actorUserId: userId, action: 'business.created', entityType: 'business', entityId: business.id, metadata: { selfService: true } });
+  return business;
 }
 
 export async function authenticate(emailRaw: string, password: string) {

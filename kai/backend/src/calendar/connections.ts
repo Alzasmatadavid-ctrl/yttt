@@ -2,8 +2,9 @@ import { and, eq, ne } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { calendarConnections } from '../database/schema.js';
 import { decryptJson, encryptJson } from '../lib/crypto.js';
-import { audit } from '../audit/audit.service.js';
+import { audit, logError } from '../audit/audit.service.js';
 import { refreshGoogleToken, type GoogleTokens } from './providers/google.js';
+import { calendlyDeleteWebhook } from './providers/calendly.js';
 
 export type CalendarConnection = typeof calendarConnections.$inferSelect;
 
@@ -50,6 +51,21 @@ export async function googleAccessToken(conn: CalendarConnection): Promise<strin
   return tokens.accessToken;
 }
 
+/**
+ * Borra en Calendly el webhook de una conexión que se desconecta o se sustituye (reconexión, cambio a Google).
+ * Si no, Calendly rechazaría uno nuevo con la misma URL y el viejo seguiría firmando con una clave que ya no
+ * se guarda. Un fallo (token revocado, Calendly caído) solo se registra: no impide el cambio.
+ */
+export async function releaseCalendlyWebhook(conn: CalendarConnection) {
+  if (conn.provider !== 'calendly') return;
+  try {
+    const creds = decryptJson<CalendlyCredentials>(conn.credentialsEnc);
+    if (creds.webhookUri) await calendlyDeleteWebhook(creds.token, creds.webhookUri);
+  } catch (err) {
+    await logError('calendar.calendly.delete_webhook', err, { connectionId: conn.id }, conn.businessId, 'warn');
+  }
+}
+
 export async function saveCalendarConnection(
   businessId: string,
   userId: string | null,
@@ -64,7 +80,12 @@ export async function saveCalendarConnection(
   },
 ) {
   const db = getDb();
-  // Solo un calendario activo a la vez: conectar uno desconecta el otro.
+  // Solo un calendario activo a la vez: conectar uno desconecta el otro (y Calendly deja de avisar a KAI).
+  const replaced = await db
+    .select()
+    .from(calendarConnections)
+    .where(and(eq(calendarConnections.businessId, businessId), ne(calendarConnections.provider, input.provider), ne(calendarConnections.status, 'disconnected')));
+  for (const old of replaced) await releaseCalendlyWebhook(old);
   await db
     .update(calendarConnections)
     .set({ status: 'disconnected', updatedAt: new Date() })

@@ -481,6 +481,11 @@ export async function cancelPendingAutomationsForLead(businessId: string, leadId
 export async function deleteLead(businessId: string, leadId: string, actor: Actor) {
   const lead = await getLead(businessId, leadId);
   const db = getDb();
+  // Sus citas programadas se borran con él: antes hay que quitar los eventos de Google Calendar y sus
+  // recordatorios, o quedarían huérfanos ocupando el hueco para siempre. (Import dinámico: calendar.service
+  // importa este módulo.)
+  const { releaseLeadAppointments } = await import('../calendar/calendar.service.js');
+  await releaseLeadAppointments(businessId, leadId);
   await db
     .update(scheduledJobs)
     .set({ status: 'cancelled', finishedAt: new Date() })

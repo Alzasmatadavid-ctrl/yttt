@@ -367,3 +367,40 @@
   max-width: 520px;
   text-align: left;
 }
+
+/* «Crear mi negocio» en la pantalla de cuenta sin negocio */
+.kai-404 .kai-nobiz-create {
+  width: 100%;
+  max-width: 520px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+.kai-404 .kai-nobiz-create-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.kai-404 .kai-nobiz-create-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
+}
+.kai-404 .kai-nobiz-create .kai-nobiz-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.kai-404 .kai-nobiz-create p {
+  max-width: none;
+  margin: 0;
+}
+.kai-404 .kai-nobiz-create [role='alert'] {
+  max-width: none;
+}

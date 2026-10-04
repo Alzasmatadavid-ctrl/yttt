@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, Hand, Inbox as InboxIcon, PanelRight, Play, RotateCw, Search, Send, Sparkles, User, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, CheckCheck, Hand, Inbox as InboxIcon, PanelRight, Play, RotateCw, Search, Send, Sparkles, User, UserRound, X } from 'lucide-react';
 import { CHANNEL_LABELS, HANDOFF_REASONS, type HandoffReason, type LeadSource, type LeadStatus, type LeadTemperature } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, dayLabel, shortTime, timeAgo, timeOnly } from '../lib/format';
@@ -101,12 +101,27 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.conversation.unreadCount, conversationId]);
 
+  /** Bandeja, conversación, avisos y panel: lo que cambia cuando se atiende un escalado. */
+  const refreshAfterHandoff = () => {
+    for (const key of ['conversation', 'inbox', 'inbox-counts', 'alerts', 'dashboard']) void qc.invalidateQueries({ queryKey: [key] });
+  };
   const send = useMutation({
     mutationFn: (body: { text: string; pauseKai: boolean }) => api.post<{ delivered: boolean; blockedReason: string | null }>(`/conversations/${conversationId}/messages`, body),
     onSuccess: (r) => {
       if (!r.delivered) toast(`Mensaje no enviado: ${r.blockedReason ?? 'revisa el canal'}`, 'error');
       void qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
       void qc.invalidateQueries({ queryKey: ['inbox'] });
+      // Si KAI había escalado la conversación, al entregarse el mensaje el servidor da el escalado por atendido
+      // (se cierra el aviso «KAI necesita tu intervención»): se refrescan también los avisos y los contadores.
+      if (r.delivered && data?.conversation.handoffActive) refreshAfterHandoff();
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const attended = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; changed: boolean }>(`/conversations/${conversationId}/handoff-attended`),
+    onSuccess: (r) => {
+      toast(r.changed ? 'Marcado como atendido. KAI sigue en pausa en esta conversación hasta que se la devuelvas.' : 'Esta conversación ya estaba atendida.');
+      refreshAfterHandoff();
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
@@ -183,10 +198,18 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           <AlertTriangle />
           <div className="grow">
             <strong>KAI necesita tu intervención.</strong> {reason ? HANDOFF_REASONS[reason] ?? reason : ''}. KAI no responderá hasta que se la devuelvas.
+            <div className="xs muted mt-4">
+              Si ya lo has resuelto por tu cuenta (por teléfono, en persona…), márcalo como atendido: desaparece de pendientes y KAI sigue en pausa aquí.
+            </div>
           </div>
-          <Button size="sm" icon={Play} onClick={() => release.mutate(true)}>
-            Que KAI responda ahora
-          </Button>
+          <div className="row wrap" style={{ gap: 6, justifyContent: 'flex-end' }}>
+            <Button size="sm" icon={CheckCheck} loading={attended.isPending} onClick={() => attended.mutate()}>
+              Marcar como atendido
+            </Button>
+            <Button size="sm" icon={Play} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
+              Que KAI responda ahora
+            </Button>
+          </div>
         </div>
       )}
       {!conv.handoffActive && !conv.aiEnabled && (
@@ -198,7 +221,10 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
       {lead.optedOut && (
         <div className="handoff-banner" style={{ background: 'var(--danger-soft)' }}>
           <AlertTriangle style={{ color: 'var(--danger)' }} />
-          <div className="grow">Este lead pidió no recibir más mensajes. KAI no le volverá a escribir.</div>
+          <div className="grow">
+            Este lead está dado de baja: no recibe mensajes de KAI ni del equipo. Si te pide que vuelvas a escribirle, puedes permitirlo desde su
+            ficha, con «Volver a permitir mensajes».
+          </div>
         </div>
       )}
       <MessageList messages={data.messages} />
@@ -288,6 +314,7 @@ function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: s
       <div className="row wrap" style={{ gap: 6 }}>
         <TemperatureBadge temperature={lead.temperature} />
         {lead.isTest && <span className="badge">Prueba</span>}
+        {lead.optedOut && <span className="badge badge-danger">Dado de baja</span>}
       </div>
       <div className="callout" style={{ padding: '10px 12px' }}>
         <Sparkles style={{ color: 'var(--accent-text)' }} />
@@ -502,7 +529,7 @@ export default function Inbox() {
         <>
           <Thread key={activeId} conversationId={activeId} onBack={() => navigate('/app/inbox')} onTogglePanel={() => setShowPanel((s) => !s)} panelOpen={showPanel} />
           {showPanel && <div className="inbox-panel-backdrop" onClick={closePanel} aria-hidden />}
-          <LeadPanel key={activeId} conversationId={activeId} overlayOpen={showPanel} onClose={closePanel} />
+          <LeadPanel key={`panel-${activeId}`} conversationId={activeId} overlayOpen={showPanel} onClose={closePanel} />
         </>
       ) : (
         <section className="thread" style={{ display: 'grid', placeItems: 'center', gridColumn: 'span 2' }}>

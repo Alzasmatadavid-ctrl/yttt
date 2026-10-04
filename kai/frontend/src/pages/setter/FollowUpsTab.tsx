@@ -1,10 +1,10 @@
 /* Pestaña «Seguimientos»: automatizaciones de seguimiento, recordatorios, no presentados y aviso tras la llamada. */
-import { useId, useRef, useState, type ReactNode } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { BellRing, CalendarCheck, ClipboardCheck, Moon, Plus, Repeat, Trash2, UserX, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BellRing, CalendarCheck, ChevronUp, ClipboardCheck, Moon, PenLine, Plus, Repeat, RotateCcw, Sparkles, Trash2, UserX, type LucideIcon } from 'lucide-react';
 import { AUTOMATION_LABELS, type AutomationConfig, type AutomationType, type FollowUpStep } from '@shared';
-import { api, errorText } from '../../lib/api';
-import { Button, Callout, Card, Field, Select, Switch, Textarea, useToast } from '../../components/ui';
+import { api, ApiError, errorText } from '../../lib/api';
+import { Button, Callout, Card, Field, Select, Spinner, Switch, Textarea, useToast } from '../../components/ui';
 import type { Automation } from '../../lib/types';
 import { CharCount, NumInput, SaveBar, humanHours, isTime, useDraft, useReportDirty, withUnit, type TabProps } from './setter-shared';
 
@@ -34,8 +34,15 @@ function normalize(type: AutomationType, a: Automation | undefined): AutoDraft |
     c.confirmation = c.confirmation !== false;
     c.reminder24h = c.reminder24h !== false;
     c.reminder1h = c.reminder1h !== false;
+    // Textos de la llamada: vacío = mensaje por defecto de KAI.
+    c.confirmationMessage = c.confirmationMessage ?? '';
+    c.reminder24hMessage = c.reminder24hMessage ?? '';
+    c.reminder1hMessage = c.reminder1hMessage ?? '';
   }
-  if (type === 'no_show_recovery') c.delayMinutes = c.delayMinutes ?? 15;
+  if (type === 'no_show_recovery') {
+    c.delayMinutes = c.delayMinutes ?? 15;
+    c.noShowMessage = c.noShowMessage ?? '';
+  }
   if (type === 'post_call') c.delayMinutes = c.delayMinutes ?? 10;
   return { enabled: a.enabled, config: c };
 }
@@ -102,12 +109,242 @@ function firstError(e: Errors): string | null {
   return null;
 }
 
-/** Configuración limpia para el servidor (textos recortados). */
+/** Configuración limpia para el servidor (textos recortados). Se envía siempre la configuración completa. */
 function toPayload(a: AutoDraft): AutoDraft {
   const config: AutomationConfig = { ...a.config };
   if (config.steps) config.steps = config.steps.map((s) => ({ delayHours: s.delayHours, angle: s.angle.trim() }));
   if (!config.quietHours) delete config.quietHours;
+  for (const { field } of Object.values(MESSAGES)) if (typeof config[field] === 'string') config[field] = config[field].trim();
   return { enabled: a.enabled, config };
+}
+
+// ───────────── Mensajes de la llamada (confirmación, recordatorios y no-show) ─────────────
+type MessageKind = 'confirmation' | 'reminder24h' | 'reminder1h' | 'noShow';
+type MessageField = 'confirmationMessage' | 'reminder24hMessage' | 'reminder1hMessage' | 'noShowMessage';
+
+/** Dónde se guarda cada texto (mismos nombres que el servidor) y cómo se llama en pantalla. */
+const MESSAGES: Record<MessageKind, { field: MessageField; type: 'appointment_reminders' | 'no_show_recovery'; label: string }> = {
+  confirmation: { field: 'confirmationMessage', type: 'appointment_reminders', label: 'Mensaje de confirmación' },
+  reminder24h: { field: 'reminder24hMessage', type: 'appointment_reminders', label: 'Recordatorio 24 h antes' },
+  reminder1h: { field: 'reminder1hMessage', type: 'appointment_reminders', label: 'Recordatorio 1 h antes' },
+  noShow: { field: 'noShowMessage', type: 'no_show_recovery', label: 'Mensaje si no se presenta' },
+};
+const MESSAGE_KINDS = Object.keys(MESSAGES) as MessageKind[];
+const FIELD_TO_KIND = Object.fromEntries(MESSAGE_KINDS.map((k) => [MESSAGES[k].field, k])) as Record<MessageField, MessageKind>;
+
+interface TemplateVariable {
+  key: string;
+  label: string;
+  example: string;
+}
+/** GET /agenda/message-templates */
+interface TemplatesInfo {
+  defaults: Record<MessageKind, string>;
+  fields: Record<MessageKind, MessageField>;
+  variables: TemplateVariable[];
+  maxLength: number;
+}
+/** POST /agenda/message-templates/preview */
+interface TemplatePreview {
+  preview: string;
+  issues: string[];
+  usesDefault: boolean;
+}
+/** Problemas que la vista previa ha encontrado en un texto concreto (para no dar por buenos los de un texto anterior). */
+type TemplateReport = { text: string; issues: string[] };
+
+/** Mientras no llegan del servidor (o si fallan), las mismas variables y el mismo límite que usa KAI. */
+const FALLBACK_VARIABLES: TemplateVariable[] = [
+  { key: 'nombre', label: 'Nombre del lead', example: 'Laura' },
+  { key: 'fecha', label: 'Día de la llamada', example: '«mañana» o «el jueves 9 de octubre»' },
+  { key: 'hora', label: 'Hora de la llamada', example: '18:00' },
+  { key: 'llamada', label: 'Cómo llamas a la llamada', example: 'llamada de valoración' },
+  { key: 'entrenador', label: 'Tu nombre', example: 'Álex' },
+  { key: 'enlace', label: 'Enlace de la videollamada', example: 'https://meet.google.com/…' },
+];
+const FALLBACK_MAX_LENGTH = 700;
+
+/** Errores 400 del servidor al guardar, por campo de texto (la ruta del error es el nombre del campo, p. ej. «config.confirmationMessage»). */
+function messageErrorsFrom(err: unknown): Partial<Record<MessageField, string>> {
+  const out: Partial<Record<MessageField, string>> = {};
+  if (!(err instanceof ApiError) || err.status !== 400 || !Array.isArray(err.details)) return out;
+  for (const d of err.details as unknown[]) {
+    if (!d || typeof d !== 'object') continue;
+    const item = d as { path?: unknown; field?: unknown; message?: unknown; issues?: unknown };
+    const where = typeof item.path === 'string' ? item.path : typeof item.field === 'string' ? item.field : '';
+    const field = where.split('.').pop() as MessageField;
+    if (!(field in FIELD_TO_KIND) || out[field]) continue;
+    const message = typeof item.message === 'string' ? item.message : Array.isArray(item.issues) ? item.issues.filter((i) => typeof i === 'string').join(' ') : '';
+    out[field] = message || err.message;
+  }
+  return out;
+}
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
+/** «Enlace de la videollamada (si la llamada no tiene…)» → «Enlace de la videollamada» (el texto completo va en la ayuda del botón). */
+const shortLabel = (label: string) => label.replace(/\s*\(.*\)\s*$/, '');
+
+/**
+ * Editor de uno de los textos de la llamada: variables que se insertan al pulsarlas, vista previa en vivo con
+ * datos de ejemplo y los problemas que impedirían guardarlo. Vacío = mensaje por defecto de KAI.
+ */
+function MessageTemplateEditor({
+  kind,
+  value,
+  onChange,
+  info,
+  active,
+  errors,
+  onReport,
+}: {
+  kind: MessageKind;
+  value: string;
+  onChange: (text: string) => void;
+  info: TemplatesInfo | undefined;
+  /** ¿Se envía este mensaje ahora mismo? (automatización y opción activadas) */
+  active: boolean;
+  /** Problemas del texto actual (vista previa, límite de caracteres o error del servidor al guardar). */
+  errors: string[];
+  onReport: (kind: MessageKind, report: TemplateReport) => void;
+}) {
+  const id = useId();
+  const bodyId = useId();
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const label = MESSAGES[kind].label;
+  const custom = value.trim().length > 0;
+  const [open, setOpen] = useState(custom);
+  // Con errores se queda abierto: así siempre se ve qué hay que corregir.
+  const isOpen = open || errors.length > 0;
+  const variables = info?.variables ?? FALLBACK_VARIABLES;
+  const maxLength = info?.maxLength ?? FALLBACK_MAX_LENGTH;
+  const defaultText = info?.defaults[kind] ?? '';
+
+  // Vista previa: se pide al servidor (los mismos datos y reglas que usará KAI) cuando se deja de escribir.
+  const text = useDebounced(value, 450);
+  const preview = useQuery({
+    queryKey: ['message-template-preview', kind, text],
+    queryFn: () => api.post<TemplatePreview>('/agenda/message-templates/preview', { kind, text }),
+    enabled: isOpen || custom,
+    staleTime: 30_000,
+    retry: false,
+    placeholderData: (prev) => prev,
+  });
+  const fresh = preview.data && !preview.isPlaceholderData ? preview.data : undefined;
+  useEffect(() => {
+    if (fresh) onReport(kind, { text, issues: fresh.issues });
+  }, [fresh, text, kind, onReport]);
+
+  /** Inserta la variable donde está el cursor (o al final) y deja el cursor detrás. */
+  const insert = (token: string) => {
+    const el = ref.current;
+    const start = el ? el.selectionStart : value.length;
+    const end = el ? el.selectionEnd : value.length;
+    const next = (value.slice(0, start) + token + value.slice(end)).slice(0, maxLength);
+    onChange(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const pos = Math.min(next.length, start + token.length);
+      el.setSelectionRange(pos, pos);
+    });
+  };
+  const startFromDefault = () => {
+    onChange(defaultText);
+    requestAnimationFrame(() => ref.current?.focus());
+  };
+
+  return (
+    <div className="fu-msg">
+      <div className="fu-msg-head">
+        <div className="fu-msg-summary">
+          <span className="small">
+            <strong>Texto:</strong> {custom ? 'personalizado' : 'mensaje por defecto de KAI'}
+          </span>
+          {errors.length > 0 && <span className="badge badge-danger">Revisar</span>}
+        </div>
+        {errors.length === 0 && (
+          <Button size="sm" variant="ghost" icon={isOpen ? ChevronUp : PenLine} aria-expanded={isOpen} aria-controls={bodyId} onClick={() => setOpen(!isOpen)}>
+            {isOpen ? 'Ocultar el texto' : custom ? 'Editar el texto' : 'Personalizar el texto'}
+          </Button>
+        )}
+      </div>
+      {isOpen && (
+        <div className="fu-msg-body" id={bodyId}>
+          {!active && <p className="xs subtle">Ahora mismo este mensaje no se envía (está desactivado). El texto se guarda igual y se usará cuando lo actives.</p>}
+          <Field label={label} htmlFor={id} error={errors.length ? errors.join(' ') : null} hint="Si lo dejas vacío, KAI usa su mensaje por defecto, adaptado a tu tono.">
+            <textarea
+              ref={ref}
+              id={id}
+              className="textarea"
+              rows={4}
+              maxLength={maxLength}
+              value={value}
+              placeholder={defaultText ? `Mensaje por defecto de KAI:\n${defaultText}` : 'Vacío: KAI usa su mensaje por defecto.'}
+              onChange={(e) => onChange(e.target.value)}
+            />
+          </Field>
+          <div className="row-between wrap" style={{ gap: 8 }}>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {!custom && defaultText && (
+                <Button size="sm" icon={Sparkles} onClick={startFromDefault}>
+                  Partir del mensaje de KAI
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" icon={RotateCcw} disabled={!value} onClick={() => onChange('')} title="Borra tu texto y vuelve al mensaje por defecto de KAI">
+                Restablecer
+              </Button>
+            </div>
+            <span className={`setter-counter ${value.length > maxLength ? 'is-over' : ''}`}>
+              {value.length.toLocaleString('es-ES')} / {maxLength.toLocaleString('es-ES')}
+            </span>
+          </div>
+          <div className="fu-vars">
+            <span className="xs muted" id={`${id}-vars`}>
+              Variables: púlsalas para añadirlas donde está el cursor. Se rellenan con los datos reales de cada llamada.
+            </span>
+            <div className="chips" role="group" aria-labelledby={`${id}-vars`}>
+              {variables.map((v) => (
+                <button key={v.key} type="button" className="chip fu-var" title={`${v.label}. Ejemplo: ${v.example}`} onClick={() => insert(`{${v.key}}`)}>
+                  <code>{`{${v.key}}`}</code>
+                  <span className="fu-var-label">{shortLabel(v.label)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="fu-msg-preview" aria-live="polite">
+            <div className="row-between wrap" style={{ gap: 6 }}>
+              <span className="section-title">Vista previa</span>
+              {preview.isFetching && <Spinner size={14} />}
+            </div>
+            {preview.data ? (
+              <>
+                <div className="phone fu-phone">
+                  <div className="msg-row out kai">
+                    <div className="bubble">{preview.data.preview || '—'}</div>
+                  </div>
+                </div>
+                <span className="xs subtle">
+                  {preview.data.usesDefault ? 'Mensaje por defecto de KAI. ' : ''}Ejemplo con datos ficticios: un lead llamado Laura y una llamada de prueba con enlace de videollamada.
+                </span>
+              </>
+            ) : preview.isError ? (
+              <span className="xs subtle">No se ha podido generar la vista previa ahora mismo. Puedes guardar igualmente: KAI revisará el texto.</span>
+            ) : (
+              <span className="xs subtle">Preparando la vista previa…</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ───────────── Controles ─────────────
@@ -359,7 +596,36 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
   const { draft, base, setDraft, dirty, reset, markSaved } = useDraft<Draft>(toDraft(settings.automations));
   useReportDirty(onDirtyChange, dirty);
   const errors = validate(draft);
-  const error = firstError(errors);
+
+  // Textos de la llamada: textos por defecto y variables (servidor), problemas de la vista previa y errores al guardar.
+  const templates = useQuery({ queryKey: ['message-templates'], queryFn: () => api.get<TemplatesInfo>('/agenda/message-templates'), staleTime: 5 * 60_000 });
+  const [reports, setReports] = useState<Partial<Record<MessageKind, TemplateReport>>>({});
+  const [serverErrors, setServerErrors] = useState<Partial<Record<MessageField, string>>>({});
+  const onReport = useCallback((kind: MessageKind, report: TemplateReport) => setReports((r) => ({ ...r, [kind]: report })), []);
+  const maxLength = templates.data?.maxLength ?? FALLBACK_MAX_LENGTH;
+  const messageText = (kind: MessageKind) => {
+    const value = draft[MESSAGES[kind].type]?.config[MESSAGES[kind].field];
+    return typeof value === 'string' ? value : '';
+  };
+  const messageErrors = (kind: MessageKind): string[] => {
+    const text = messageText(kind);
+    const server = serverErrors[MESSAGES[kind].field];
+    if (server) return [server];
+    if (text.length > maxLength) return [`El texto es demasiado largo (máximo ${maxLength} caracteres).`];
+    // Solo cuentan los problemas del texto que hay ahora escrito (no los de una versión anterior).
+    const report = reports[kind];
+    return text.trim() && report && report.text === text ? report.issues : [];
+  };
+  const firstMessageError = MESSAGE_KINDS.map((k) => ({ k, errs: messageErrors(k) })).find((m) => m.errs.length > 0);
+  const error = firstError(errors) ?? (firstMessageError ? `${MESSAGES[firstMessageError.k].label}: ${firstMessageError.errs[0]}` : null);
+  const setMessage = (kind: MessageKind, text: string) => {
+    const { type, field } = MESSAGES[kind];
+    setServerErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
+    patchConfig(type, { [field]: text });
+  };
+  const messageEditor = (kind: MessageKind, active: boolean) => (
+    <MessageTemplateEditor kind={kind} value={messageText(kind)} onChange={(t) => setMessage(kind, t)} info={templates.data} active={active} errors={messageErrors(kind)} onReport={onReport} />
+  );
 
   const patch = (type: AutomationType, change: Partial<AutoDraft> | ((a: AutoDraft) => Partial<AutoDraft>)) =>
     setDraft((d) => {
@@ -382,11 +648,17 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
       void qc.invalidateQueries({ queryKey: ['settings'] });
     },
     onError: (e) => {
+      // Los errores de los textos de la llamada se muestran también junto al campo afectado.
+      setServerErrors(messageErrorsFrom(e));
       toast(errorText(e), 'error');
       // Puede haberse guardado una parte: recargamos para mostrar el estado real.
       void qc.invalidateQueries({ queryKey: ['settings'] });
     },
   });
+  const discard = () => {
+    setServerErrors({});
+    reset();
+  };
 
   const fu = draft.followup_no_reply;
   const rem = draft.appointment_reminders;
@@ -425,16 +697,28 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
       <AutomationCard type="appointment_reminders" icon={CalendarCheck} draft={rem} onToggle={(enabled) => patch('appointment_reminders', { enabled })}>
         {rem && (
           <>
-            <p className="muted small">Mensajes automáticos al lead para que no se olvide de la llamada. Reducen las ausencias y le permiten avisar si necesita cambiar la hora.</p>
+            <p className="muted small">
+              Mensajes automáticos al lead para que no se olvide de la llamada. Reducen las ausencias y le permiten avisar si necesita cambiar la hora. Puedes usar
+              el texto de KAI o escribir el tuyo: la fecha, la hora y el enlace se rellenan solos con los de cada llamada.
+            </p>
             <div>
-              <ToggleRow
-                title="Confirmación al agendar"
-                description="En cuanto se agenda la llamada, KAI envía un mensaje con el día y la hora (si no lo ha confirmado ya en la propia conversación)."
-                checked={rem.config.confirmation !== false}
-                onChange={(confirmation) => patchConfig('appointment_reminders', { confirmation })}
-              />
-              <ToggleRow title="Recordatorio 24 horas antes" description="Un día antes, KAI le recuerda la llamada y le pregunta si le sigue viniendo bien." checked={rem.config.reminder24h !== false} onChange={(reminder24h) => patchConfig('appointment_reminders', { reminder24h })} />
-              <ToggleRow title="Recordatorio 1 hora antes" description="Un aviso breve una hora antes, con el enlace de la llamada si lo hay." checked={rem.config.reminder1h !== false} onChange={(reminder1h) => patchConfig('appointment_reminders', { reminder1h })} />
+              <div className="fu-msg-group">
+                <ToggleRow
+                  title="Confirmación al agendar"
+                  description="En cuanto se agenda la llamada, KAI envía un mensaje con el día y la hora (si no lo ha confirmado ya en la propia conversación)."
+                  checked={rem.config.confirmation !== false}
+                  onChange={(confirmation) => patchConfig('appointment_reminders', { confirmation })}
+                />
+                {messageEditor('confirmation', rem.enabled && rem.config.confirmation !== false)}
+              </div>
+              <div className="fu-msg-group">
+                <ToggleRow title="Recordatorio 24 horas antes" description="Un día antes, KAI le recuerda la llamada y le pregunta si le sigue viniendo bien." checked={rem.config.reminder24h !== false} onChange={(reminder24h) => patchConfig('appointment_reminders', { reminder24h })} />
+                {messageEditor('reminder24h', rem.enabled && rem.config.reminder24h !== false)}
+              </div>
+              <div className="fu-msg-group">
+                <ToggleRow title="Recordatorio 1 hora antes" description="Un aviso breve una hora antes, con el enlace de la llamada si lo hay." checked={rem.config.reminder1h !== false} onChange={(reminder1h) => patchConfig('appointment_reminders', { reminder1h })} />
+                {messageEditor('reminder1h', rem.enabled && rem.config.reminder1h !== false)}
+              </div>
             </div>
             <QuietHoursEditor
               value={rem.config.quietHours}
@@ -468,6 +752,10 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
                 />
               </Field>
               <p className="subtle xs">Se cuenta desde que registras la ausencia. Valor por defecto: 15 minutos.</p>
+              <div className="fu-msg-group">
+                <strong className="small">Mensaje si no se presenta</strong>
+                {messageEditor('noShow', noShow.enabled)}
+              </div>
             </>
           )}
         </AutomationCard>
@@ -500,7 +788,7 @@ export default function FollowUpsTab({ settings, canEdit, onDirtyChange }: TabPr
         <BellRing size={13} aria-hidden /> Los mensajes y avisos que ya estaban programados mantienen su hora; los cambios se aplican a los siguientes.
       </p>
 
-      <SaveBar dirty={dirty} saving={save.isPending} canEdit={canEdit} error={error} onDiscard={reset} onSave={() => save.mutate()} saveLabel="Guardar seguimientos" />
+      <SaveBar dirty={dirty} saving={save.isPending} canEdit={canEdit} error={error} onDiscard={discard} onSave={() => save.mutate()} saveLabel="Guardar seguimientos" />
     </>
   );
 }

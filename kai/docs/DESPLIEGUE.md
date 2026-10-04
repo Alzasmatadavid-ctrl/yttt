@@ -118,4 +118,4 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 
 ## Varias instancias
 
-Puedes ejecutar más de una copia del servidor: la cola de trabajos usa bloqueos de PostgreSQL (`FOR UPDATE SKIP LOCKED`), así que cada recordatorio o respuesta se procesa una sola vez.
+Puedes ejecutar más de una copia del servidor: la cola de trabajos usa bloqueos de PostgreSQL (`FOR UPDATE SKIP LOCKED`), así que cada recordatorio o respuesta se procesa una sola vez. Los límites de peticiones (inicio de sesión, simulador, vista previa del Setter IA…) se cuentan en cada copia por separado: con dos copias, en la práctica se duplican.

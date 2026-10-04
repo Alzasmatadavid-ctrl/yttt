@@ -52,6 +52,9 @@ function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allow
   if (!activeBusiness) {
     return me.user.platformRole === 'admin' ? <Navigate to="/admin" replace /> : <Navigate to={NO_BUSINESS_PATH} replace />;
   }
+  // Cuenta suspendida: el servidor rechaza (403) todo lo del negocio, también el onboarding. Se deja pasar a AppLayout,
+  // que muestra el aviso de cuenta suspendida, y si se abre el onboarding se lleva allí en vez de mostrar errores.
+  if (activeBusiness.status === 'suspended') return allowOnboarding ? <Navigate to="/app" replace /> : <>{children}</>;
   const openDuringOnboarding = allowOnboarding || OPEN_DURING_ONBOARDING.some((p) => location.pathname.startsWith(p));
   if (!openDuringOnboarding && !activeBusiness.onboardingCompletedAt && activeBusiness.role === 'trainer') return <Navigate to="/app/onboarding" replace />;
   return <>{children}</>;

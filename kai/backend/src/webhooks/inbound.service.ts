@@ -56,6 +56,15 @@ export async function replyDelaySeconds(businessId: string): Promise<number> {
   return min + Math.random() * (max - min);
 }
 
+/**
+ * ¿Puede KAI escribir en nombre de este negocio? Con la cuenta desactivada los leads y sus mensajes
+ * se siguen guardando (no se pierde nada), pero no se programa ninguna respuesta ni primer contacto.
+ */
+async function businessIsActive(businessId: string): Promise<boolean> {
+  const [biz] = await getDb().select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return biz?.status === 'active';
+}
+
 /** Registra un mensaje entrante y programa la respuesta de KAI (con retardo humano y agrupando ráfagas). */
 export async function receiveInboundMessage(input: InboundMessageInput) {
   const db = getDb();
@@ -114,7 +123,7 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     optedOutNow = true;
   }
 
-  if (conversation.aiEnabled && !conversation.handoffActive && !lead.optedOut && !optedOutNow) {
+  if (conversation.aiEnabled && !conversation.handoffActive && !lead.optedOut && !optedOutNow && (await businessIsActive(input.businessId))) {
     const delay = input.replyDelaySeconds ?? (await replyDelaySeconds(input.businessId));
     await scheduleOrReschedule({
       businessId: input.businessId,
@@ -200,7 +209,8 @@ export async function ingestExternalLead(input: ExternalLeadInput): Promise<{ le
 
   let conversationId: string | null = null;
   const channel = input.firstContactChannel ?? 'none';
-  if (created && channel !== 'none' && (channel === 'web' || lead.phone)) {
+  // Cuenta desactivada: el lead queda guardado, pero KAI no le escribe.
+  if (created && channel !== 'none' && (channel === 'web' || lead.phone) && (await businessIsActive(input.businessId))) {
     const conversation = await getOrCreateConversation(input.businessId, lead.id, channel, input.whatsappConnectionId ?? null);
     conversationId = conversation.id;
     await scheduleJob({

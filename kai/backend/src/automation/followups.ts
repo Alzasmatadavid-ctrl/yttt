@@ -15,7 +15,7 @@ import { getChannelAdapter } from '../integrations/channels/registry.js';
 import { HOURS_24 } from '../integrations/channels/types.js';
 import { getActiveConnection } from '../integrations/connections.service.js';
 import { getAutomation } from './reminders.js';
-import { scheduleJob } from './jobs.js';
+import { cancelJobsForBusiness, scheduleJob } from './jobs.js';
 
 type QuietHours = { start: string; end: string };
 
@@ -143,6 +143,18 @@ export async function markFollowUp(followUpId: string, status: 'sent' | 'skipped
     .update(followUps)
     .set({ status, messageId: extra.messageId ?? null, note: extra.note ?? null, sentAt: status === 'sent' ? new Date() : null })
     .where(eq(followUps.id, followUpId));
+}
+
+/**
+ * Cuenta suspendida (o eliminada): no se envía nada en su nombre. Se cancelan todos sus trabajos pendientes
+ * y sus seguimientos programados, para que no salga una avalancha de mensajes antiguos si se reactiva.
+ */
+export async function stopBusinessAutomations(businessId: string, note: string) {
+  await cancelJobsForBusiness(businessId, note);
+  await getDb()
+    .update(followUps)
+    .set({ status: 'cancelled', note })
+    .where(and(eq(followUps.businessId, businessId), eq(followUps.status, 'scheduled')));
 }
 
 export async function listFollowUps(businessId: string, leadId?: string) {

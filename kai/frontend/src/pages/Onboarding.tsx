@@ -36,9 +36,10 @@ import {
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
-import { BILLING_PERIOD_LABELS, DEFAULT_TONE, WEEKDAY_LABELS, formatMoney, type AiTone, type AvailabilityWeek, type TimeRange } from '@shared';
+import { BILLING_PERIOD_LABELS, DEFAULT_TONE, ONE_QUESTION_MESSAGE, WEEKDAY_LABELS, formatMoney, hasSeveralQuestions, type AiTone, type AvailabilityWeek, type TimeRange } from '@shared';
 import { api, ApiError, errorText } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { parseEurosToCents } from '../lib/format';
 import { Logo } from '../components/brand';
 import { InstagramIcon, WhatsAppIcon } from '../components/lead-bits';
 import { Button, Callout, Card, Field, Input, PageLoading, Segmented, Select, Spinner, Switch, TagInput, Textarea, useToast } from '../components/ui';
@@ -274,23 +275,6 @@ const toMinutes = (hm: string) => {
   return h * 60 + m;
 };
 
-/**
- * Convierte lo que escribe el entrenador («149», «149,90», «1.200», «149 €», «149 MXN») a céntimos.
- * Ignora el símbolo o el código de la moneda si lo escribe junto al importe.
- */
-function parseAmountToCents(raw: string): number | null {
-  let s = raw
-    .replace(/[\s\p{Sc}]/gu, '')
-    .replace(/^[a-z]{3}(?=\d)/i, '')
-    .replace(/(\d)[a-z]{3}$/i, '$1');
-  if (!s) return null;
-  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
-  else if (s.includes(',')) s = s.replace(',', '.');
-  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
-  return Math.round(Number(s) * 100);
-}
-
 function centsToText(cents: number): string {
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2).replace('.', ',');
 }
@@ -313,7 +297,7 @@ const currencySymbol = (currency: string) => (currency === 'EUR' ? '€' : curre
  * El precio solo se envía cuando hay un importe válido, para no borrar uno ya guardado. Va siempre en la moneda del negocio.
  */
 function servicePayload(d: Draft, currency: string) {
-  const cents = parseAmountToCents(d.price);
+  const cents = parseEurosToCents(d.price);
   return {
     name: d.serviceName.trim(),
     description: d.serviceDescription.trim(),
@@ -440,7 +424,7 @@ function validateStep(key: StepKey, d: Draft): Errors {
       break;
     }
     case 'price': {
-      const cents = parseAmountToCents(d.price);
+      const cents = parseEurosToCents(d.price);
       if (!d.price.trim()) e.price = 'Indica el precio de tu servicio.';
       else if (cents === null) e.price = 'Escribe solo el importe, por ejemplo 149 o 149,90.';
       else if (cents <= 0) e.price = 'El precio debe ser mayor que 0.';
@@ -463,6 +447,12 @@ function validateStep(key: StepKey, d: Draft): Errors {
         if (len(r.label) < 2) e[`rules.${i}.label`] = 'Ponle un nombre (mínimo 2 caracteres).';
         else if (len(r.label) > 60) e[`rules.${i}.label`] = 'Máximo 60 caracteres.';
         if (len(r.question) > 300) e[`rules.${i}.question`] = 'Máximo 300 caracteres.';
+        // Misma regla que el servidor: más de un «?» son varias preguntas, y KAI hace solo una por mensaje.
+        else if (hasSeveralQuestions(r.question)) {
+          e[`rules.${i}.question`] = ONE_QUESTION_MESSAGE;
+          // Si la pregunta está desactivada, su campo no se ve: se avisa arriba para que se pueda corregir.
+          if (!r.enabled) e.rules = `«${r.label.trim() || r.key}»: ${ONE_QUESTION_MESSAGE} Actívala para corregirla.`;
+        }
       });
       if (!d.rules.some((r) => r.enabled && r.weight > 0)) e.rules = 'Activa al menos una pregunta para que KAI pueda valorar a tus leads.';
       break;
@@ -998,8 +988,12 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
       const msg = leadMessage.trim();
       return api.post<PreviewResponse>('/settings/ai/preview', msg ? { leadMessage: msg } : {});
     },
-    onError: (e) => toast(errorText(e), 'error'),
+    // Límite de mensajes del plan (402): se explica dentro de la tarjeta del ejemplo, no en un aviso que desaparece.
+    onError: (e) => {
+      if (!(e instanceof ApiError && e.status === 402 && e.code === 'limit_reached')) toast(errorText(e), 'error');
+    },
   });
+  const previewLimit = preview.error instanceof ApiError && preview.error.status === 402 && preview.error.code === 'limit_reached' ? preview.error.message : null;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -1165,7 +1159,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
           </>
         );
       case 'price': {
-        const cents = parseAmountToCents(draft.price);
+        const cents = parseEurosToCents(draft.price);
         const currency = businessCurrency(settings);
         return (
           <>
@@ -1275,7 +1269,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
                       <Field label="Nombre" htmlFor={`onb-rule-label-${i}`} error={errors[`rules.${i}.label`]}>
                         <Input id={`onb-rule-label-${i}`} value={r.label} maxLength={60} aria-invalid={Boolean(errors[`rules.${i}.label`])} onChange={(e) => setRule(i, { label: e.target.value })} />
                       </Field>
-                      <Field label="Cómo lo preguntarías tú" htmlFor={`onb-rule-q-${i}`} error={errors[`rules.${i}.question`]} hint="Déjalo vacío si prefieres que KAI lo deduzca de la conversación.">
+                      <Field label="Cómo lo preguntarías tú" htmlFor={`onb-rule-q-${i}`} error={errors[`rules.${i}.question`]} hint="Una sola pregunta. Déjalo vacío si prefieres que KAI lo deduzca de la conversación.">
                         <Input
                           id={`onb-rule-q-${i}`}
                           value={r.question}
@@ -1483,6 +1477,11 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
                   <div className="row muted small">
                     <Spinner size={16} /> KAI está escribiendo…
                   </div>
+                )}
+                {!preview.isPending && previewLimit && (
+                  <Callout tone="warning">
+                    {previewLimit} El ejemplo es opcional: puedes seguir configurando KAI sin él.
+                  </Callout>
                 )}
                 {!preview.isPending && result && (
                   <div className="col gap-12">

@@ -14,7 +14,7 @@
   --border-strong: #343944;
   --text: #eef0f3;
   --text-2: #a8afbb;
-  --text-3: #6f7785;
+  --text-3: #8a92a0; /* contraste ≥ 4,5:1 sobre las superficies oscuras (igual que tokens.css) */
   --accent: #c6ff3d;
   --accent-hover: #b3f01f;
   --accent-ink: #0b0c0e;

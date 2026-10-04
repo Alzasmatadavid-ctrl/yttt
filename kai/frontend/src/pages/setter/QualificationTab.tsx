@@ -2,7 +2,7 @@
 import { useId, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Calculator, ChevronDown, ChevronUp, ListChecks, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { STANDARD_QUALIFICATION_KEYS } from '@shared';
+import { ONE_QUESTION_MESSAGE, STANDARD_QUALIFICATION_KEYS, hasSeveralQuestions } from '@shared';
 import { api, errorText } from '../../lib/api';
 import { Button, Callout, Card, ConfirmDialog, Field, Input, Modal, Switch, Textarea, useToast } from '../../components/ui';
 import type { QualificationRule } from '../../lib/types';
@@ -30,13 +30,22 @@ function toDraft(rules: QualificationRule[]): RuleDraft[] {
     }));
 }
 
+/** Mismo mensaje y misma regla que el servidor (@shared): una pregunta sugerida con más de un «?» son varias preguntas. */
+function questionError(question: string): string | undefined {
+  const q = question.trim();
+  if (q.length > 300) return 'Máximo 300 caracteres.';
+  if (hasSeveralQuestions(q)) return ONE_QUESTION_MESSAGE;
+  return undefined;
+}
+
 function validateRule(r: RuleDraft): RuleErrors {
   const e: RuleErrors = {};
   const label = r.label.trim();
   if (label.length < 2) e.label = 'El nombre debe tener al menos 2 caracteres.';
   else if (label.length > 60) e.label = 'Máximo 60 caracteres.';
   if (r.description.trim().length > 300) e.description = 'Máximo 300 caracteres.';
-  if (r.question.trim().length > 300) e.question = 'Máximo 300 caracteres.';
+  const qe = questionError(r.question);
+  if (qe) e.question = qe;
   if (r.disqualifyWhen.trim().length > 300) e.disqualifyWhen = 'Máximo 300 caracteres.';
   if (!Number.isInteger(r.weight) || r.weight < 0 || r.weight > MAX_WEIGHT) e.weight = `El peso debe ser un número entero entre 0 y ${MAX_WEIGHT}.`;
   return e;
@@ -61,7 +70,8 @@ function CustomRuleModal({ open, onClose, taken, onAdd }: { open: boolean; onClo
   else if (STANDARD.has(effectiveKey)) errors.key = 'Ese identificador está reservado para una variable estándar.';
   else if (taken.has(effectiveKey)) errors.key = 'Ya existe una variable con ese identificador.';
   if (description.length > 300) errors.description = 'Máximo 300 caracteres.';
-  if (question.length > 300) errors.question = 'Máximo 300 caracteres.';
+  const qe = questionError(question);
+  if (qe) errors.question = qe;
   const valid = Object.keys(errors).length === 0;
 
   const close = () => {
@@ -79,7 +89,8 @@ function CustomRuleModal({ open, onClose, taken, onAdd }: { open: boolean; onClo
     onAdd({ key: effectiveKey, label: label.trim(), description: description.trim(), question: question.trim(), weight: 5, required: false, enabled: true, disqualifyWhen: '' });
     close();
   };
-  const show = (field: string) => (submitted || field === 'key' ? errors[field] : undefined);
+  // La regla de «una sola pregunta» se avisa mientras se escribe: es fácil de corregir en el momento.
+  const show = (field: string) => (submitted || field === 'key' || (field === 'question' && errors.question === ONE_QUESTION_MESSAGE) ? errors[field] : undefined);
 
   return (
     <Modal
@@ -120,7 +131,7 @@ function CustomRuleModal({ open, onClose, taken, onAdd }: { open: boolean; onClo
         <Field label="Qué significa (opcional)" htmlFor={ids.description} error={show('description')} hint="KAI usa esta descripción para saber qué información buscar en la conversación.">
           <Textarea id={ids.description} rows={2} value={description} maxLength={300} placeholder="Ej.: Días y horas en los que puede entrenar." onChange={(e) => setDescription(e.target.value)} />
         </Field>
-        <Field label="Pregunta sugerida (opcional)" htmlFor={ids.question} error={show('question')}>
+        <Field label="Pregunta sugerida (opcional)" htmlFor={ids.question} error={show('question')} hint="Una sola pregunta: KAI hace solo una pregunta por mensaje.">
           <Input id={ids.question} value={question} maxLength={300} placeholder="Ej.: ¿Qué días y a qué horas te vendría mejor entrenar?" onChange={(e) => setQuestion(e.target.value)} />
         </Field>
         <p className="subtle xs">La variable se añade al final de la lista con peso 5. Podrás ajustarla antes de guardar.</p>
@@ -206,7 +217,7 @@ function RuleItem({
             label="Pregunta sugerida"
             htmlFor={ids.question}
             error={errors.question}
-            hint="KAI la adapta a cada conversación, no la copia literal. Si la dejas vacía, KAI no preguntará por esto directamente, aunque lo tendrá en cuenta si el lead lo cuenta."
+            hint="Escribe una sola pregunta. KAI la adapta a cada conversación, no la copia literal. Si la dejas vacía, KAI no preguntará por esto directamente, aunque lo tendrá en cuenta si el lead lo cuenta."
           >
             <Input id={ids.question} value={rule.question} maxLength={300} onChange={(e) => onChange({ question: e.target.value })} />
           </Field>

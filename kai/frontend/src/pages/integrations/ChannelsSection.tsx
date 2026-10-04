@@ -137,9 +137,10 @@ function ConnectChannelModal({ def, existing, onClose }: { def: ChannelDef; exis
         displayName: typedName ?? (testMode ? `${def.title} (prueba)` : undefined),
         config,
         ...(testMode ? { skipVerification: true } : {}),
+        // Si ha cambiado de cuenta, el servidor desconecta la anterior en la misma operación (y no la cuenta para el límite del plan),
+        // así nunca quedan dos activas ni falla por el límite de canales al sustituir una cuenta por otra.
+        ...(existing && changingAccount ? { replacesConnectionId: existing.id } : {}),
       });
-      // Si ha cambiado de cuenta, la anterior se desconecta para que no queden dos activas.
-      if (existing && existing.id !== res.connection.id) await api.del(`/integrations/channels/${existing.id}`);
       return res.connection;
     },
     onSuccess: (c) => {

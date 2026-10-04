@@ -50,6 +50,10 @@ const FIELD_LABELS: Record<string, string> = {
   priceCents: 'precio',
   text: 'mensaje',
   question: 'pregunta',
+  confirmationMessage: 'mensaje de confirmación',
+  reminder24hMessage: 'recordatorio del día antes',
+  reminder1hMessage: 'recordatorio de una hora antes',
+  noShowMessage: 'mensaje si no se presenta',
 };
 
 /** Valida datos de entrada con Zod y devuelve un error 400 legible en español. */

@@ -53,9 +53,9 @@ function GoogleCard({ data, google, calendly, canManage }: { data: IntegrationsR
 
   const connect = useMutation({
     mutationFn: async () => {
-      // Primero pedimos la dirección de Google (así comprobamos que el servidor lo permite) y después, si hace falta, desconectamos Calendly.
+      // Calendly sigue conectado hasta que Google confirme: el servidor lo sustituye al guardar la conexión de Google,
+      // así que si el entrenador cancela en la pantalla de Google no se queda sin calendario.
       const { url } = await api.get<{ url: string }>('/integrations/google/connect');
-      if (calendly) await api.del('/integrations/calendar/calendly');
       return url;
     },
     onSuccess: (url) => {
@@ -146,7 +146,7 @@ function GoogleCard({ data, google, calendly, canManage }: { data: IntegrationsR
       <ConfirmDialog
         open={confirmSwitch}
         title="¿Cambiar de Calendly a Google Calendar?"
-        message="Solo puede haber un calendario conectado a la vez. Vamos a desconectar Calendly y a llevarte a Google para conectar tu calendario. Si cancelas en Google, KAI usará su propia agenda hasta que conectes uno."
+        message="Solo puede haber un calendario conectado a la vez. Te llevamos a Google para conectar tu calendario y, cuando lo confirmes, sustituirá a Calendly. Si cancelas en Google, Calendly sigue conectado como hasta ahora."
         confirmLabel="Continuar con Google"
         loading={connect.isPending}
         onConfirm={() => connect.mutate()}

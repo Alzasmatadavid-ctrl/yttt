@@ -7,6 +7,7 @@ import {
   acceptInvitation,
   authenticate,
   changePassword,
+  createOwnBusiness,
   getInvitation,
   listUserBusinesses,
   registerTrainer,
@@ -72,6 +73,21 @@ export async function authRoutes(app: FastifyInstance) {
     if (!businesses.some((b) => b.businessId === businessId)) throw forbidden('No tienes acceso a ese negocio.');
     await setActiveBusiness(request.sessionToken!, businessId);
     return { ok: true };
+  });
+
+  /**
+   * «Crear mi negocio» (pantalla /sin-negocio): solo para una cuenta con sesión y SIN ningún negocio.
+   * Lo crea con el plan por defecto y lo deja activo en la sesión; después la app lleva al onboarding.
+   */
+  app.post('/create-business', authLimit, async (request) => {
+    const user = requireUser(request);
+    const body = parse(
+      z.object({ name: z.string().trim().min(2, 'Indica el nombre de tu negocio').max(120), timezone: timezoneSchema.optional() }),
+      request.body,
+    );
+    const business = await createOwnBusiness(user.id, body);
+    if (request.sessionToken) await setActiveBusiness(request.sessionToken, business.id);
+    return { business: { id: business.id, name: business.name } };
   });
 
   app.post('/forgot-password', authLimit, async (request) => {

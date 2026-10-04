@@ -13,14 +13,16 @@ import {
   plans,
   qualificationRules,
   services,
+  sessions,
   trainers,
   users,
 } from '../database/schema.js';
 import { parse, uuidParam, timezoneSchema } from '../lib/http.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
-import { requireTenant } from '../auth/guards.js';
+import { perBusinessRateLimit, requireTenant } from '../auth/guards.js';
+import { env } from '../config/env.js';
 import { audit } from '../audit/audit.service.js';
-import { STANDARD_QUALIFICATION_KEYS, type AutomationType } from '../lib/domain.js';
+import { hasSeveralQuestions, ONE_QUESTION_MESSAGE, STANDARD_QUALIFICATION_KEYS, type AutomationType } from '../lib/domain.js';
 import { temperatureFor, validateBands } from '../crm/scoring.js';
 import { recomputeLeadScore } from '../crm/leads.service.js';
 import { getLimits, getUsage, countSeats, countChannels } from '../plans/plans.service.js';
@@ -28,6 +30,7 @@ import { inviteMember } from '../auth/auth.service.js';
 import { getAvailabilityConfig } from '../calendar/calendar.service.js';
 import { previewSetterMessage } from '../ai/setter/preview.js';
 import { aiModeInfo } from '../ai/providers/index.js';
+import { automationMessageIssues, MESSAGE_TEMPLATE_MAX_LENGTH } from '../automation/messages.js';
 
 const level = z.number().int().min(1).max(5);
 export const ToneSchema = z.object({
@@ -135,14 +138,25 @@ const ObjectionSchema = z.object({
 
 const StepSchema = z.object({ delayHours: z.number().min(0.25).max(24 * 30), angle: z.string().trim().min(3).max(300) });
 const QuietSchema = z.object({ start: z.string().regex(/^\d{2}:\d{2}$/), end: z.string().regex(/^\d{2}:\d{2}$/) });
-const AutomationConfigSchema = z.object({
-  steps: z.array(StepSchema).max(6).optional(),
-  quietHours: QuietSchema.optional(),
-  confirmation: z.boolean().optional(),
-  reminder24h: z.boolean().optional(),
-  reminder1h: z.boolean().optional(),
-  delayMinutes: z.number().int().min(0).max(24 * 60).optional(),
-});
+/** Texto editable de confirmación, recordatorio o no-show. Vacío ('') = usar el texto por defecto de KAI. */
+const MessageTemplateSchema = z.string().trim().max(MESSAGE_TEMPLATE_MAX_LENGTH).optional();
+const AutomationConfigSchema = z
+  .object({
+    steps: z.array(StepSchema).max(6).optional(),
+    quietHours: QuietSchema.optional(),
+    confirmation: z.boolean().optional(),
+    reminder24h: z.boolean().optional(),
+    reminder1h: z.boolean().optional(),
+    delayMinutes: z.number().int().min(0).max(24 * 60).optional(),
+    confirmationMessage: MessageTemplateSchema,
+    reminder24hMessage: MessageTemplateSchema,
+    reminder1hMessage: MessageTemplateSchema,
+    noShowMessage: MessageTemplateSchema,
+  })
+  // Mismas comprobaciones que la vista previa: variables válidas, {fecha}/{hora} obligatorias, sin precios…
+  .superRefine((cfg, ctx) => {
+    for (const { field, issues } of automationMessageIssues(cfg)) for (const message of issues) ctx.addIssue({ code: 'custom', path: [field], message });
+  });
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/settings', async (request) => {
@@ -199,7 +213,8 @@ export async function settingsRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post('/settings/ai/preview', async (request) => {
+  // Cada vista previa gasta IA: límite por negocio (no por IP), además del límite mensual de mensajes del plan.
+  app.post('/settings/ai/preview', perBusinessRateLimit(() => env.SIMULATOR_MAX_PER_MINUTE), async (request) => {
     const ctx = await requireTenant(request, 'settings:read');
     const body = parse(
       z.object({
@@ -240,6 +255,11 @@ export async function settingsRoutes(app: FastifyInstance) {
     const keys = body.rules.map((r) => r.key);
     if (new Set(keys).size !== keys.length) throw badRequest('Hay variables de cualificación repetidas.');
     if (!body.rules.some((r) => r.enabled && r.weight > 0)) throw badRequest('Activa al menos una variable con peso mayor que 0.');
+    // KAI hace UNA sola pregunta por mensaje: una “pregunta” con dos «?» acabaría en dos preguntas seguidas.
+    const several = body.rules.findIndex((r) => hasSeveralQuestions(r.question));
+    if (several >= 0) {
+      throw badRequest(ONE_QUESTION_MESSAGE, [{ path: `rules.${several}.question`, message: ONE_QUESTION_MESSAGE, label: body.rules[several].label }]);
+    }
     const db = getDb();
     await db.transaction(async (tx) => {
       // Las variables estándar no se borran (solo se desactivan); las personalizadas sí.
@@ -429,6 +449,12 @@ export async function settingsRoutes(app: FastifyInstance) {
       .where(and(eq(memberships.businessId, ctx.businessId), eq(memberships.role, 'trainer')));
     if (trainersLeft.length <= 1 && trainersLeft[0]?.userId === id) throw forbidden('El negocio debe tener al menos un entrenador.');
     await db.delete(memberships).where(and(eq(memberships.businessId, ctx.businessId), eq(memberships.userId, id)));
+    // Sus sesiones dejan de apuntar a este negocio: pasan a su otro negocio (si tiene) o a «sin negocio».
+    // No se cierran: el acceso ya se comprueba en cada petición y así puede crear su propio negocio.
+    await db
+      .update(sessions)
+      .set({ activeBusinessId: null })
+      .where(and(eq(sessions.userId, id), eq(sessions.activeBusinessId, ctx.businessId)));
     await audit({ businessId: ctx.businessId, actorType: 'user', actorUserId: ctx.userId, action: 'team.member_removed', entityType: 'user', entityId: id });
     return { ok: true };
   });

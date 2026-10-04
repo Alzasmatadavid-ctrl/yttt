@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Brain, CalendarPlus, ClipboardCheck, History, MessagesSquare, Plus, Repeat, Save, Target, Trash2, UserRound, X } from 'lucide-react';
+import { ArrowLeft, Ban, Brain, CalendarPlus, ClipboardCheck, History, MessageCircle, MessagesSquare, Plus, Repeat, Save, Target, Trash2, UserRound, X } from 'lucide-react';
 import { leadSourceLabel, leadStatusLabel, type LeadSource, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, money, timeAgo } from '../lib/format';
 import { useBusinessTimezone, useCan } from '../lib/business';
-import { Button, Card, ConfirmDialog, EmptyState, Field, Input, PageLoading, Textarea, useToast, TagInput } from '../components/ui';
+import { Button, Callout, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageLoading, Textarea, useToast, TagInput } from '../components/ui';
 import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
 import { BookCallModal, OutcomeModal, QualificationList, StatusSelect } from '../components/lead-actions';
 import type { Appointment, Conversation, Lead, Memory, QualificationRule } from '../lib/types';
@@ -36,7 +36,8 @@ const EVENT_LABELS: Record<string, string> = {
   no_show_message_sent: 'Mensaje de no-show enviado',
   followup_sent: 'Seguimiento enviado',
   handoff: 'KAI pidió intervención humana',
-  opted_out: 'Pidió no recibir mensajes',
+  opted_out: 'Dado de baja: no se le vuelve a escribir',
+  opted_in: 'Vuelve a aceptar mensajes',
 };
 
 const ACTOR_LABELS: Record<string, string> = { kai: 'KAI', human: 'Equipo', system: 'Sistema', lead: 'Lead', integration: 'Integración' };
@@ -46,7 +47,72 @@ function describeEvent(e: Profile['events'][number]) {
   if (e.type === 'score_changed') return `${e.data.from} → ${e.data.to}`;
   if (e.type === 'created') return e.data.source ? `Origen: ${leadSourceLabel(e.data.source as LeadSource)}` : '';
   if (e.type === 'handoff') return String(e.data.detail ?? e.data.reason ?? '');
+  if (e.type === 'opted_out') {
+    const reason = typeof e.data.reason === 'string' ? e.data.reason : '';
+    if (e.data.manual) return reason ? `Baja manual del equipo · ${reason}` : 'Baja manual del equipo';
+    return 'Lo pidió el propio lead en la conversación';
+  }
   return '';
+}
+
+/**
+ * Baja / alta manual de mensajes (POST /leads/:id/opt-out). Para cuando el lead pide por otra vía (teléfono, email,
+ * en persona) que no le escriban más, o cuando vuelve a pedir que le escriban. Siempre con confirmación.
+ */
+function OptOutDialog({ lead, open, onClose }: { lead: Lead; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const optingOut = !lead.optedOut;
+  const close = () => {
+    setReason('');
+    onClose();
+  };
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post<{ lead: Lead }>(`/leads/${lead.id}/opt-out`, optingOut ? { optedOut: true, ...(reason.trim() ? { reason: reason.trim() } : {}) } : { optedOut: false }),
+    onSuccess: () => {
+      toast(optingOut ? 'Lead dado de baja: no se le volverá a escribir.' : 'El lead vuelve a aceptar mensajes. KAI sigue en pausa en sus conversaciones hasta que se las devuelvas.');
+      // La baja pausa a KAI en sus conversaciones y cancela seguimientos: cambia la ficha, la bandeja y los listados.
+      for (const key of ['lead', 'leads', 'inbox', 'inbox-counts', 'conversation', 'dashboard']) void qc.invalidateQueries({ queryKey: [key] });
+      close();
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const name = lead.name || 'este lead';
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title={optingOut ? `¿Dar de baja a ${name}?` : '¿Volver a permitir mensajes?'}
+      footer={
+        <>
+          <Button onClick={close}>Cancelar</Button>
+          <Button variant={optingOut ? 'danger' : 'primary'} icon={optingOut ? Ban : MessageCircle} loading={mutation.isPending} onClick={() => mutation.mutate()}>
+            {optingOut ? 'Dar de baja' : 'Volver a permitir mensajes'}
+          </Button>
+        </>
+      }
+    >
+      {optingOut ? (
+        <div className="col gap-12">
+          <p className="muted">
+            Ni KAI ni tu equipo podrán volver a escribirle: KAI se pausa en sus conversaciones y se cancelan los seguimientos y recordatorios pendientes. El
+            lead y su historial no se borran.
+          </p>
+          <p className="muted small">Úsalo cuando te pida, por teléfono, email o en persona, que no le escribáis más.</p>
+          <Field label="Motivo (opcional)" hint="Solo lo ve tu equipo, en el historial del lead.">
+            <Input value={reason} maxLength={300} placeholder="Ej.: Me lo pidió por teléfono" onChange={(e) => setReason(e.target.value)} />
+          </Field>
+        </div>
+      ) : (
+        <div className="col gap-12">
+          <p className="muted">Hazlo solo si {lead.name || 'el lead'} te ha pedido que vuelvas a escribirle. Tu equipo podrá escribirle de nuevo desde la conversación.</p>
+          <p className="muted small">KAI seguirá en pausa en sus conversaciones hasta que pulses «Devolver a KAI» en la bandeja de entrada.</p>
+        </div>
+      )}
+    </Modal>
+  );
 }
 
 type LeadForm = { name: string; phone: string; email: string; instagramUsername: string; notes: string; tags: string[] };
@@ -102,6 +168,7 @@ export default function LeadDetail() {
   const [booking, setBooking] = useState(false);
   const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [optOutOpen, setOptOutOpen] = useState(false);
   const [newMemory, setNewMemory] = useState('');
   const { data, isLoading, error } = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.get<Profile>(`/leads/${leadId}`), enabled: Boolean(leadId) });
   const { form, setForm, dirty, markSaved } = useLeadDraft(data?.lead);
@@ -169,7 +236,7 @@ export default function LeadDetail() {
               <ScoreBadge score={lead.score} />
               <SourceBadge source={lead.source} />
               {lead.isTest && <span className="badge">Prueba</span>}
-              {lead.optedOut && <span className="badge badge-danger">No contactar</span>}
+              {lead.optedOut && <span className="badge badge-danger">Dado de baja</span>}
             </div>
           </div>
         </div>
@@ -187,6 +254,11 @@ export default function LeadDetail() {
           <div style={{ width: 190 }}>
             <StatusSelect leadId={lead.id} status={lead.status} onChanged={invalidate} />
           </div>
+          {!lead.optedOut && (
+            <Button variant="ghost" icon={Ban} onClick={() => setOptOutOpen(true)}>
+              Dar de baja (no volver a escribirle)
+            </Button>
+          )}
           {canDelete && (
             <Button variant="danger" iconOnly icon={Trash2} onClick={() => setConfirmDelete(true)}>
               Eliminar lead
@@ -194,6 +266,21 @@ export default function LeadDetail() {
           )}
         </div>
       </div>
+
+      {lead.optedOut && (
+        <div style={{ marginBottom: 16 }} role="status">
+          <Callout tone="danger" icon={Ban}>
+            <div className="row-between wrap" style={{ gap: 12 }}>
+              <span>
+                <strong>Este lead está dado de baja.</strong> Ni KAI ni tu equipo le escribirán: no recibe respuestas, seguimientos ni recordatorios.
+              </span>
+              <Button size="sm" icon={MessageCircle} onClick={() => setOptOutOpen(true)}>
+                Volver a permitir mensajes
+              </Button>
+            </div>
+          </Callout>
+        </div>
+      )}
 
       <div className="grid-split">
         <div className="col gap-16">
@@ -391,6 +478,7 @@ export default function LeadDetail() {
         </div>
       </div>
 
+      <OptOutDialog lead={lead} open={optOutOpen} onClose={() => setOptOutOpen(false)} />
       <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversation?.id} />
       <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
       <ConfirmDialog

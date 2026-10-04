@@ -90,6 +90,30 @@ export async function requireTenant(request: FastifyRequest, permission?: Permis
   return request.tenant;
 }
 
+/**
+ * Límite de peticiones POR NEGOCIO (no por IP) para las rutas que gastan IA a demanda (simulador, vista previa):
+ * cambiar de IP o de dispositivo no lo salta, y varias personas del equipo en la misma red no se lo reparten.
+ * Si la petición no es de un miembro del negocio se cuenta por IP (la ruta la rechazará igualmente).
+ * `max` se lee en cada petición, así que respeta cambios de configuración sin reiniciar.
+ */
+export function perBusinessRateLimit(max: () => number, timeWindow = '1 minute') {
+  return {
+    config: {
+      rateLimit: {
+        max: () => max(),
+        timeWindow,
+        keyGenerator: async (request: FastifyRequest) => {
+          try {
+            return `business:${(await requireTenant(request)).businessId}`;
+          } catch {
+            return `ip:${request.ip}`;
+          }
+        },
+      },
+    },
+  };
+}
+
 export function can(ctx: TenantContext, permission: Permission) {
   return ctx.permissions.includes(permission);
 }

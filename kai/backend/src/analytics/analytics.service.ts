@@ -7,6 +7,7 @@ import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { getDb } from '../database/client.js';
 import {
+  aiSettings,
   alerts,
   analyticsDaily,
   appointments,
@@ -18,7 +19,8 @@ import {
   plans,
   services,
 } from '../database/schema.js';
-import type { LeadStatus } from '../lib/domain.js';
+import { DEFAULT_SCORE_BANDS, type LeadStatus } from '../lib/domain.js';
+import { bandMin } from '../crm/scoring.js';
 import { getInsights } from './insights.js';
 
 export type Period = 'today' | '7d' | '30d' | '90d' | 'custom';
@@ -261,7 +263,8 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
   const [counts] = await db
     .select({
       newToday: sql<number>`count(*) filter (where ${leads.createdAt} >= ${today.from})::int`,
-      contacted: sql<number>`count(*) filter (where ${leads.status} = 'contacted')::int`,
+      // Leads a los que KAI o el equipo ya han escrito (no solo los que siguen en la etapa “Contactado”).
+      contacted: sql<number>`count(*) filter (where ${leads.lastOutboundAt} is not null)::int`,
       active: sql<number>`count(*) filter (where ${leads.lastInteractionAt} >= now() - interval '7 days' and ${leads.status} not in ('client','lost'))::int`,
       hot: sql<number>`count(*) filter (where ${leads.temperature} in ('caliente','muy_cualificado') and ${leads.status} not in ('client','lost'))::int`,
       qualified: sql<number>`count(*) filter (where ${leads.status} in ('qualified','call_proposed'))::int`,
@@ -281,19 +284,41 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     .from(followUps)
     .where(and(eq(followUps.businessId, businessId), eq(followUps.status, 'scheduled')));
 
+  // Las citas del simulador (leads de prueba) no cuentan como llamadas reales.
   const callsToday = await db
     .select({ appointment: appointments, leadName: leads.name, leadScore: leads.score, goal: leads.goalSummary })
     .from(appointments)
     .innerJoin(leads, eq(leads.id, appointments.leadId))
-    .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'scheduled'), gte(appointments.startsAt, today.from), lt(appointments.startsAt, today.to)))
+    .where(
+      and(
+        eq(appointments.businessId, businessId),
+        eq(leads.isTest, false),
+        eq(appointments.status, 'scheduled'),
+        gte(appointments.startsAt, today.from),
+        lt(appointments.startsAt, today.to),
+      ),
+    )
     .orderBy(asc(appointments.startsAt));
+  const upcomingWhere = and(
+    eq(appointments.businessId, businessId),
+    eq(leads.isTest, false),
+    eq(appointments.status, 'scheduled'),
+    gte(appointments.startsAt, today.to),
+    lt(appointments.startsAt, new Date(Date.now() + 7 * 86_400_000)),
+  );
+  // La lista muestra las 10 primeras; el indicador cuenta todas las de los próximos 7 días.
   const upcoming = await db
     .select({ appointment: appointments, leadName: leads.name, leadScore: leads.score, goal: leads.goalSummary })
     .from(appointments)
     .innerJoin(leads, eq(leads.id, appointments.leadId))
-    .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'scheduled'), gte(appointments.startsAt, today.to), lt(appointments.startsAt, new Date(Date.now() + 7 * 86_400_000))))
+    .where(upcomingWhere)
     .orderBy(asc(appointments.startsAt))
     .limit(10);
+  const [upcomingCount] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(appointments)
+    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .where(upcomingWhere);
 
   const openAlerts = await db
     .select({ alert: alerts, leadName: leads.name })
@@ -303,14 +328,17 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     .orderBy(sql`case ${alerts.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`, sql`${alerts.createdAt} desc`)
     .limit(20);
 
-  // Leads a punto de perderse: interesados o más, sin contestar hace 48 h y sin llamada.
+  // Leads a punto de perderse: interesados o más (según las bandas de puntuación del negocio),
+  // sin contestar hace 48 h y sin llamada.
+  const [settings] = await db.select({ scoreBands: aiSettings.scoreBands }).from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
+  const interestedMin = bandMin(settings?.scoreBands ?? DEFAULT_SCORE_BANDS, 'interesado', 51);
   const atRisk = await db
     .select({ id: leads.id, name: leads.name, score: leads.score, temperature: leads.temperature, status: leads.status, lastInboundAt: leads.lastInboundAt, lastOutboundAt: leads.lastOutboundAt, goalSummary: leads.goalSummary })
     .from(leads)
     .where(
       and(
         notTest,
-        gte(leads.score, 51),
+        gte(leads.score, interestedMin),
         inArray(leads.status, ['conversing', 'interested', 'qualified', 'call_proposed', 'follow_up', 'no_show']),
         sql`coalesce(${leads.lastInboundAt}, ${leads.createdAt}) < now() - interval '48 hours'`,
       ),
@@ -348,7 +376,7 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
       activeConversations: convs?.active ?? 0,
       pendingFollowUps: fus?.pending ?? 0,
       callsToday: callsToday.length,
-      upcomingCalls: upcoming.length,
+      upcomingCalls: upcomingCount?.n ?? 0,
       leadsWithoutReply: counts?.noReply ?? 0,
     },
     callsToday,

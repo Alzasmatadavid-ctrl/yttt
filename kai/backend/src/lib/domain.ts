@@ -76,6 +76,12 @@ export const STANDARD_QUALIFICATION_KEYS = [
 ] as const;
 export type StandardQualificationKey = (typeof STANDARD_QUALIFICATION_KEYS)[number];
 
+/** KAI hace UNA sola pregunta por mensaje: cada pregunta de cualificación debe serlo. */
+export const ONE_QUESTION_MESSAGE = 'Escribe una sola pregunta: KAI hace solo una pregunta por mensaje.';
+
+/** ¿El texto contiene más de una pregunta? (más de un «?»). */
+export const hasSeveralQuestions = (text: string) => (text.match(/\?/g) ?? []).length > 1;
+
 export type SignalLevel = 'high' | 'medium' | 'low';
 export type BudgetLevel = 'yes' | 'maybe' | 'no';
 export type FitLevel = 'yes' | 'unknown' | 'no';
@@ -252,6 +258,10 @@ export interface ConversationState {
   objectionsHandled?: string[];
   lastAnalysisAt?: string;
   medicalFlag?: boolean;
+  /** El lead rechazó (o canceló) la llamada: KAI no se la vuelve a proponer salvo que la pida él. */
+  callDeclinedAt?: string;
+  /** Ya se resolvieron una vez sus dudas sobre la llamada (no se repite la misma explicación). */
+  callReassuredAt?: string;
 }
 
 // ───────────── Agenda ─────────────

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { boolQuery, parse, uuidParam } from '../lib/http.js';
-import { requireTenant } from '../auth/guards.js';
+import { requireTenant, type TenantContext } from '../auth/guards.js';
 import { LEAD_SOURCES, LEAD_STATUS_KEYS, LEAD_TEMPERATURES, type LeadSource, type LeadStatus, type LeadTemperature } from '../lib/domain.js';
 import {
   createLead,
@@ -136,28 +136,46 @@ export async function crmRoutes(app: FastifyInstance) {
     return { lead };
   });
 
-  // Baja / alta manual: p. ej. el lead pidió por teléfono o por email que no le escriban más.
-  app.post('/leads/:id/opt-out', async (request) => {
-    const ctx = await requireTenant(request, 'leads:write');
-    const { id } = parse(uuidParam, request.params);
-    const body = parse(z.object({ optedOut: z.boolean(), reason: z.string().trim().max(300).optional() }), request.body);
+  /**
+   * Baja / alta manual: p. ej. el lead pidió por teléfono o por email que no le escriban más, o que vuelvan
+   * a hacerlo. Queda en la ficha (evento) y en la auditoría con el usuario. Tras un alta, KAI sigue en pausa
+   * en sus conversaciones hasta que el entrenador lo reactive.
+   */
+  async function setOptOut(ctx: TenantContext, id: string, optedOut: boolean, reason: string | undefined, ip: string) {
     const lead = await getLead(ctx.businessId, id);
-    if (lead.optedOut !== body.optedOut) {
+    if (lead.optedOut !== optedOut) {
       const actor = { type: 'user' as const, userId: ctx.userId };
-      if (body.optedOut) await markOptedOut(ctx.businessId, id, actor, { manual: true, reason: body.reason });
+      if (optedOut) await markOptedOut(ctx.businessId, id, actor, { manual: true, reason });
       else await markOptedIn(ctx.businessId, id, actor);
       await audit({
         businessId: ctx.businessId,
         actorType: 'user',
         actorUserId: ctx.userId,
-        action: body.optedOut ? 'lead.opted_out' : 'lead.opted_in',
+        action: optedOut ? 'lead.opted_out' : 'lead.opted_in',
         entityType: 'lead',
         entityId: id,
-        metadata: { manual: true, reason: body.reason },
-        ip: request.ip,
+        metadata: { manual: true, reason },
+        ip,
       });
     }
     return { lead: await getLead(ctx.businessId, id) };
+  }
+
+  const OptReason = z.string().trim().max(300).optional();
+
+  app.post('/leads/:id/opt-out', async (request) => {
+    const ctx = await requireTenant(request, 'leads:write');
+    const { id } = parse(uuidParam, request.params);
+    const body = parse(z.object({ optedOut: z.boolean(), reason: OptReason }), request.body);
+    return setOptOut(ctx, id, body.optedOut, body.reason, request.ip);
+  });
+
+  // «Volver a permitir mensajes» (equivale a opt-out con optedOut: false).
+  app.post('/leads/:id/opt-in', async (request) => {
+    const ctx = await requireTenant(request, 'leads:write');
+    const { id } = parse(uuidParam, request.params);
+    const body = parse(z.object({ reason: OptReason }), request.body ?? {});
+    return setOptOut(ctx, id, false, body.reason, request.ip);
   });
 
   app.post('/leads/:id/rescore', async (request) => {

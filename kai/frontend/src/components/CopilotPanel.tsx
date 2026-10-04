@@ -58,7 +58,10 @@ function ActionCard({ action, pending }: { action: { id: string; summary: string
     <div className="action-card">
       <div className="small">
         <strong>Requiere tu confirmación</strong>
-        <div className="muted mt-4">{action.summary}</div>
+        {/* El resumen de «enviar mensaje» incluye el mensaje completo (con saltos de línea): se muestra entero antes de confirmar. */}
+        <div className="muted mt-4" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {action.summary}
+        </div>
       </div>
       {state === 'pending' ? (
         <div className="row">

@@ -90,6 +90,10 @@ const EnvSchema = z.object({
   PUBLIC_FORM_MAX_PER_HOUR: positiveInt(30),
   PUBLIC_FORM_MAX_PER_DAY: positiveInt(200),
 
+  // --- Pruebas de KAI (anti-abuso) ---
+  /** Mensajes por minuto y negocio en el simulador y en la vista previa del Setter IA (cada uno gasta IA). */
+  SIMULATOR_MAX_PER_MINUTE: positiveInt(20),
+
   // --- Frontend ---
   SERVE_FRONTEND: bool(false),
   FRONTEND_DIST: z.string().default('../frontend/dist'),

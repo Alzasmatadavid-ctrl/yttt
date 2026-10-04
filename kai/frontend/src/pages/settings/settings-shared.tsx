@@ -4,6 +4,7 @@ import { RotateCcw, Save } from 'lucide-react';
 import type { BusinessRole, PlanLimits, UsageMetric } from '@shared';
 import { Button } from '../../components/ui';
 import type { Plan } from '../../lib/types';
+import { parseEurosToCents as parseAmount } from '../../lib/format';
 
 // ───────────── Tipos (reflejan settings.routes.ts) ─────────────
 
@@ -191,18 +192,12 @@ export function centsToInput(cents: number | null | undefined): string {
 
 /**
  * Importe escrito → céntimos. Acepta “300”, “300,5”, “1.250,90” o “1250.90” (con o sin símbolo de moneda: “300 €”, “$300”).
- * Devuelve null si no es un importe válido. Vacío = 0.
+ * Devuelve null si no es un importe válido. Vacío = 0 (en Ajustes, un importe vacío significa «nada»).
+ * Usa la conversión común de la app (lib/format) para que un mismo texto valga lo mismo en todas las pantallas.
  */
 export function parseEurosToCents(raw: string): number | null {
-  const s = raw.trim().replace(/[\s\p{Sc}]/gu, '');
-  if (!s) return 0;
-  let normalized: string;
-  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(s)) normalized = s.replace(/\./g, '').replace(',', '.');
-  else if (/^\d+([.,]\d{1,2})?$/.test(s)) normalized = s.replace(',', '.');
-  else return null;
-  const value = Number(normalized);
-  if (!Number.isFinite(value) || value < 0) return null;
-  return Math.round(value * 100);
+  if (!raw.replace(/[\s\p{Sc}]/gu, '')) return 0;
+  return parseAmount(raw);
 }
 
 // ───────────── Fechas ─────────────

@@ -1,9 +1,10 @@
 /* Pestaña «Personalidad»: identidad, transparencia, tono, vocabulario, ejemplos, ritmo y vista previa. */
 import { useId, useState } from 'react';
+import { Link } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, Lightbulb, ListChecks, MessageSquareText, Power, ShieldCheck, SlidersHorizontal, Sparkles, Timer, UserRound, Users } from 'lucide-react';
 import { DEFAULT_TONE, type AiTone } from '@shared';
-import { api, errorText } from '../../lib/api';
+import { api, ApiError, errorText } from '../../lib/api';
 import { Button, Callout, Card, ConfirmDialog, Field, Input, Spinner, Switch, TagInput, Textarea, useToast } from '../../components/ui';
 import { InstagramIcon, WhatsAppIcon } from '../../components/lead-bits';
 import type { AiSettings, SettingsResponse } from '../../lib/types';
@@ -138,6 +139,9 @@ function AutopilotCard({ enabled, canEdit }: { enabled: boolean; canEdit: boolea
 }
 
 // ───────────── Vista previa ─────────────
+/** 402 «limit_reached»: la vista previa usa la IA real y cuenta para el límite de mensajes del plan. */
+const isLimitReached = (e: unknown): e is ApiError => e instanceof ApiError && e.status === 402 && e.code === 'limit_reached';
+
 function PreviewCard({
   ai,
   assistantName,
@@ -159,8 +163,12 @@ function PreviewCard({
   const [usedDraft, setUsedDraft] = useState(false);
   const preview = useMutation({
     mutationFn: (vars: { leadMessage: string; overrides?: Partial<PersonalityDraft> }) => api.post<PreviewResponse>('/settings/ai/preview', vars),
-    onError: (e) => toast(errorText(e), 'error'),
+    // El límite del plan se explica dentro de la tarjeta (con enlace al plan), no en un aviso que desaparece.
+    onError: (e) => {
+      if (!isLimitReached(e)) toast(errorText(e), 'error');
+    },
   });
+  const limitMessage = isLimitReached(preview.error) ? preview.error.message : null;
   const run = () => {
     const text = message.trim();
     if (!text) {
@@ -217,7 +225,13 @@ function PreviewCard({
             <Spinner size={16} /> KAI está escribiendo…
           </div>
         )}
-        {!busy && !result && <p className="subtle small">Aquí aparecerá la respuesta de ejemplo.</p>}
+        {!busy && limitMessage && (
+          <Callout tone="warning">
+            {limitMessage}{' '}
+            <Link to="/app/ajustes?tab=plan">Ver mi plan</Link>
+          </Callout>
+        )}
+        {!busy && !result && !limitMessage && <p className="subtle small">Aquí aparecerá la respuesta de ejemplo.</p>}
         {!busy && result && (
           <div className="col gap-12">
             <div className="phone setter-chat">

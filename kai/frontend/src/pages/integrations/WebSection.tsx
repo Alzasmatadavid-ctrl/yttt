@@ -191,7 +191,8 @@ function FormGenerator({ endpoint, publicKey }: { endpoint: string; publicKey: s
           <Switch checked={o.askGoal} onChange={(v) => set('askGoal', v)} label="Preguntar su objetivo" />
           <Switch checked={o.whatsapp} onChange={(v) => set('whatsapp', v)} label="Que KAI le escriba por WhatsApp" />
           <span className="xs subtle">
-            Si tienes WhatsApp conectado y la persona deja su teléfono, KAI le envía el primer mensaje con tu plantilla de «Primer contacto».
+            Si tienes WhatsApp conectado y la persona deja su teléfono, KAI le envía el primer mensaje con tu plantilla de «Primer contacto». Si la
+            desactivas, el lead entra igual en KAI pero nadie le escribe por WhatsApp: en este formulario KAI solo escribe si esta opción está activada.
           </span>
         </div>
       </div>
@@ -256,7 +257,10 @@ const FIELDS: { name: string; text: string }[] = [
   { name: 'goal', text: 'Objetivo que ha indicado (hasta 500 caracteres).' },
   { name: 'message', text: 'Mensaje o comentario libre (hasta 2000 caracteres).' },
   { name: 'source_detail', text: 'De dónde viene, para reconocerlo luego. Ej.: «Typeform» (hasta 120 caracteres).' },
-  { name: 'contact_via_whatsapp', text: 'true o false, sin comillas. Si no lo envías se considera true: si tienes WhatsApp conectado, KAI le escribe.' },
+  {
+    name: 'contact_via_whatsapp',
+    text: 'true o false, sin comillas. En este webhook (con tu clave secreta), si no lo envías se considera true: si tienes WhatsApp conectado, KAI le escribe. Envía false si no quieres que le escriba.',
+  },
   { name: 'extra', text: 'Otros datos, como un objeto con pares «nombre»: «texto». Ej.: {"edad": "34"}.' },
 ];
 

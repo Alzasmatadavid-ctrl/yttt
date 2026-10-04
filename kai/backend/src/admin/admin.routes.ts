@@ -28,6 +28,7 @@ import { requireAdmin } from '../auth/guards.js';
 import { audit } from '../audit/audit.service.js';
 import { usagePeriod } from '../lib/time.js';
 import { destroyUserSessions } from '../auth/sessions.js';
+import { stopBusinessAutomations } from '../automation/followups.js';
 
 const LimitsSchema = z.object({
   maxLeadsPerMonth: z.number().int().min(0).nullable(),
@@ -162,6 +163,9 @@ export async function adminRoutes(app: FastifyInstance) {
     );
     const [row] = await getDb().update(businesses).set({ ...body, updatedAt: new Date() }).where(eq(businesses.id, id)).returning({ id: businesses.id });
     if (!row) throw notFound();
+    // Cuenta desactivada: se cancelan ya sus trabajos y seguimientos pendientes (sin esperar a que venzan),
+    // para que no salga una avalancha de mensajes antiguos si se reactiva.
+    if (body.status === 'suspended') await stopBusinessAutomations(id, 'Cuenta desactivada');
     await audit({ businessId: id, actorType: 'admin', actorUserId: admin.id, action: 'admin.business_updated', entityType: 'business', entityId: id, metadata: body });
     return { ok: true };
   });

@@ -13,9 +13,16 @@ import { aiModeInfo } from '../ai/providers/index.js';
 import type { ChannelConfig } from '../lib/domain.js';
 import { disconnectConnection, listConnections, updateConnectionConfig, upsertConnection } from './connections.service.js';
 import { friendlyMetaError, graphRequest } from './meta/graph.js';
-import { getCalendarConnection, listCalendarConnections, saveCalendarConnection, updateCalendarConnection, type CalendlyCredentials } from '../calendar/connections.js';
+import {
+  getCalendarConnection,
+  listCalendarConnections,
+  releaseCalendlyWebhook,
+  saveCalendarConnection,
+  updateCalendarConnection,
+  type CalendlyCredentials,
+} from '../calendar/connections.js';
 import { exchangeGoogleCode, googleAuthUrl } from '../calendar/providers/google.js';
-import { calendlyCreateWebhook, calendlyDeleteWebhook, calendlyEventTypes, calendlyMe } from '../calendar/providers/calendly.js';
+import { calendlyCreateWebhook, calendlyEventTypes, calendlyMe } from '../calendar/providers/calendly.js';
 
 const TemplateRef = z.object({ name: z.string().trim().min(1).max(512), language: z.string().trim().min(2).max(10) });
 const ChannelConfigSchema = z.object({
@@ -156,8 +163,18 @@ export async function integrationsRoutes(app: FastifyInstance) {
     } catch (err) {
       throw badRequest(`Calendly no ha aceptado el token: ${errorMessage(err)}`);
     }
-    const eventTypes = await calendlyEventTypes(body.token, me.uri);
+    let eventTypes;
+    try {
+      eventTypes = await calendlyEventTypes(body.token, me.uri);
+    } catch (err) {
+      // Sin tocar nada: la conexión anterior (si la hay) sigue funcionando.
+      throw badRequest(`Calendly no ha devuelto tus tipos de evento: ${errorMessage(err)}`);
+    }
     const selected = eventTypes.find((e) => e.uri === body.eventTypeUri) ?? (eventTypes.length === 1 ? eventTypes[0] : undefined);
+    // Reconexión (otro token o la misma cuenta): primero se borra el webhook anterior. Calendly no admite dos
+    // con la misma URL y el viejo firmaría con una clave que ya no se guarda. Solo con el token nuevo ya validado.
+    const previous = await getCalendarConnection(ctx.businessId, 'calendly');
+    if (previous) await releaseCalendlyWebhook(previous);
     const signingKey = randomToken(24);
     const creds: CalendlyCredentials = { token: body.token, signingKey };
     let webhookError: string | null = null;
@@ -205,14 +222,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
     const { provider } = parse(z.object({ provider: z.enum(['google', 'calendly']) }), request.params);
     const conn = await getCalendarConnection(ctx.businessId, provider);
     if (!conn) return { ok: true };
-    if (provider === 'calendly') {
-      try {
-        const creds = decryptJson<CalendlyCredentials>(conn.credentialsEnc);
-        if (creds.webhookUri) await calendlyDeleteWebhook(creds.token, creds.webhookUri);
-      } catch (err) {
-        await logError('calendar.calendly.delete_webhook', err, {}, ctx.businessId, 'warn');
-      }
-    }
+    await releaseCalendlyWebhook(conn);
     await getDb().update(calendarConnections).set({ status: 'disconnected', updatedAt: new Date() }).where(eq(calendarConnections.id, conn.id));
     await audit({ businessId: ctx.businessId, actorType: 'user', actorUserId: ctx.userId, action: 'calendar.disconnected', metadata: { provider } });
     return { ok: true };
