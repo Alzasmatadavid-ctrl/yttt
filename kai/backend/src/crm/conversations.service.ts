@@ -276,6 +276,35 @@ export async function takeOverConversation(businessId: string, conversationId: s
   await audit({ businessId, actorType: 'user', actorUserId: userId, action: 'conversation.taken_over', entityType: 'conversation', entityId: conv.id });
 }
 
+/**
+ * Escalado atendido: una persona ya ha respondido al lead. La conversación deja de estar “pendiente”
+ * y se cierra el aviso “KAI necesita tu intervención”, pero KAI sigue pausado (el entrenador mantiene
+ * el control hasta que pulse «Devolver a KAI»). No hace nada si no había escalado.
+ */
+export async function markHandoffAttended(
+  businessId: string,
+  conversationId: string,
+  actor: { type: 'user'; userId: string } | { type: 'integration' },
+): Promise<boolean> {
+  const [conv] = await getDb()
+    .update(conversations)
+    .set({ handoffActive: false, aiEnabled: false, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId), eq(conversations.handoffActive, true)))
+    .returning();
+  if (!conv) return false;
+  await resolveAlertsFor(businessId, { leadId: conv.leadId, type: 'handoff' });
+  await audit({
+    businessId,
+    actorType: actor.type,
+    actorUserId: actor.type === 'user' ? actor.userId : null,
+    action: 'conversation.handoff_attended',
+    entityType: 'conversation',
+    entityId: conv.id,
+    metadata: { reason: conv.handoffReason },
+  });
+  return true;
+}
+
 /** Devuelve la conversación a KAI y cierra el escalado si lo había. */
 export async function releaseConversation(businessId: string, conversationId: string, userId: string) {
   const conv = await getConversation(businessId, conversationId);

@@ -20,6 +20,7 @@ export const notFound = (message = 'No encontrado.') => new AppError(404, 'not_f
 export const conflict = (message: string) => new AppError(409, 'conflict', message);
 export const limitReached = (message: string) => new AppError(402, 'limit_reached', message);
 export const unavailable = (message: string) => new AppError(503, 'unavailable', message);
+export const tooManyRequests = (message = 'Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.') => new AppError(429, 'rate_limited', message);
 
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;

@@ -91,3 +91,27 @@ export const timezoneSchema = z
       return false;
     }
   }, 'Zona horaria no válida');
+
+/** Parámetros de la URL que nunca deben acabar en los registros (enlaces de invitación, OAuth…). */
+const SENSITIVE_QUERY_PARAMS = ['token', 'code', 'state', 'key', 'secret', 'access_token', 'hub.verify_token', 'hub.challenge'];
+
+/** Devuelve la URL con los valores sensibles de la query sustituidos por «[oculto]». */
+export function redactUrl(url: string): string {
+  const q = url.indexOf('?');
+  if (q < 0) return url;
+  const params = url
+    .slice(q + 1)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      const rawName = eq < 0 ? pair : pair.slice(0, eq);
+      let name = rawName;
+      try {
+        name = decodeURIComponent(rawName.replace(/\+/g, ' '));
+      } catch {
+        // nombre mal codificado: se compara tal cual
+      }
+      return eq >= 0 && SENSITIVE_QUERY_PARAMS.includes(name.toLowerCase()) ? `${rawName}=[oculto]` : pair;
+    });
+  return `${url.slice(0, q)}?${params.join('&')}`;
+}

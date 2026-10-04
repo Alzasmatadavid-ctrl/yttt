@@ -325,3 +325,45 @@
     flex-direction: column;
   }
 }
+
+/* ───────────── Cuenta sin negocio (reutiliza el diseño de la 404) ───────────── */
+.kai-404 .kai-nobiz-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-text);
+}
+.kai-404 .kai-nobiz-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.kai-404 .kai-nobiz-list {
+  max-width: 520px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.kai-404 .kai-nobiz-list li {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.kai-404 .kai-nobiz-list strong {
+  display: block;
+  margin-bottom: 2px;
+}
+.kai-404 [role='alert'] {
+  width: 100%;
+  max-width: 520px;
+  text-align: left;
+}

@@ -3,7 +3,7 @@
 KAI tiene dos tipos de configuración:
 
 - **Del servidor** (archivo `.env` o variables de entorno del hosting): las claves de *tu* plataforma KAI. Las configuras una vez, como propietario del SaaS.
-- **De cada entrenador** (pantalla **Integraciones** dentro de la app): su número de WhatsApp, su cuenta de Instagram, su calendario… Cada negocio conecta lo suyo.
+- **De cada entrenador** (pantalla **Integraciones** del menú de la app, con tres pestañas: **WhatsApp, Instagram y anuncios**, **Calendario** y **Formularios y webhooks**): su número de WhatsApp, su cuenta de Instagram, su calendario… Cada negocio conecta lo suyo.
 
 Ninguna integración es obligatoria para arrancar. Si falta algo, la pantalla **Integraciones** lo indica.
 
@@ -13,8 +13,8 @@ Ninguna integración es obligatoria para arrancar. Si falta algo, la pantalla **
 | WhatsApp Business | `META_APP_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Identificador del número + token |
 | Instagram | (las mismas de Meta) | ID de la cuenta de Instagram + token |
 | Meta Lead Ads | (las mismas de Meta) | ID de la página de Facebook + token |
-| Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Botón “Conectar Google Calendar” |
-| Calendly | — | Token personal de Calendly |
+| Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Pestaña Calendario → botón “Conectar Google Calendar” |
+| Calendly | — | Pestaña Calendario → token personal de Calendly |
 | Email (Resend) | `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `EMAIL_FROM` | — |
 | Formularios / landing / Zapier | — | Clave pública y secreto del webhook |
 
@@ -33,7 +33,7 @@ Sin esta clave KAI funciona en **modo simulado**: responde con reglas fijas (út
    ```
    ANTHROPIC_API_KEY=sk-ant-...
    ```
-5. Reinicia. En **Integraciones** verás “IA: Claude”.
+5. Reinicia. En **Integraciones**, en la tarjeta **Inteligencia artificial de KAI**, verás “IA: Claude”.
 
 Ajustes opcionales (ya vienen bien configurados):
 
@@ -44,7 +44,7 @@ Ajustes opcionales (ya vienen bien configurados):
 | `AI_SETTER_EFFORT` | `low` | Cuánto razona antes de responder. `low` es rápido y suficiente para conversaciones. |
 | `AI_JUDGE_ENABLED` | `true` | Segunda revisión de cada mensaje antes de enviarlo. |
 
-**Consejo de costes:** en **Ajustes → Plan** verás los mensajes de IA usados en el mes. Los límites de cada plan se editan en el panel `/admin`.
+**Consejo de costes:** en **Ajustes → Plan y uso** verás los mensajes de IA usados en el mes. Los límites de cada plan se editan en **Administración → Planes** (`/admin/planes`).
 
 ---
 
@@ -68,7 +68,7 @@ Las tres integraciones usan **una sola app de Meta** (la tuya, como propietario 
 Meta necesita una dirección **pública** para avisar a KAI de cada mensaje nuevo, así que primero publica KAI ([DESPLIEGUE.md](DESPLIEGUE.md)).
 
 1. En la app de Meta → **Webhooks**.
-2. **URL de devolución de llamada**: la que aparece en KAI → **Integraciones → URL del webhook de Meta** (es `https://tu-dominio/api/webhooks/meta`).
+2. **URL de devolución de llamada**: la que aparece en KAI → **Integraciones → WhatsApp, Instagram y anuncios**, recuadro **Webhook de Meta** → **URL de devolución de llamada (Callback URL)** (es `https://tu-dominio/api/webhooks/meta`).
 3. **Token de verificación**: el mismo `META_VERIFY_TOKEN`.
 4. Pulsa **Verificar y guardar**.
 5. Suscríbete a estos campos:
@@ -83,16 +83,16 @@ KAI comprueba la firma de cada aviso con `META_APP_SECRET`, así que nadie puede
 1. En la app de Meta → **WhatsApp → Configuración de la API**, añade y verifica el número de teléfono del negocio.
 2. Copia el **Identificador del número de teléfono** (Phone number ID, solo números).
 3. Crea un **token permanente**: en Business Manager → **Configuración del negocio → Usuarios del sistema** → crea un usuario del sistema (Administrador) → **Generar token** con los permisos `whatsapp_business_messaging` y `whatsapp_business_management`. Asígnale la cuenta de WhatsApp en **Activos**.
-4. En KAI → **Integraciones → WhatsApp → Conectar**: pega el identificador y el token. KAI lo comprueba con Meta antes de guardarlo.
+4. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **WhatsApp Business** → **Conectar WhatsApp Business**: pega el identificador y el token. KAI lo comprueba con Meta antes de guardarlo.
 
-**Plantillas (importante).** WhatsApp solo permite escribir libremente durante las 24 h siguientes al último mensaje del lead. Fuera de esa ventana hay que usar **plantillas aprobadas** por Meta. Créalas en **WhatsApp Manager → Plantillas de mensajes** (categoría *Utilidad* para recordatorios, *Marketing* para seguimientos) y escribe su nombre e idioma en KAI → Integraciones → WhatsApp → Plantillas:
+**Plantillas (importante).** WhatsApp solo permite escribir libremente durante las 24 h siguientes al último mensaje del lead. Fuera de esa ventana hay que usar **plantillas aprobadas** por Meta. Créalas en **WhatsApp Manager → Plantillas de mensajes** (categoría *Utilidad* para recordatorios, *Marketing* para seguimientos). Después, en KAI → **Integraciones → WhatsApp, Instagram y anuncios**, en la tarjeta **WhatsApp Business** (ya conectada) busca el apartado **Plantillas para escribir fuera de las 24 horas**, escribe el nombre y el idioma de cada una y pulsa **Guardar plantillas**:
 
 | Plantilla en KAI | Cuándo se usa | Variables que rellena KAI |
 |---|---|---|
 | Primer contacto | Lead de formulario o anuncio que aún no ha escrito | `{{1}}` = nombre |
 | Seguimiento | Seguimiento fuera de las 24 h | `{{1}}` = nombre |
-| Recordatorio | Confirmación y recordatorios de la llamada | `{{1}}` = nombre, `{{2}}` = día y hora (“martes 14 de octubre a las 18:00”) |
-| No-show | Mensaje tras no presentarse | `{{1}}` = nombre |
+| Recordatorio de la llamada | Confirmación y recordatorios de la llamada | `{{1}}` = nombre, `{{2}}` = día y hora (“martes 14 de octubre a las 18:00”) |
+| No-show (no se presentó) | Mensaje tras no presentarse | `{{1}}` = nombre |
 
 Ejemplo de plantilla de recordatorio: *“Hola {{1}}, te recuerdo tu llamada de valoración el {{2}}. Si necesitas cambiarla, respóndeme por aquí.”*
 
@@ -106,9 +106,9 @@ Requisitos: cuenta de Instagram **profesional** (empresa o creador).
 2. Añade la cuenta de Instagram y genera un **token de acceso** con los permisos `instagram_business_basic` e `instagram_business_manage_messages`.
 3. Copia el **ID de la cuenta de Instagram** (solo números).
 4. En la app de Instagram del entrenador: **Configuración → Mensajes y respuestas a historias → Herramientas de mensajes → Permitir acceso a los mensajes** (activado).
-5. En KAI → **Integraciones → Instagram → Conectar**: pega el ID y el token.
+5. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **Instagram** → **Conectar Instagram**: pega el ID y el token.
 
-Si usas la API antigua con página de Facebook, elige `graph.facebook.com` como servidor de la API en el formulario.
+Si usas la API antigua con página de Facebook, en el formulario, en «¿Cómo has creado el token? (servidor de la API)», elige **Inicio de sesión con Facebook** (`graph.facebook.com`) en lugar de **Inicio de sesión con Instagram (recomendado)**.
 
 Notas:
 - Igual que WhatsApp, Instagram solo permite responder durante 24 h desde el último mensaje del lead. Cuando el entrenador responde a mano desde KAI, se usa la etiqueta de “agente humano” (hasta 7 días).
@@ -118,8 +118,8 @@ Notas:
 
 1. Necesitas el **ID de la página de Facebook** asociada a los anuncios (Página → Información → ID de la página).
 2. Genera un token de página (o de usuario del sistema) con los permisos `leads_retrieval`, `pages_manage_metadata`, `pages_show_list` y `pages_read_engagement`.
-3. En KAI → **Integraciones → Meta Lead Ads → Conectar**: pega el ID y el token. KAI suscribe la página automáticamente al aviso `leadgen`.
-4. Si tiene WhatsApp conectado y el formulario pide teléfono, KAI escribirá al lead por WhatsApp con la plantilla de primer contacto.
+3. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **Meta Lead Ads** → **Conectar Meta Lead Ads**: pega el ID y el token. KAI suscribe la página automáticamente al aviso `leadgen`.
+4. En la misma tarjeta eliges qué hacer con cada lead nuevo: **Escribirle por WhatsApp (recomendado)**, que usa la plantilla de «Primer contacto» (hace falta WhatsApp conectado y que el formulario del anuncio pida el teléfono), o **Solo guardarlo en KAI**.
 
 ### 2.6. Revisión de la app (para clientes reales)
 
@@ -145,7 +145,7 @@ KAI consulta los huecos ocupados del calendario y crea el evento (con enlace de 
 
 ### Cada entrenador
 
-**Integraciones → Google Calendar → Conectar** y aceptar los permisos. A partir de ahí, KAI cruza su disponibilidad (Agenda → Disponibilidad) con los eventos que ya tenga en el calendario.
+**Integraciones → Calendario**, tarjeta **Google Calendar** → **Conectar Google Calendar**, y aceptar los permisos. A partir de ahí, KAI cruza su disponibilidad (**Agenda → Disponibilidad**) con los eventos que ya tenga en el calendario.
 
 ---
 
@@ -153,9 +153,10 @@ KAI consulta los huecos ocupados del calendario y crea el evento (con enlace de 
 
 Si el entrenador ya usa Calendly, KAI le ofrece los huecos reales de Calendly al lead y le envía el enlace de reserva; cuando el lead reserva, la cita aparece en KAI automáticamente.
 
-1. En Calendly: **Integraciones → API y webhooks → Generar token** (token personal de acceso). Copia el token.
-2. En KAI → **Integraciones → Calendly → Conectar**: pega el token y elige el tipo de evento (por ejemplo “Llamada de valoración”).
-3. KAI crea automáticamente el webhook en Calendly. Necesita que KAI esté publicado (dirección pública) y un plan de Calendly que permita webhooks (Standard o superior). Si no se puede crear, la pantalla lo indica y KAI seguirá ofreciendo el enlace, pero tendrás que registrar las citas a mano.
+1. En Calendly: **Integraciones y aplicaciones → API y webhooks → Tokens de acceso personal → Generar nuevo token**. Copia el token (Calendly solo lo enseña una vez).
+2. En KAI → **Integraciones → Calendario**, tarjeta **Calendly**: pega el token, pulsa **Conectar Calendly** y, si tienes varios tipos de evento, elige cuál debe ofrecer KAI (por ejemplo “Llamada de valoración”).
+3. Para cambiar de cuenta o de tipo de evento, pulsa **Volver a conectar** o **Cambiar tipo de evento** y pega de nuevo el token. Si Calendly no lo acepta, no se cambia nada: sigue funcionando la conexión anterior.
+4. KAI crea automáticamente el webhook en Calendly. Necesita que KAI esté publicado (dirección pública) y un plan de Calendly que permita webhooks (Standard o superior). Si no se puede crear, la pantalla lo indica y KAI seguirá ofreciendo el enlace, pero tendrás que registrar las citas a mano.
 
 ---
 
@@ -181,38 +182,26 @@ Cada negocio tiene una **clave pública** (empieza por `kai_pk_`) y un **secreto
 
 ### 6.1. Formulario de tu web (sin programar el servidor)
 
-Pega esto en tu landing (por ejemplo, en un bloque HTML de WordPress, Webflow o Framer) y cambia `TU_DOMINIO` y `TU_CLAVE_PUBLICA`:
+La forma más sencilla: en **Integraciones → Formularios y webhooks**, tarjeta **Formulario de tu web**, usa el **Generador de formulario listo para pegar**. Personaliza los textos (título, botón, mensaje de agradecimiento, responsable de los datos y enlace a tu política de privacidad), pulsa copiar y pega el código en tu landing (por ejemplo, en un bloque HTML de WordPress, Webflow o Framer). El código ya incluye la casilla de consentimiento de privacidad y la protección contra el spam.
 
-```html
-<form id="kai-form">
-  <input name="name" placeholder="Nombre" required />
-  <input name="phone" placeholder="WhatsApp (con prefijo, ej. +34…)" required />
-  <input name="email" type="email" placeholder="Email" />
-  <textarea name="goal" placeholder="¿Qué te gustaría conseguir?"></textarea>
-  <!-- Campo trampa anti-spam: no lo quites y déjalo oculto -->
-  <input name="website" style="display:none" tabindex="-1" autocomplete="off" />
-  <button type="submit">Quiero información</button>
-  <p id="kai-ok" style="display:none">¡Gracias! Te escribimos en unos minutos.</p>
-</form>
-<script>
-  document.getElementById('kai-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
-    const res = await fetch('https://TU_DOMINIO/api/public/forms/TU_CLAVE_PUBLICA', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) document.getElementById('kai-ok').style.display = 'block';
-  });
-</script>
+Si prefieres tu propio formulario, envía los datos desde el navegador a la **Dirección del formulario público** que aparece en esa misma tarjeta:
+
+```
+POST https://TU_DOMINIO/api/public/forms/TU_CLAVE_PUBLICA
+Content-Type: application/json
+
+{ "name": "Ana López", "phone": "+34600111222", "email": "ana@example.com", "goal": "Perder 5 kg", "website": "" }
 ```
 
-Campos admitidos: `name`, `phone`, `email`, `instagram`, `goal`, `message`, `source_detail` (por ejemplo, el nombre de la campaña) y `extra` (pares clave/valor). Hace falta al menos `phone` o `email`.
+- Campos admitidos: `name`, `phone`, `email`, `instagram`, `goal`, `message`, `source_detail` (por ejemplo, el nombre de la campaña), `contact_via_whatsapp` (`true` o `false`) y `extra` (pares clave/valor). Hace falta al menos `phone` o `email`.
+- `website` es la trampa anti-spam: déjalo oculto y vacío. Si llega relleno, KAI ignora el envío sin avisar.
+- Pide el consentimiento de privacidad en tu formulario antes de enviar los datos.
 
-Si el entrenador tiene WhatsApp conectado y el lead deja su teléfono, KAI le escribe por WhatsApp en segundos.
+Si el entrenador tiene WhatsApp conectado y el lead deja su teléfono, KAI le escribe por WhatsApp en segundos (salvo que envíes `"contact_via_whatsapp": false`).
 
 ### 6.2. Webhook de servidor (Zapier, Make, Typeform, tu CRM…)
+
+En **Integraciones → Formularios y webhooks**, tarjeta **Webhook para Zapier o Make**, tienes la dirección, el secreto y una guía para Zapier y Make.
 
 ```
 POST https://TU_DOMINIO/api/webhooks/leads/TU_CLAVE_PUBLICA
@@ -224,7 +213,7 @@ X-KAI-Key: TU_SECRETO
 { "name": "Ana López", "phone": "+34600111222", "email": "ana@example.com", "goal": "Perder 5 kg", "source_detail": "Typeform enero" }
 ```
 
-En lugar de `X-KAI-Key` puedes firmar el cuerpo: cabecera `X-KAI-Signature: sha256=<HMAC-SHA256 del cuerpo con el secreto, en hexadecimal>`.
+Hace falta al menos uno de estos datos: `name`, `email`, `phone` o `instagram`. En lugar de `X-KAI-Key` puedes firmar el cuerpo: cabecera `X-KAI-Signature: sha256=<HMAC-SHA256 del cuerpo con el secreto, en hexadecimal>`.
 
 Si crees que el secreto se ha filtrado, pulsa **Regenerar secreto** en Integraciones (el anterior deja de funcionar al momento).
 

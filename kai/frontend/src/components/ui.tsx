@@ -1,5 +1,5 @@
 /* Componentes base de la interfaz de KAI. */
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, type LucideIcon } from 'lucide-react';
 
 // ───────────── Botón ─────────────
@@ -36,12 +36,48 @@ export function Button({ variant = 'secondary', size = 'md', icon: Icon, iconOnl
 }
 
 // ───────────── Campos ─────────────
+type ControlProps = { id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean };
+
+/** ¿Es el hijo un único campo de formulario al que se puede asociar la etiqueta? */
+function isFormControl(node: ReactNode): node is ReactElement<ControlProps> {
+  if (!isValidElement(node)) return false;
+  const t = node.type;
+  return t === Input || t === Select || t === Textarea || t === 'input' || t === 'select' || t === 'textarea';
+}
+
+/**
+ * Campo con etiqueta, pista y error.
+ * Si no se indica htmlFor y el contenido es un único campo, la etiqueta se asocia sola (useId), y la pista
+ * o el error se enlazan con aria-describedby: así los lectores de pantalla anuncian el nombre del campo.
+ */
 export function Field({ label, hint, error, children, htmlFor }: { label?: ReactNode; hint?: ReactNode; error?: string | null; children: ReactNode; htmlFor?: string }) {
+  const autoId = useId();
+  const noteId = `${autoId}-nota`;
+  const note = error ? error : hint;
+  let controlId = htmlFor;
+  let content = children;
+  if (isFormControl(children)) {
+    const props = children.props;
+    if (!controlId) controlId = props.id ?? autoId;
+    content = cloneElement(children, {
+      id: props.id ?? (htmlFor ? undefined : controlId),
+      'aria-describedby': [props['aria-describedby'], note ? noteId : null].filter(Boolean).join(' ') || undefined,
+      'aria-invalid': error ? true : props['aria-invalid'],
+    });
+  }
   return (
     <div className="field">
-      {label && <label htmlFor={htmlFor}>{label}</label>}
-      {children}
-      {error ? <span className="error-text">{error}</span> : hint ? <span className="hint">{hint}</span> : null}
+      {label && <label htmlFor={controlId}>{label}</label>}
+      {content}
+      {error ? (
+        <span className="error-text" id={noteId}>
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="hint" id={noteId}>
+          {hint}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -206,16 +242,36 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { valu
   );
 }
 
+const FOCUSABLE = 'input:not([type="hidden"]),textarea,select,button,a[href],[tabindex]:not([tabindex="-1"])';
+
 export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
+  // Los padres suelen pasar onClose como una función nueva en cada render: se guarda en una ref para que
+  // el efecto de apertura no se repita (si se repitiera, robaría el foco del campo en el que se está escribiendo).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
     window.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input,textarea,select,button')?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // Foco inicial (solo al abrir): respeta autoFocus; si no, el primer control del contenido, no el botón Cerrar de la cabecera.
+    const root = ref.current;
+    if (root && !root.contains(document.activeElement)) {
+      const first = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).find((el) => !el.closest('.modal-header') && !(el as HTMLButtonElement).disabled);
+      (first ?? root.querySelector<HTMLElement>('.modal-header button'))?.focus();
+    }
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      // Al cerrar, el foco vuelve a donde estaba (por ejemplo, al botón que abrió el modal).
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

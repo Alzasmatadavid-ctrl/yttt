@@ -5,13 +5,15 @@
  *   3. Arranca la API (y la web en producción).
  *   4. Arranca el trabajador de automatizaciones.
  */
-import { env, isProduction, resolveAiMode } from './config/env.js';
+import { env, isProduction, resolveAiMode, startupWarnings } from './config/env.js';
 import { closeDatabase, initDatabase } from './database/client.js';
 import { bootstrapData } from './database/bootstrap.js';
 import { buildApp } from './app.js';
 import { startWorker, stopWorker } from './automation/worker.js';
 import { logger } from './lib/logger.js';
+import { settleBackgroundTasks } from './lib/background.js';
 
+for (const warning of startupWarnings()) logger.warn('config.warning', { warning });
 const handle = await initDatabase();
 await bootstrapData();
 const app = await buildApp({ logger: true });
@@ -31,6 +33,7 @@ async function shutdown(signal: string) {
   logger.info('kai.shutdown', { signal });
   stopWorker();
   await app.close();
+  await settleBackgroundTasks();
   await closeDatabase();
   process.exit(0);
 }

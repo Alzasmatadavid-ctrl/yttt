@@ -1,6 +1,7 @@
 /* Piezas visuales de leads: etapa, temperatura, puntuación, origen y avatar. */
+import { createContext, useContext, type CSSProperties } from 'react';
 import { Flame, Snowflake, Sparkles, Thermometer, Globe, Webhook, PenLine, FlaskConical, Megaphone } from 'lucide-react';
-import { leadSourceLabel, leadStatusLabel, temperatureLabel, type LeadSource, type LeadStatus, type LeadTemperature, type ChannelKey } from '@shared';
+import { DEFAULT_SCORE_BANDS, leadSourceLabel, leadStatusLabel, temperatureLabel, type LeadSource, type LeadStatus, type LeadTemperature, type ChannelKey, type ScoreBand } from '@shared';
 import { initials } from '../lib/format';
 
 const STATUS_TONE: Record<LeadStatus, string> = {
@@ -41,17 +42,38 @@ export function TemperatureBadge({ temperature }: { temperature: LeadTemperature
   );
 }
 
-export function scoreColor(score: number) {
-  if (score >= 86) return { background: 'var(--accent-soft)', color: 'var(--accent-text)' };
-  if (score >= 71) return { background: 'var(--hot-soft)', color: 'var(--hot)' };
-  if (score >= 51) return { background: 'var(--warning-soft)', color: 'var(--warning)' };
-  if (score >= 31) return { background: 'var(--slate-soft)', color: 'var(--text-2)' };
-  return { background: 'var(--info-soft)', color: 'var(--info)' };
+/**
+ * Bandas de puntuación del negocio (Setter IA → Puntuación). AppLayout facilita las guardadas;
+ * fuera de la app (o mientras cargan) se usan las de por defecto.
+ */
+export const ScoreBandsContext = createContext<ScoreBand[]>(DEFAULT_SCORE_BANDS);
+
+/** Temperatura que corresponde a una puntuación según las bandas (mismo criterio que el servidor). */
+export function temperatureForScore(score: number, bands: ScoreBand[] = DEFAULT_SCORE_BANDS): LeadTemperature {
+  const sorted = [...bands].sort((a, b) => a.min - b.min);
+  let found: LeadTemperature = sorted[0]?.key ?? 'frio';
+  for (const band of sorted) if (score >= band.min) found = band.key;
+  return found;
+}
+
+const SCORE_COLORS: Record<LeadTemperature, CSSProperties> = {
+  muy_cualificado: { background: 'var(--accent-soft)', color: 'var(--accent-text)' },
+  caliente: { background: 'var(--hot-soft)', color: 'var(--hot)' },
+  interesado: { background: 'var(--warning-soft)', color: 'var(--warning)' },
+  curioso: { background: 'var(--slate-soft)', color: 'var(--text-2)' },
+  frio: { background: 'var(--info-soft)', color: 'var(--info)' },
+};
+
+/** Colores de la puntuación: los de la banda (temperatura) en la que cae, con las bandas configuradas. */
+export function scoreColor(score: number, bands: ScoreBand[] = DEFAULT_SCORE_BANDS): CSSProperties {
+  return SCORE_COLORS[temperatureForScore(score, bands)] ?? SCORE_COLORS.frio;
 }
 
 export function ScoreBadge({ score }: { score: number }) {
+  const bands = useContext(ScoreBandsContext);
+  const temperature = temperatureForScore(score, bands);
   return (
-    <span className="score" style={scoreColor(score)} title="Puntuación interna (el lead no la ve)">
+    <span className="score" style={scoreColor(score, bands)} title={`Puntuación interna (el lead no la ve) · ${temperatureLabel(temperature)}`}>
       {score}
     </span>
   );

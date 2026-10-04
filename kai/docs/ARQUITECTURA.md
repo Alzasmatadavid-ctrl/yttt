@@ -6,9 +6,10 @@ Documento técnico para quien mantenga o amplíe KAI.
 
 ```
                 ┌────────────── Frontend (React 19 + Vite) ──────────────┐
-                │ Landing · Auth · Onboarding · Panel · Inbox · Pipeline │
-                │ Leads · Agenda · Analítica · Copilot · Simulador       │
-                │ Configurar KAI · Integraciones · Ajustes · Admin       │
+                │ Landing · Acceso · Onboarding · Hoy · Bandeja          │
+                │ Pipeline · Leads · Agenda · Analítica · KAI Copilot    │
+                │ Simulador · Setter IA · Integraciones · Ajustes        │
+                │ Administración                                         │
                 └───────────────────────────┬────────────────────────────┘
                                             │ /api (JSON, cookie de sesión)
 ┌───────────────────────────────── Backend (Fastify 5, TypeScript) ─────────────────────────────────┐
@@ -124,6 +125,26 @@ npm run dev              # 3. Se aplica sola al arrancar
 - React 19 + React Router 7 + TanStack Query 5. Sin librerías de componentes: sistema de diseño propio en `styles/` (tokens de color claro/oscuro, componentes, layout).
 - `lib/api.ts`: cliente HTTP (cookie de sesión + cabecera CSRF + negocio activo). `lib/auth.tsx`: sesión y cambio de negocio.
 - `@shared` apunta a `backend/src/lib/domain.ts`: etapas, permisos, etiquetas y tipos son los mismos en ambos lados.
+- Rutas (`App.tsx`) y nombre de cada pantalla en el menú:
+
+| Ruta | Pantalla (menú) | Archivo |
+|---|---|---|
+| `/` | Página de inicio | `pages/Landing.tsx` |
+| `/login`, `/registro`, `/recuperar`, `/restablecer`, `/invitacion` | Acceso (entrar, crear cuenta, contraseña, invitación) | `pages/auth/` |
+| `/app/onboarding` | Configuración inicial en 14 pasos | `pages/Onboarding.tsx` |
+| `/app` | Hoy | `pages/Dashboard.tsx` |
+| `/app/inbox` | Bandeja (filtros Todos, Nuevos, Calientes, Cualificados, Pendientes, Agendados, No respondieron y Clientes) | `pages/Inbox.tsx` |
+| `/app/pipeline`, `/app/leads` | Pipeline y Leads | `pages/Pipeline.tsx`, `pages/Leads.tsx`, `pages/LeadDetail.tsx` |
+| `/app/agenda` | Agenda (Semana y Disponibilidad) | `pages/Agenda.tsx` |
+| `/app/analitica` | Analítica | `pages/Analytics.tsx` |
+| `/app/copilot` | KAI Copilot | `pages/CopilotPage.tsx` |
+| `/app/simulador` | Simulador | `pages/Simulator.tsx` |
+| `/app/setter` | Setter IA (Personalidad, Cualificación, Puntuación, Servicio y precio, Objeciones, Seguimientos, Escalado y Llamada) | `pages/setter/` |
+| `/app/integraciones` | Integraciones (WhatsApp, Instagram y anuncios · Calendario · Formularios y webhooks) | `pages/Integrations.tsx`, `pages/integrations/` |
+| `/app/ajustes` | Ajustes (Negocio, Equipo, Plan y uso, Tu cuenta) | `pages/settings/` |
+| `/admin` | Administración (Resumen, Negocios, Usuarios, Planes y Registros) | `pages/admin/` |
+| `/sin-negocio` | Aviso para una cuenta con sesión que ya no pertenece a ningún negocio (p. ej., la quitaron del equipo) | `pages/NoBusiness.tsx` |
+| `/privacidad`, `/terminos` | Textos legales (plantilla) | `pages/Legal.tsx` |
 
 ## Pruebas
 

@@ -47,8 +47,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 1. Railway construye y arranca KAI solo (tarda 2–4 minutos). Las tablas de la base de datos se crean automáticamente al arrancar.
 2. Abre `https://TU_DOMINIO/api/health`. Debe responder `{"ok":true,…}`.
-3. Abre `https://TU_DOMINIO` y entra con `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Verás el panel **Admin** (planes, negocios, registros).
-4. Para usar KAI tú mismo como entrenador, crea una cuenta normal con **Probar KAI**.
+3. Abre `https://TU_DOMINIO` y entra con `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Verás el panel de **Administración** (Resumen, Negocios, Usuarios, Planes y Registros).
+4. Para usar KAI tú mismo como entrenador, cierra sesión y crea una cuenta normal con **Probar KAI** usando otro email (el de administración no puede registrarse otra vez).
 
 ### Paso 5 · Conecta Meta
 
@@ -76,11 +76,21 @@ En un servidor con Docker instalado (Hetzner, DigitalOcean…):
 ```bash
 git clone <tu-repositorio> kai && cd kai
 cp .env.example .env
-# Edita .env: NODE_ENV=production, APP_URL, ENCRYPTION_KEY, POSTGRES_PASSWORD, ADMIN_EMAIL, ADMIN_PASSWORD…
+# Edita .env: APP_URL, ENCRYPTION_KEY, POSTGRES_PASSWORD, ADMIN_EMAIL, ADMIN_PASSWORD…
+# (NODE_ENV=production, SERVE_FRONTEND=true y DATABASE_URL ya los pone docker-compose.yml)
 docker compose up -d --build
 ```
 
-KAI queda escuchando en el puerto 3000. Pon delante un proxy con HTTPS (por ejemplo Caddy: `app.tudominio.com { reverse_proxy localhost:3000 }`).
+KAI queda escuchando en el puerto 3000.
+
+Si ya tienes PostgreSQL en otro sitio y solo quieres la imagen de KAI (sin `docker compose`), añade `DATABASE_URL` a tu `.env` y arranca así:
+
+```bash
+docker build -t kai .
+docker run -d -p 3000:3000 --env-file .env -e NODE_ENV=production -e SERVE_FRONTEND=true kai
+```
+
+Los `-e` del final aseguran el modo producción y que se sirva la web aunque tu `.env` diga otra cosa (con `--env-file`, el `.env` tiene prioridad sobre los valores de la imagen). Pon delante un proxy con HTTPS (por ejemplo Caddy: `app.tudominio.com { reverse_proxy localhost:3000 }`).
 
 ### Supabase como base de datos
 

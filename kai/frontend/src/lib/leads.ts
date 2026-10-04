@@ -1,16 +1,20 @@
 import type { LeadStatus } from '@shared';
 import { dateTime } from './format';
 
-/** Próxima acción sugerida para un lead (lo que verá el entrenador en la bandeja). */
+/**
+ * Próxima acción sugerida para un lead (lo que verá el entrenador en la bandeja).
+ * timeZone: zona horaria del negocio, para que la hora de la llamada coincida con la de la Agenda.
+ */
 export function nextActionFor(
   lead: { status: LeadStatus; nextAction?: string | null; optedOut?: boolean },
   conv?: { handoffActive?: boolean; aiEnabled?: boolean } | null,
   upcoming?: { startsAt: string } | null,
+  timeZone?: string,
 ): string {
   if (lead.optedOut) return 'No contactar (pidió la baja)';
   if (conv?.handoffActive) return 'Responder tú (KAI te lo ha pasado)';
   if (lead.nextAction) return lead.nextAction;
-  if (upcoming) return `Llamada ${dateTime(upcoming.startsAt)}`;
+  if (upcoming) return `Llamada ${dateTime(upcoming.startsAt, timeZone)}`;
   if (conv && !conv.aiEnabled) return 'Conversación en tus manos';
   switch (lead.status) {
     case 'new':

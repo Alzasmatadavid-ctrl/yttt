@@ -113,7 +113,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/admin/businesses/:id', async (request) => {
-    requireAdmin(request);
+    const admin = requireAdmin(request);
     const { id } = parse(uuidParam, request.params);
     const db = getDb();
     const [b] = await db.select().from(businesses).where(eq(businesses.id, id)).limit(1);
@@ -133,6 +133,18 @@ export async function adminRoutes(app: FastifyInstance) {
         .orderBy(sql`${conversations.lastMessageAt} desc nulls last`)
         .limit(20),
     ]);
+    // Incluye nombres de leads y el último mensaje de sus conversaciones: el acceso queda auditado,
+    // igual que al abrir una conversación completa.
+    await audit({
+      businessId: id,
+      actorType: 'admin',
+      actorUserId: admin.id,
+      action: 'admin.business_viewed',
+      entityType: 'business',
+      entityId: id,
+      metadata: { conversationsShown: recentConvs.length },
+      ip: request.ip,
+    });
     return { business, members, channels, calendars, usage, errors, conversations: recentConvs };
   });
 
@@ -162,7 +174,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const [conv] = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
     if (!conv) throw notFound();
     const msgs = await db.select().from(messages).where(eq(messages.conversationId, id)).orderBy(asc(messages.createdAt)).limit(500);
-    await audit({ businessId: conv.businessId, actorType: 'admin', actorUserId: admin.id, action: 'admin.conversation_viewed', entityType: 'conversation', entityId: id });
+    await audit({ businessId: conv.businessId, actorType: 'admin', actorUserId: admin.id, action: 'admin.conversation_viewed', entityType: 'conversation', entityId: id, ip: request.ip });
     return { conversation: conv, messages: msgs };
   });
 
@@ -202,16 +214,27 @@ export async function adminRoutes(app: FastifyInstance) {
     return { plans: await getDb().select().from(plans).orderBy(asc(plans.sortOrder)) };
   });
 
-  const PlanSchema = z.object({
+  /**
+   * Campos de un plan SIN valores por defecto: la edición usa `PlanFields.partial()` para no
+   * machacar lo que no se envía (en Zod 4 los `.default()` también se aplican dentro de `.partial()`).
+   */
+  const PlanFields = z.object({
     key: z.string().trim().regex(/^[a-z][a-z0-9_-]{1,30}$/),
     name: z.string().trim().min(2).max(60),
-    description: z.string().trim().max(300).default(''),
+    description: z.string().trim().max(300),
     priceMonthlyCents: z.number().int().min(0).max(10_000_000),
-    currency: z.string().length(3).default('EUR'),
+    currency: z.string().trim().length(3).toUpperCase(),
     limits: LimitsSchema,
-    isActive: z.boolean().default(true),
-    isPublic: z.boolean().default(true),
-    sortOrder: z.number().int().min(0).max(100).default(0),
+    isActive: z.boolean(),
+    isPublic: z.boolean(),
+    sortOrder: z.number().int().min(0).max(100),
+  });
+  const PlanSchema = PlanFields.extend({
+    description: PlanFields.shape.description.default(''),
+    currency: PlanFields.shape.currency.default('EUR'),
+    isActive: PlanFields.shape.isActive.default(true),
+    isPublic: PlanFields.shape.isPublic.default(true),
+    sortOrder: PlanFields.shape.sortOrder.default(0),
   });
 
   app.post('/admin/plans', async (request) => {
@@ -225,7 +248,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch('/admin/plans/:id', async (request) => {
     const admin = requireAdmin(request);
     const { id } = parse(uuidParam, request.params);
-    const body = parse(PlanSchema.partial(), request.body);
+    const body = parse(PlanFields.partial(), request.body);
     const [row] = await getDb().update(plans).set({ ...body, updatedAt: new Date() }).where(eq(plans.id, id)).returning();
     if (!row) throw notFound();
     await audit({ actorType: 'admin', actorUserId: admin.id, action: 'admin.plan_updated', entityType: 'plan', entityId: id, metadata: body });

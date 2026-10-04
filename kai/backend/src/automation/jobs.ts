@@ -93,6 +93,32 @@ export async function cancelJob(jobId: string) {
     .where(and(eq(scheduledJobs.id, jobId), eq(scheduledJobs.status, 'pending')));
 }
 
+/** Cancela todos los trabajos pendientes de un negocio (p. ej. cuenta suspendida). */
+export async function cancelJobsForBusiness(businessId: string, note: string) {
+  await getDb()
+    .update(scheduledJobs)
+    .set({ status: 'cancelled', finishedAt: new Date(), lastError: note.slice(0, 2000) })
+    .where(and(eq(scheduledJobs.businessId, businessId), eq(scheduledJobs.status, 'pending')));
+}
+
+/** Da por cancelado un trabajo que ya se había reclamado (no se ejecuta ni se reintenta). */
+export async function cancelClaimedJob(jobId: string, note: string) {
+  await getDb()
+    .update(scheduledJobs)
+    .set({ status: 'cancelled', finishedAt: new Date(), lastError: note.slice(0, 2000) })
+    .where(and(eq(scheduledJobs.id, jobId), eq(scheduledJobs.status, 'running')));
+}
+
+/** ¿Hay un trabajo pendiente o en marcha con esta clave? (para no duplicar los trabajos del sistema). */
+export async function hasActiveJob(dedupeKey: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ id: scheduledJobs.id })
+    .from(scheduledJobs)
+    .where(and(eq(scheduledJobs.dedupeKey, dedupeKey), inArray(scheduledJobs.status, ['pending', 'running'])))
+    .limit(1);
+  return Boolean(row);
+}
+
 export async function cancelJobsByDedupePrefix(prefix: string) {
   await getDb()
     .update(scheduledJobs)
@@ -119,31 +145,88 @@ export async function claimDueJobs(limit = 10): Promise<Job[]> {
   return db.select().from(scheduledJobs).where(inArray(scheduledJobs.id, ids));
 }
 
+/**
+ * Renueva el bloqueo de un trabajo justo antes de ejecutarlo. Los trabajos se reclaman en tandas y se ejecutan
+ * uno a uno: sin esto, el último de una tanda lenta podría parecer “huérfano” y otro proceso lo repetiría.
+ * Devuelve false si el trabajo ya no es nuestro (se liberó y lo reclamó otro proceso, o se canceló).
+ */
+export async function touchJob(job: Job): Promise<boolean> {
+  const rows = await getDb()
+    .update(scheduledJobs)
+    .set({ lockedAt: new Date() })
+    .where(and(eq(scheduledJobs.id, job.id), eq(scheduledJobs.status, 'running'), eq(scheduledJobs.attempts, job.attempts)))
+    .returning({ id: scheduledJobs.id });
+  return rows.length > 0;
+}
+
 export async function completeJob(jobId: string) {
   await getDb().update(scheduledJobs).set({ status: 'done', finishedAt: new Date(), lastError: null }).where(eq(scheduledJobs.id, jobId));
 }
 
-export async function failJob(job: Job, error: string) {
+/** Violación de un índice único (p. ej. ya hay otro trabajo pendiente con la misma `dedupeKey`). */
+function isUniqueViolation(err: unknown): boolean {
+  for (let e: unknown = err, i = 0; e && i < 5; e = (e as { cause?: unknown }).cause, i++) {
+    if ((e as { code?: string }).code === '23505') return true;
+  }
+  return false;
+}
+
+/**
+ * Devuelve un trabajo a la cola. Si mientras tanto se programó otro igual (misma `dedupeKey`, p. ej. una
+ * respuesta nueva de KAI para la misma conversación), el nuevo lo sustituye y este se cancela.
+ */
+async function requeueJob(job: Job, runAt: Date, error: string | null) {
   const db = getDb();
+  try {
+    await db
+      .update(scheduledJobs)
+      .set({ status: 'pending', runAt, lockedAt: null, ...(error !== null ? { lastError: error.slice(0, 2000) } : {}) })
+      .where(and(eq(scheduledJobs.id, job.id), eq(scheduledJobs.status, 'running')));
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    await db
+      .update(scheduledJobs)
+      .set({ status: 'cancelled', finishedAt: new Date(), lastError: `${error ? `${error.slice(0, 1500)} · ` : ''}Sustituido por un trabajo más reciente.` })
+      .where(eq(scheduledJobs.id, job.id));
+  }
+}
+
+export async function failJob(job: Job, error: string) {
   if (job.attempts < job.maxAttempts) {
     // Reintento con espera exponencial: 1 min, 4 min, 9 min…
     const delayMs = job.attempts * job.attempts * 60_000;
-    await db
-      .update(scheduledJobs)
-      .set({ status: 'pending', runAt: new Date(Date.now() + delayMs), lastError: error.slice(0, 2000), lockedAt: null })
-      .where(eq(scheduledJobs.id, job.id));
+    await requeueJob(job, new Date(Date.now() + delayMs), error);
   } else {
-    await db
+    await getDb()
       .update(scheduledJobs)
       .set({ status: 'failed', finishedAt: new Date(), lastError: error.slice(0, 2000) })
       .where(eq(scheduledJobs.id, job.id));
   }
 }
 
-/** Libera trabajos bloqueados por un proceso que murió a mitad. */
-export async function releaseStaleJobs(staleMinutes = 10) {
-  await getDb()
-    .update(scheduledJobs)
-    .set({ status: 'pending', lockedAt: null })
-    .where(and(eq(scheduledJobs.status, 'running'), lt(scheduledJobs.lockedAt, new Date(Date.now() - staleMinutes * 60_000))));
+/**
+ * Libera trabajos bloqueados por un proceso que murió a mitad (caída, despliegue…).
+ * - Si aún le quedan intentos, vuelve a la cola de inmediato.
+ * - Si ya agotó sus intentos (p. ej. un trabajo que tumba el proceso una y otra vez), se marca como fallido
+ *   en vez de repetirse sin fin.
+ * Devuelve cuántos trabajos ha tocado.
+ */
+export async function releaseStaleJobs(staleMinutes = 10): Promise<number> {
+  const db = getDb();
+  const stale = await db
+    .select()
+    .from(scheduledJobs)
+    .where(and(eq(scheduledJobs.status, 'running'), lt(scheduledJobs.lockedAt, new Date(Date.now() - staleMinutes * 60_000))))
+    .limit(200);
+  for (const job of stale) {
+    if (job.attempts >= job.maxAttempts) {
+      await db
+        .update(scheduledJobs)
+        .set({ status: 'failed', finishedAt: new Date(), lastError: 'El proceso se detuvo mientras se ejecutaba el trabajo y ya no quedan reintentos.' })
+        .where(and(eq(scheduledJobs.id, job.id), eq(scheduledJobs.status, 'running')));
+    } else {
+      await requeueJob(job, new Date(), null);
+    }
+  }
+  return stale.length;
 }

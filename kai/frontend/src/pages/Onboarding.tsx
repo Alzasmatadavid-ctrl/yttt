@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   ArrowRight,
+  Banknote,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -12,7 +13,6 @@ import {
   ClipboardList,
   Copy,
   Dumbbell,
-  Euro,
   ExternalLink,
   FlaskConical,
   LayoutDashboard,
@@ -163,12 +163,12 @@ const STEPS: StepDef[] = [
     title: 'Servicio',
     icon: Package,
     heading: '¿Qué servicio ofreces?',
-    description: 'Es el programa que vendes. KAI lo explicará cuando un lead pregunte qué incluye. Más adelante podrás añadir otros servicios desde Ajustes.',
+    description: 'Es el programa que vendes. KAI lo explicará cuando un lead pregunte qué incluye. Más adelante podrás añadir otros servicios desde Setter IA → Servicio y precio.',
   },
   {
     key: 'price',
     title: 'Precio',
-    icon: Euro,
+    icon: Banknote,
     heading: '¿Cuánto cuesta tu servicio?',
     description: 'KAI usará siempre este precio exacto. Nunca inventará descuentos ni ofertas.',
   },
@@ -274,9 +274,15 @@ const toMinutes = (hm: string) => {
   return h * 60 + m;
 };
 
-/** Convierte lo que escribe el entrenador («149», «149,90», «1.200») a céntimos. */
-function parseEurosToCents(raw: string): number | null {
-  let s = raw.replace(/[€\s]/g, '');
+/**
+ * Convierte lo que escribe el entrenador («149», «149,90», «1.200», «149 €», «149 MXN») a céntimos.
+ * Ignora el símbolo o el código de la moneda si lo escribe junto al importe.
+ */
+function parseAmountToCents(raw: string): number | null {
+  let s = raw
+    .replace(/[\s\p{Sc}]/gu, '')
+    .replace(/^[a-z]{3}(?=\d)/i, '')
+    .replace(/(\d)[a-z]{3}$/i, '$1');
   if (!s) return null;
   if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
   else if (s.includes(',')) s = s.replace(',', '.');
@@ -295,20 +301,26 @@ function centsToText(cents: number): string {
  */
 const onboardingService = (services: Service[]) => services.find((x) => x.isPrimary) ?? services.find((x) => x.isActive) ?? services[0] ?? null;
 
+/** Moneda del negocio (la que hereda un negocio creado con «Añadir negocio»). Es la de los precios que KAI da a los leads. */
+const businessCurrency = (s: SettingsResponse) => s.business.currency || 'EUR';
+
+/** Cómo se muestra la moneda junto a un importe: «€» para el euro y el código para el resto («MXN»), igual que en Setter IA. */
+const currencySymbol = (currency: string) => (currency === 'EUR' ? '€' : currency);
+
 /**
  * Cuerpo COMPLETO del servicio principal. Se envía entero en los pasos «Servicio» y «Precio» porque el servidor
  * rellena con sus valores por defecto los campos que no llegan (descripción vacía, sin elementos incluidos, no principal).
- * El precio solo se envía cuando hay un importe válido, para no borrar uno ya guardado.
+ * El precio solo se envía cuando hay un importe válido, para no borrar uno ya guardado. Va siempre en la moneda del negocio.
  */
-function servicePayload(d: Draft) {
-  const cents = parseEurosToCents(d.price);
+function servicePayload(d: Draft, currency: string) {
+  const cents = parseAmountToCents(d.price);
   return {
     name: d.serviceName.trim(),
     description: d.serviceDescription.trim(),
     includes: d.includes.map((x) => x.trim()).filter(Boolean),
     durationWeeks: d.durationWeeks.trim() ? Number(d.durationWeeks) : null,
     ...(cents !== null && cents > 0 ? { priceCents: cents } : {}),
-    currency: 'EUR',
+    currency,
     billingPeriod: d.billingPeriod,
     isPrimary: true,
     isActive: true,
@@ -428,10 +440,10 @@ function validateStep(key: StepKey, d: Draft): Errors {
       break;
     }
     case 'price': {
-      const cents = parseEurosToCents(d.price);
+      const cents = parseAmountToCents(d.price);
       if (!d.price.trim()) e.price = 'Indica el precio de tu servicio.';
       else if (cents === null) e.price = 'Escribe solo el importe, por ejemplo 149 o 149,90.';
-      else if (cents <= 0) e.price = 'El precio debe ser mayor que 0 €.';
+      else if (cents <= 0) e.price = 'El precio debe ser mayor que 0.';
       else if (cents > 100_000_000) e.price = 'El importe es demasiado alto.';
       else if (len(d.serviceName) < 2) e.price = 'Antes vuelve al paso «Servicio» y escribe el nombre de tu servicio.';
       else if (hasErrors(validateStep('service', d))) e.price = 'Antes vuelve al paso «Servicio» y revisa los datos marcados en rojo.';
@@ -794,7 +806,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
 
   /** Guarda el servicio principal. Si ya existe, se actualiza ese mismo servicio (nunca se crea un duplicado). */
   async function saveService(d: Draft) {
-    const body = servicePayload(d);
+    const body = servicePayload(d, businessCurrency(settings));
     const id = serviceId.current;
     let res: { service: Service };
     if (id) {
@@ -817,7 +829,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
         await api.put('/settings/business', {
           name: d.businessName.trim(),
           timezone: d.timezone,
-          currency: settings.business.currency || 'EUR',
+          currency: businessCurrency(settings),
           monthlyAdSpendCents: settings.business.monthlyAdSpendCents ?? 0,
         });
         await qc.invalidateQueries({ queryKey: ['me'] });
@@ -1153,14 +1165,20 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
           </>
         );
       case 'price': {
-        const cents = parseEurosToCents(draft.price);
+        const cents = parseAmountToCents(draft.price);
+        const currency = businessCurrency(settings);
         return (
           <>
             <div className="grid-2">
-              <Field label="Importe" htmlFor="onb-price" error={errors.price} hint="En euros. Puedes usar decimales: 149,90.">
+              <Field
+                label="Importe"
+                htmlFor="onb-price"
+                error={errors.price}
+                hint={`${currency === 'EUR' ? 'En euros' : `En ${currency}, la moneda de tu negocio`}. Puedes usar decimales: 149,90.`}
+              >
                 <div className="input-group onb-amount">
                   <Input id="onb-price" inputMode="decimal" value={draft.price} placeholder="Ej.: 149" aria-invalid={Boolean(errors.price)} onChange={(e) => edit('price', { price: e.target.value })} />
-                  <span className="input-suffix">€</span>
+                  <span className="input-suffix">{currencySymbol(currency)}</span>
                 </div>
               </Field>
               <div className="field">
@@ -1180,7 +1198,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
               <p className="muted">
                 Tus leads lo verán así:{' '}
                 <strong>
-                  {formatMoney(cents, 'EUR')} {draft.billingPeriod === 'one_time' ? '(pago único)' : BILLING_PERIOD_LABELS[draft.billingPeriod]}
+                  {formatMoney(cents, currency)} {draft.billingPeriod === 'one_time' ? '(pago único)' : BILLING_PERIOD_LABELS[draft.billingPeriod]}
                 </strong>
               </p>
             )}

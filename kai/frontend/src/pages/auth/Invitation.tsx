@@ -6,7 +6,7 @@ import { ROLE_LABELS, type BusinessRole } from '@shared';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { Button, Callout, Field, Input, Spinner, useToast } from '../../components/ui';
-import AuthShell, { FormError, PasswordInput, PasswordRules, passwordIssue } from '../../components/AuthShell';
+import AuthShell, { FormError, PasswordInput, PasswordRules, forgetPreviousSession, passwordIssue } from '../../components/AuthShell';
 
 /** Respuesta de GET /api/auth/invitation. */
 interface InvitationInfo {
@@ -56,7 +56,7 @@ export default function Invitation() {
       ),
     onSuccess: async () => {
       // La sesión pasa al negocio que invita: descartamos datos en caché de otra cuenta o negocio.
-      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' && q.queryKey[0] !== 'invitation' });
+      forgetPreviousSession(qc, ['invitation']);
       await refresh();
       toast(info ? `Ya formas parte de ${info.businessName}` : 'Invitación aceptada');
       navigate('/app', { replace: true });

@@ -5,8 +5,9 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { env, isProduction, isTest } from './config/env.js';
+import { env, isProduction, isTest, trustProxySetting, type TrustProxy } from './config/env.js';
 import { AppError } from './lib/errors.js';
+import { redactUrl } from './lib/http.js';
 import { safeEqual } from './lib/crypto.js';
 import { logError } from './audit/audit.service.js';
 import { identify } from './auth/guards.js';
@@ -27,10 +28,26 @@ import { aiModeInfo } from './ai/providers/index.js';
 /** Rutas que reciben peticiones de terceros (no del navegador del entrenador): sin comprobación CSRF. */
 const CSRF_EXEMPT = [/^\/api\/webhooks\//, /^\/api\/public\//, /^\/api\/internal\//];
 
-export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildApp(opts: { logger?: boolean; trustProxy?: TrustProxy } = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: opts.logger ? { level: env.LOG_LEVEL, redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers["x-kai-key"]'] } : false,
-    trustProxy: true,
+    logger: opts.logger
+      ? {
+          level: env.LOG_LEVEL,
+          redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers["x-kai-key"]', 'req.headers["x-kai-signature"]'],
+          // Las URLs se registran sin tokens (enlaces de invitación, callbacks OAuth…).
+          serializers: {
+            req: (req: { method: string; url: string; hostname?: string; ip?: string }) => ({
+              method: req.method,
+              url: redactUrl(req.url),
+              hostname: req.hostname,
+              remoteAddress: req.ip,
+            }),
+          },
+        }
+      : false,
+    // IP real del visitante solo a través de proxies de confianza (ver TRUST_PROXY en .env.example):
+    // nunca `true`, que permitiría falsificarla con X-Forwarded-For y saltarse los límites de peticiones.
+    trustProxy: opts.trustProxy ?? trustProxySetting(),
     bodyLimit: 1_000_000,
   });
 

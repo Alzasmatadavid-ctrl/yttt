@@ -7,6 +7,7 @@ import {
   leadEvents,
   leadMemories,
   leads,
+  memberships,
   qualificationRules,
   scheduledJobs,
   followUps,
@@ -88,32 +89,48 @@ export async function findExistingLead(businessId: string, input: Partial<Create
   return row ?? null;
 }
 
+/** Completa en un lead existente los datos que le falten, sin sobrescribir los que ya tiene. */
+async function completeExistingLead(businessId: string, existing: Lead, input: CreateLeadInput): Promise<Lead> {
+  const patch: Partial<Lead> = {};
+  if (!existing.name && input.name) patch.name = input.name;
+  if (!existing.email && input.email) patch.email = input.email.trim().toLowerCase();
+  if (!existing.phone && input.phone) patch.phone = normalizePhone(input.phone);
+  if (!existing.whatsappId && input.whatsappId) patch.whatsappId = input.whatsappId;
+  if (!existing.instagramUserId && input.instagramUserId) patch.instagramUserId = input.instagramUserId;
+  if (!existing.instagramUsername && input.instagramUsername) patch.instagramUsername = input.instagramUsername;
+  if (!existing.avatarUrl && input.avatarUrl) patch.avatarUrl = input.avatarUrl;
+  if (Object.keys(patch).length === 0) return existing;
+  try {
+    const [updated] = await getDb()
+      .update(leads)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(and(eq(leads.businessId, businessId), eq(leads.id, existing.id)))
+      .returning();
+    return updated ?? existing;
+  } catch (err) {
+    // Otro lead ya tiene ese WhatsApp/Instagram (índice único): se conserva el lead tal cual.
+    if (isUniqueViolation(err)) return existing;
+    throw err;
+  }
+}
+
+/** Error de PostgreSQL por índice único (23505), venga directo o envuelto por Drizzle. */
+export function isUniqueViolation(err: unknown): boolean {
+  for (let e = err as { code?: string; cause?: unknown } | undefined, i = 0; e && i < 5; e = e.cause as typeof e, i++) {
+    if (e.code === '23505') return true;
+  }
+  return false;
+}
+
 export async function createLead(businessId: string, input: CreateLeadInput, actor: Actor): Promise<{ lead: Lead; created: boolean }> {
   const existing = await findExistingLead(businessId, input);
-  if (existing) {
-    // Completa datos que falten sin sobrescribir los existentes.
-    const patch: Partial<Lead> = {};
-    if (!existing.name && input.name) patch.name = input.name;
-    if (!existing.email && input.email) patch.email = input.email.trim().toLowerCase();
-    if (!existing.phone && input.phone) patch.phone = normalizePhone(input.phone);
-    if (!existing.whatsappId && input.whatsappId) patch.whatsappId = input.whatsappId;
-    if (!existing.instagramUserId && input.instagramUserId) patch.instagramUserId = input.instagramUserId;
-    if (!existing.instagramUsername && input.instagramUsername) patch.instagramUsername = input.instagramUsername;
-    if (!existing.avatarUrl && input.avatarUrl) patch.avatarUrl = input.avatarUrl;
-    if (Object.keys(patch).length) {
-      const [updated] = await getDb()
-        .update(leads)
-        .set({ ...patch, updatedAt: new Date() })
-        .where(and(eq(leads.businessId, businessId), eq(leads.id, existing.id)))
-        .returning();
-      return { lead: updated, created: false };
-    }
-    return { lead: existing, created: false };
-  }
+  if (existing) return { lead: await completeExistingLead(businessId, existing, input), created: false };
 
   const usage = await checkUsageLimit(businessId, 'leads');
   const qualification: LeadQualification = {};
   if (input.goal) qualification.goal = { value: input.goal.slice(0, 500), confidence: 0.8, updatedAt: new Date().toISOString() };
+  // ON CONFLICT DO NOTHING: si llegan a la vez varios mensajes de un contacto nuevo (webhooks en paralelo),
+  // solo uno crea el lead; los demás lo encuentran justo después y siguen con él (no se pierde ningún mensaje).
   const [lead] = await getDb()
     .insert(leads)
     .values({
@@ -134,7 +151,13 @@ export async function createLead(businessId: string, input: CreateLeadInput, act
       isTest: input.isTest ?? false,
       lastInteractionAt: new Date(),
     })
+    .onConflictDoNothing()
     .returning();
+  if (!lead) {
+    const winner = await findExistingLead(businessId, input);
+    if (!winner) throw new Error('No se pudo crear ni encontrar el lead tras un conflicto de duplicados.');
+    return { lead: await completeExistingLead(businessId, winner, input), created: false };
+  }
   if (!input.isTest) await incrementUsage(businessId, 'leads');
   await recordLeadEvent(businessId, lead.id, 'created', actor, { source: input.source, sourceDetail: input.sourceDetail });
   if (!usage.allowed && !input.isTest) {
@@ -233,7 +256,22 @@ export interface UpdateLeadInput {
 }
 
 export async function updateLead(businessId: string, leadId: string, patch: UpdateLeadInput, actor: Actor) {
-  await getLead(businessId, leadId);
+  const current = await getLead(businessId, leadId);
+  if (patch.assignedUserId) {
+    // Solo se puede asignar a personas del equipo de ESTE negocio.
+    const [member] = await getDb()
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(and(eq(memberships.businessId, businessId), eq(memberships.userId, patch.assignedUserId)))
+      .limit(1);
+    if (!member) throw badRequest('Esa persona no forma parte del equipo de este negocio.');
+  }
+  if (patch.tags !== undefined && current.tags.includes(OVER_LIMIT_TAG) && !patch.tags.includes(OVER_LIMIT_TAG)) {
+    // La etiqueta de “fuera de límite” no se puede quitar a mano mientras el negocio siga por encima
+    // del límite de leads del plan (si no, bastaría con editar las etiquetas para saltárselo).
+    const usage = await checkUsageLimit(businessId, 'leads');
+    if (!usage.allowed) patch = { ...patch, tags: [...patch.tags.filter((t) => t !== OVER_LIMIT_TAG).slice(0, 19), OVER_LIMIT_TAG] };
+  }
   const values: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
   if (patch.name !== undefined) values.name = patch.name.trim();
   if (patch.phone !== undefined) values.phone = normalizePhone(patch.phone);
@@ -379,17 +417,45 @@ export async function mergeQualification(
   return recomputeLeadScore(businessId, leadId);
 }
 
-export async function markOptedOut(businessId: string, leadId: string) {
-  await getDb()
+/** Trabajos que envían mensajes al lead (no incluye el aviso post-llamada, que es para el entrenador). */
+const LEAD_MESSAGE_JOBS = ['kai_reply', 'first_contact', 'followup', 'appointment_confirmation', 'appointment_reminder', 'no_show_message'];
+
+/**
+ * Baja: el lead pidió no recibir más mensajes. KAI se pausa en todas sus conversaciones y se cancelan
+ * seguimientos, primeros contactos, confirmaciones y recordatorios de cita pendientes.
+ */
+export async function markOptedOut(businessId: string, leadId: string, actor: Actor = { type: 'lead' }, meta: Record<string, unknown> = {}) {
+  const db = getDb();
+  await db
     .update(leads)
     .set({ optedOut: true, updatedAt: new Date() })
     .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)));
-  await getDb()
+  await db
     .update(conversations)
     .set({ aiEnabled: false, updatedAt: new Date() })
     .where(and(eq(conversations.businessId, businessId), eq(conversations.leadId, leadId)));
   await cancelPendingAutomationsForLead(businessId, leadId);
-  await recordLeadEvent(businessId, leadId, 'opted_out', { type: 'lead' });
+  await db
+    .update(scheduledJobs)
+    .set({ status: 'cancelled', finishedAt: new Date() })
+    .where(
+      and(
+        eq(scheduledJobs.businessId, businessId),
+        eq(scheduledJobs.status, 'pending'),
+        inArray(scheduledJobs.type, LEAD_MESSAGE_JOBS),
+        sql`${scheduledJobs.payload}->>'leadId' = ${leadId}`,
+      ),
+    );
+  await recordLeadEvent(businessId, leadId, 'opted_out', actor, meta);
+}
+
+/** Alta manual (el lead vuelve a aceptar mensajes). KAI sigue pausado hasta que el entrenador lo reactive. */
+export async function markOptedIn(businessId: string, leadId: string, actor: Actor) {
+  await getDb()
+    .update(leads)
+    .set({ optedOut: false, updatedAt: new Date() })
+    .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)));
+  await recordLeadEvent(businessId, leadId, 'opted_in', actor);
 }
 
 /** Cancela seguimientos y trabajos pendientes de un lead (cuando responde, se cierra o se borra). */

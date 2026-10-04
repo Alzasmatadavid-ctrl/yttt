@@ -1,15 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, Hand, Inbox as InboxIcon, PanelRight, Play, Search, Send, Sparkles, User, UserRound } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, Hand, Inbox as InboxIcon, PanelRight, Play, RotateCw, Search, Send, Sparkles, User, UserRound, X } from 'lucide-react';
 import { CHANNEL_LABELS, HANDOFF_REASONS, type HandoffReason, type LeadSource, type LeadStatus, type LeadTemperature } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, dayLabel, shortTime, timeAgo, timeOnly } from '../lib/format';
 import { nextActionFor } from '../lib/leads';
+import { useBusinessSettings } from '../lib/business';
 import { Button, Card, EmptyState, Spinner, Switch, useToast } from '../components/ui';
 import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
 import { BookCallModal, QualificationList, StatusSelect } from '../components/lead-actions';
-import type { Appointment, Conversation, Lead, Memory, Message, SettingsResponse } from '../lib/types';
+import type { Appointment, Conversation, Lead, Memory, Message } from '../lib/types';
 
 interface InboxItem {
   conversation: Conversation;
@@ -84,7 +85,7 @@ function MessageList({ messages }: { messages: Message[] }) {
   );
 }
 
-function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: string; onBack: () => void; onTogglePanel: () => void }) {
+function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversationId: string; onBack: () => void; onTogglePanel: () => void; panelOpen: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [text, setText] = useState('');
@@ -116,6 +117,7 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
       toast('Has tomado el control. KAI no responderá en esta conversación.');
       void qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
     },
+    onError: (e) => toast(errorText(e), 'error'),
   });
   const release = useMutation({
     mutationFn: (replyNow: boolean) => api.post(`/conversations/${conversationId}/release`, { replyNow }),
@@ -123,7 +125,14 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
       toast('KAI vuelve a encargarse de esta conversación.');
       void qc.invalidateQueries();
     },
+    onError: (e) => toast(errorText(e), 'error'),
   });
+  // Un solo envío a la vez: el texto no se borra hasta que el servidor confirma, así que pulsar Enter
+  // dos veces seguidas (o Enter y el botón) mandaría el mismo mensaje dos veces al lead.
+  const submit = () => {
+    if (!text.trim() || send.isPending || data?.lead.optedOut) return;
+    send.mutate({ text, pauseKai });
+  };
 
   if (isLoading) return <div className="thread page-loading"><Spinner /></div>;
   if (error || !data) return <div className="thread"><EmptyState icon={AlertTriangle} title="No se pudo cargar la conversación" description={errorText(error)} /></div>;
@@ -156,7 +165,7 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
             Devolver a KAI
           </Button>
         )}
-        <Button variant="ghost" size="sm" iconOnly icon={PanelRight} onClick={onTogglePanel}>
+        <Button variant="ghost" size="sm" iconOnly icon={PanelRight} onClick={onTogglePanel} className="thread-panel-toggle" aria-expanded={panelOpen}>
           Ficha del lead
         </Button>
       </header>
@@ -188,7 +197,7 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
         className="composer"
         onSubmit={(e) => {
           e.preventDefault();
-          if (text.trim()) send.mutate({ text, pauseKai });
+          submit();
         }}
       >
         <div className="composer-box">
@@ -200,9 +209,9 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
             disabled={lead.optedOut}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                if (text.trim()) send.mutate({ text, pauseKai });
+                submit();
               }
             }}
             aria-label="Mensaje"
@@ -221,16 +230,42 @@ function Thread({ conversationId, onBack, onTogglePanel }: { conversationId: str
   );
 }
 
-function LeadPanel({ conversationId }: { conversationId: string }) {
+/**
+ * Ficha lateral del lead. En escritorio ancho es una columna fija; en pantallas medianas y móviles se abre
+ * superpuesta (overlayOpen) con su propia cabecera para cerrarla, porque tapa la cabecera de la conversación.
+ */
+function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: string; overlayOpen: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const [booking, setBooking] = useState(false);
+  const rootRef = useRef<HTMLElement>(null);
   const { data } = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => api.get<Detail>(`/conversations/${conversationId}`) });
-  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings') });
-  if (!data) return <aside className="lead-panel" />;
+  const settings = useBusinessSettings();
+  const tz = settings.data?.business.timezone;
+  // Al abrirse superpuesta, el foco pasa una sola vez al botón de cerrar (solo si es visible: en escritorio ancho no lo es).
+  // Se espera a que haya datos, pero los refrescos posteriores no vuelven a mover el foco.
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!overlayOpen) {
+      focusedRef.current = false;
+      return;
+    }
+    if (focusedRef.current) return;
+    const btn = rootRef.current?.querySelector<HTMLElement>('.lead-panel-head button');
+    if (!btn) return;
+    focusedRef.current = true;
+    if (btn.offsetParent !== null) btn.focus();
+  }, [overlayOpen, data]);
+  if (!data) return <aside className="lead-panel" ref={rootRef} />;
   const { lead, memories, appointments } = data;
   const upcoming = appointments.find((a) => a.status === 'scheduled' && new Date(a.endsAt) > new Date());
   return (
-    <aside className="lead-panel" aria-label="Ficha del lead">
+    <aside className="lead-panel" aria-label="Ficha del lead" ref={rootRef}>
+      <div className="lead-panel-head">
+        <strong>Ficha del lead</strong>
+        <Button size="sm" variant="ghost" icon={X} onClick={onClose}>
+          Cerrar
+        </Button>
+      </div>
       <div className="row" style={{ gap: 10 }}>
         <LeadAvatar name={lead.name} url={lead.avatarUrl} size={44} />
         <div className="grow" style={{ minWidth: 0 }}>
@@ -249,7 +284,7 @@ function LeadPanel({ conversationId }: { conversationId: string }) {
         <Sparkles style={{ color: 'var(--accent-text)' }} />
         <div>
           <div className="subtle xs">Próxima acción</div>
-          <strong className="small">{nextActionFor(lead, data.conversation, upcoming)}</strong>
+          <strong className="small">{nextActionFor(lead, data.conversation, upcoming, tz)}</strong>
         </div>
       </div>
       <div className="field">
@@ -271,7 +306,7 @@ function LeadPanel({ conversationId }: { conversationId: string }) {
             </Button>
           )}
         </div>
-        <p className="mt-4 small">{upcoming ? dateTime(upcoming.startsAt) : <span className="subtle">Sin llamada agendada</span>}</p>
+        <p className="mt-4 small">{upcoming ? dateTime(upcoming.startsAt, tz) : <span className="subtle">Sin llamada agendada</span>}</p>
         {upcoming?.meetingUrl && (
           <a className="small" href={upcoming.meetingUrl} target="_blank" rel="noreferrer">
             Enlace de la videollamada
@@ -324,7 +359,7 @@ function LeadPanel({ conversationId }: { conversationId: string }) {
             </>
           )}
           <dt>Entró</dt>
-          <dd>{dateTime(lead.createdAt)}</dd>
+          <dd>{dateTime(lead.createdAt, tz)}</dd>
           {lead.sourceDetail && (
             <>
               <dt>Campaña</dt>
@@ -351,8 +386,21 @@ export default function Inbox() {
     const t = setTimeout(() => setDebounced(search), 300);
     return () => clearTimeout(t);
   }, [search]);
+  // La ficha superpuesta se cierra al cambiar de conversación…
+  useEffect(() => setShowPanel(false), [conversationId]);
+  // …y con Escape (salvo que haya un modal abierto encima, como «Agendar llamada»: Escape cierra ese modal).
+  useEffect(() => {
+    if (!showPanel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('.overlay')) setShowPanel(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showPanel]);
+  const settings = useBusinessSettings();
+  const tz = settings.data?.business.timezone;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['inbox', filter, debounced],
     queryFn: () => api.get<{ items: InboxItem[]; counts: Record<string, number> }>('/inbox', { filter, search: debounced, limit: 100 }),
     refetchInterval: 10_000,
@@ -380,16 +428,18 @@ export default function Inbox() {
             <div className="row wrap mt-4" style={{ gap: 5 }}>
               {it.conversation.handoffActive && <span className="badge badge-warning">Te necesita</span>}
               <StatusBadge status={it.lead.status} />
+              <TemperatureBadge temperature={it.lead.temperature} />
               <ScoreBadge score={it.lead.score} />
+              <SourceBadge source={it.lead.source} />
             </div>
             <div className="subtle xs ellipsis mt-4">
               {it.lead.goalSummary ? `${it.lead.goalSummary} · ` : ''}
-              {nextActionFor(it.lead, it.conversation)}
+              {nextActionFor(it.lead, it.conversation, null, tz)}
             </div>
           </div>
         </button>
       )),
-    [items, activeId, navigate, filter],
+    [items, activeId, navigate, filter, tz],
   );
 
   return (
@@ -415,14 +465,27 @@ export default function Inbox() {
               <Spinner />
             </div>
           )}
-          {!isLoading && items.length === 0 && <EmptyState icon={InboxIcon} title="No hay conversaciones" description={filter === 'all' ? 'Cuando un lead escriba por WhatsApp o Instagram, o entre por un formulario, aparecerá aquí.' : 'Ninguna conversación coincide con este filtro.'} />}
+          {!isLoading && error && !data && (
+            <EmptyState
+              icon={AlertTriangle}
+              title="No se pudieron cargar las conversaciones"
+              description={errorText(error)}
+              action={
+                <Button icon={RotateCw} loading={isFetching} onClick={() => void refetch()}>
+                  Reintentar
+                </Button>
+              }
+            />
+          )}
+          {!isLoading && data && items.length === 0 && <EmptyState icon={InboxIcon} title="No hay conversaciones" description={filter === 'all' ? 'Cuando un lead escriba por WhatsApp o Instagram, o entre por un formulario, aparecerá aquí.' : 'Ninguna conversación coincide con este filtro.'} />}
           {list}
         </div>
       </section>
       {activeId ? (
         <>
-          <Thread key={activeId} conversationId={activeId} onBack={() => navigate('/app/inbox')} onTogglePanel={() => setShowPanel((s) => !s)} />
-          <LeadPanel conversationId={activeId} />
+          <Thread key={activeId} conversationId={activeId} onBack={() => navigate('/app/inbox')} onTogglePanel={() => setShowPanel((s) => !s)} panelOpen={showPanel} />
+          {showPanel && <div className="inbox-panel-backdrop" onClick={() => setShowPanel(false)} aria-hidden />}
+          <LeadPanel key={activeId} conversationId={activeId} overlayOpen={showPanel} onClose={() => setShowPanel(false)} />
         </>
       ) : (
         <section className="thread" style={{ display: 'grid', placeItems: 'center', gridColumn: 'span 2' }}>

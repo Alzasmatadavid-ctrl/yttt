@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Minus } from 'lucide-react';
 import { LEAD_STATUSES, type LeadQualification, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
-import { dayLabel, timeOnly } from '../lib/format';
+import { dayLabel, parseOptionalAmount, timeOnly } from '../lib/format';
 import { Button, Field, Input, Modal, Select, Spinner, useToast } from './ui';
 import type { QualificationRule } from '../lib/types';
 
@@ -13,6 +13,7 @@ export function StatusSelect({ leadId, status, onChanged }: { leadId: string; st
   const toast = useToast();
   const [pending, setPending] = useState<LeadStatus | null>(null);
   const [deal, setDeal] = useState('');
+  const [dealError, setDealError] = useState<string | null>(null);
   const mutate = useMutation({
     mutationFn: (body: { status: LeadStatus; dealValueCents?: number | null }) => api.post(`/leads/${leadId}/status`, body),
     onSuccess: () => {
@@ -30,8 +31,12 @@ export function StatusSelect({ leadId, status, onChanged }: { leadId: string; st
         value={status}
         onChange={(e) => {
           const next = e.target.value as LeadStatus;
-          if (next === 'client') setPending(next);
-          else mutate.mutate({ status: next });
+          if (next === 'client') {
+            // Cada vez que se abre, el importe empieza vacío (no se arrastra el de otro lead).
+            setDeal('');
+            setDealError(null);
+            setPending(next);
+          } else mutate.mutate({ status: next });
         }}
         options={LEAD_STATUSES.map((s) => ({ value: s.key, label: s.label }))}
       />
@@ -42,14 +47,30 @@ export function StatusSelect({ leadId, status, onChanged }: { leadId: string; st
         footer={
           <>
             <Button onClick={() => setPending(null)}>Cancelar</Button>
-            <Button variant="primary" loading={mutate.isPending} onClick={() => mutate.mutate({ status: 'client', dealValueCents: deal ? Math.round(Number(deal.replace(',', '.')) * 100) : null })}>
+            <Button
+              variant="primary"
+              loading={mutate.isPending}
+              onClick={() => {
+                const amount = parseOptionalAmount(deal);
+                if (amount.error) return setDealError(amount.error);
+                mutate.mutate({ status: 'client', dealValueCents: amount.cents });
+              }}
+            >
               Guardar
             </Button>
           </>
         }
       >
-        <Field label="Importe de la venta (opcional)" hint="Si lo dejas vacío se usa el precio de tu servicio principal para calcular ingresos y ROI.">
-          <Input inputMode="decimal" value={deal} onChange={(e) => setDeal(e.target.value)} placeholder="Ej. 297" />
+        <Field label="Importe de la venta (opcional)" hint="Si lo dejas vacío se usa el precio de tu servicio principal para calcular ingresos y ROI." error={dealError}>
+          <Input
+            inputMode="decimal"
+            value={deal}
+            onChange={(e) => {
+              setDeal(e.target.value);
+              setDealError(null);
+            }}
+            placeholder="Ej. 297 o 1.200,50"
+          />
         </Field>
       </Modal>
     </>
@@ -159,13 +180,28 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
   const [outcome, setOutcome] = useState<'won' | 'lost' | 'follow_up'>('won');
   const [notes, setNotes] = useState('');
   const [deal, setDeal] = useState('');
+  const [dealError, setDealError] = useState<string | null>(null);
+  // El modal está siempre montado: al abrirlo (o al pasar a otra cita) el formulario vuelve a empezar de cero,
+  // para no registrar en un lead el resultado, las notas o el importe que se escribieron para otro.
+  const formKey = open ? appointmentId : null;
+  const [shownFor, setShownFor] = useState(formKey);
+  if (formKey !== shownFor) {
+    setShownFor(formKey);
+    if (formKey) {
+      setAttended('yes');
+      setOutcome('won');
+      setNotes('');
+      setDeal('');
+      setDealError(null);
+    }
+  }
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (dealValueCents: number | null) =>
       api.post(`/agenda/appointments/${appointmentId}/outcome`, {
         attended: attended === 'yes',
         outcome: attended === 'yes' ? outcome : undefined,
         notes: notes || undefined,
-        dealValueCents: attended === 'yes' && outcome === 'won' && deal ? Math.round(Number(deal.replace(',', '.')) * 100) : undefined,
+        dealValueCents: attended === 'yes' && outcome === 'won' && dealValueCents !== null ? dealValueCents : undefined,
       }),
     onSuccess: () => {
       toast(attended === 'no' ? 'Registrado como no presentado. KAI le escribirá para reagendar.' : 'Resultado registrado');
@@ -182,7 +218,16 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>
+          <Button
+            variant="primary"
+            loading={save.isPending}
+            onClick={() => {
+              const won = attended === 'yes' && outcome === 'won';
+              const amount = won ? parseOptionalAmount(deal) : { cents: null, error: null };
+              if (amount.error) return setDealError(amount.error);
+              save.mutate(amount.cents);
+            }}
+          >
             Guardar resultado
           </Button>
         </>
@@ -190,7 +235,7 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
     >
       <div className="col gap-16">
         <Field label="¿Se presentó a la llamada?">
-          <div className="segmented">
+          <div className="segmented" role="group" aria-label="¿Se presentó a la llamada?">
             <button type="button" aria-pressed={attended === 'yes'} onClick={() => setAttended('yes')}>
               Sí, asistió
             </button>
@@ -201,7 +246,7 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
         </Field>
         {attended === 'yes' ? (
           <Field label="Resultado">
-            <div className="segmented">
+            <div className="segmented" role="group" aria-label="Resultado de la llamada">
               <button type="button" aria-pressed={outcome === 'won'} onClick={() => setOutcome('won')}>
                 Cliente 🎉
               </button>
@@ -217,8 +262,16 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
           <p className="muted small">KAI le enviará un mensaje natural para buscar otro hueco (si la automatización de no presentados está activa).</p>
         )}
         {attended === 'yes' && outcome === 'won' && (
-          <Field label="Importe de la venta (opcional)" hint="Si lo dejas vacío se usa el precio de tu servicio principal.">
-            <Input inputMode="decimal" value={deal} onChange={(e) => setDeal(e.target.value)} placeholder="Ej. 297" />
+          <Field label="Importe de la venta (opcional)" hint="Si lo dejas vacío se usa el precio de tu servicio principal." error={dealError}>
+            <Input
+              inputMode="decimal"
+              value={deal}
+              onChange={(e) => {
+                setDeal(e.target.value);
+                setDealError(null);
+              }}
+              placeholder="Ej. 297 o 1.200,50"
+            />
           </Field>
         )}
         <Field label="Notas (opcional)">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Ban,
   Bell,
   CalendarDays,
   ChartColumn,
@@ -28,9 +29,12 @@ import { api, errorText } from '../lib/api';
 import { applyTheme, getTheme, type Theme } from '../lib/theme';
 import { timeAgo } from '../lib/format';
 import { Logo } from '../components/brand';
-import { Button, ConfirmDialog, Field, Input, Modal, useToast } from '../components/ui';
+import { Button, ConfirmDialog, EmptyState, Field, Input, Modal, useToast } from '../components/ui';
+import { ScoreBandsContext } from '../components/lead-bits';
 import CopilotPanel from '../components/CopilotPanel';
+import { useCan } from '../lib/business';
 import type { Alert, SettingsResponse } from '../lib/types';
+import { DEFAULT_SCORE_BANDS } from '@shared';
 
 interface AlertRow {
   alert: Alert;
@@ -134,6 +138,14 @@ export default function AppLayout() {
   const toast = useToast();
 
   useEffect(() => setMenuOpen(false), [location.pathname]);
+  // Menú móvil: al abrirlo, el foco entra en él (primer enlace); al cerrarlo, vuelve al botón «Menú».
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuWasOpen = useRef(false);
+  useEffect(() => {
+    if (menuOpen) sidebarRef.current?.querySelector<HTMLElement>('.nav-link')?.focus();
+    else if (menuWasOpen.current) document.querySelector<HTMLElement>('.topbar .menu-btn')?.focus();
+    menuWasOpen.current = menuOpen;
+  }, [menuOpen]);
   const bizRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!bizOpen) return;
@@ -158,9 +170,13 @@ export default function AppLayout() {
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
-  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings'), staleTime: 30_000 });
-  const inbox = useQuery({ queryKey: ['inbox-counts'], queryFn: () => api.get<{ counts: Record<string, number> }>('/inbox', { filter: 'pending', limit: 1 }), refetchInterval: 20_000 });
+  // Con la cuenta suspendida el servidor rechaza todas las peticiones del negocio: no se piden datos.
+  const suspended = activeBusiness?.status === 'suspended';
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings'), staleTime: 30_000, enabled: !suspended });
+  const inbox = useQuery({ queryKey: ['inbox-counts'], queryFn: () => api.get<{ counts: Record<string, number> }>('/inbox', { filter: 'pending', limit: 1 }), refetchInterval: 20_000, enabled: !suspended });
   const autopilot = settings.data?.aiSettings.autopilotEnabled ?? true;
+  // Pausar o reactivar a KAI cambia la configuración del negocio: solo la persona titular (rol Entrenador) puede hacerlo.
+  const canToggleAutopilot = useCan('settings:write') && !suspended;
   const toggleAutopilot = useMutation({
     mutationFn: (enabled: boolean) => api.put('/settings/ai', { autopilotEnabled: enabled }),
     onSuccess: (_d, enabled) => {
@@ -205,7 +221,7 @@ export default function AppLayout() {
   return (
     <div className="app-shell">
       {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
-      <aside className={`sidebar ${menuOpen ? 'open' : ''}`} aria-label="Navegación principal">
+      <aside className={`sidebar ${menuOpen ? 'open' : ''}`} aria-label="Navegación principal" ref={sidebarRef}>
         <div className="sidebar-brand">
           <Logo to="/app" size={26} />
           <span className="badge badge-accent">Setter IA</span>
@@ -278,13 +294,23 @@ export default function AppLayout() {
           </NavLink>
         )}
         <div className="sidebar-footer">
-          <button className="kai-status" onClick={() => setConfirmAutopilot(true)} style={{ cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
-            <span className={`pulse ${autopilot ? '' : 'off'}`} />
-            <span className="grow">
-              <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{autopilot ? 'KAI está activo' : 'KAI en pausa'}</span>
-              <span className="subtle xs">{mode === 'simulated' ? 'Modo simulación (sin IA externa)' : autopilot ? 'Respondiendo a tus leads' : 'No responde automáticamente'}</span>
-            </span>
-          </button>
+          {canToggleAutopilot ? (
+            <button className="kai-status" onClick={() => setConfirmAutopilot(true)} style={{ cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+              <span className={`pulse ${autopilot ? '' : 'off'}`} />
+              <span className="grow">
+                <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{autopilot ? 'KAI está activo' : 'KAI en pausa'}</span>
+                <span className="subtle xs">{mode === 'simulated' ? 'Modo simulación (sin IA externa)' : autopilot ? 'Respondiendo a tus leads' : 'No responde automáticamente'}</span>
+              </span>
+            </button>
+          ) : (
+            <div className="kai-status" title={suspended ? undefined : 'Solo la persona titular del negocio puede pausar o reactivar a KAI.'}>
+              <span className={`pulse ${autopilot && !suspended ? '' : 'off'}`} />
+              <span className="grow">
+                <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{suspended ? 'KAI detenido' : autopilot ? 'KAI está activo' : 'KAI en pausa'}</span>
+                <span className="subtle xs">{suspended ? 'La cuenta está suspendida' : autopilot ? 'Respondiendo a los leads' : 'Pausado por la persona titular'}</span>
+              </span>
+            </div>
+          )}
           <div className="row" style={{ padding: '4px 2px' }}>
             <div className="grow" style={{ minWidth: 0 }}>
               <div className="ellipsis small" style={{ fontWeight: 600 }}>
@@ -318,15 +344,35 @@ export default function AppLayout() {
             Menú
           </Button>
           <div className="grow" />
-          <AlertsMenu />
-          <Button variant="primary" size="sm" icon={Sparkles} onClick={() => setCopilotOpen(true)}>
-            Copilot
-          </Button>
+          {!suspended && <AlertsMenu />}
+          {!suspended && (
+            <Button variant="primary" size="sm" icon={Sparkles} onClick={() => setCopilotOpen(true)}>
+              Copilot
+            </Button>
+          )}
         </header>
-        <Outlet />
+        {suspended ? (
+          // Con la cuenta suspendida el servidor rechaza todas las pantallas: mejor explicarlo que dejar spinners o errores sueltos.
+          <div className="page">
+            <EmptyState
+              icon={Ban}
+              title="Esta cuenta está suspendida"
+              description={`KAI no está respondiendo a los leads de «${activeBusiness?.name ?? 'este negocio'}» y no puedes consultar ni cambiar sus datos mientras dure la suspensión. Contacta con el equipo de soporte de KAI para reactivarla.`}
+              action={
+                <Button icon={LogOut} onClick={() => void logout()}>
+                  Cerrar sesión
+                </Button>
+              }
+            />
+          </div>
+        ) : (
+          <ScoreBandsContext.Provider value={settings.data?.aiSettings.scoreBands ?? DEFAULT_SCORE_BANDS}>
+            <Outlet />
+          </ScoreBandsContext.Provider>
+        )}
       </div>
 
-      {copilotOpen && (
+      {copilotOpen && !suspended && (
         <>
           <div className="sidebar-backdrop" style={{ zIndex: 54 }} onClick={() => setCopilotOpen(false)} />
           <aside className="drawer" aria-label="KAI Copilot">
@@ -339,7 +385,9 @@ export default function AppLayout() {
                 Cerrar
               </Button>
             </div>
-            <CopilotPanel compact />
+            <ScoreBandsContext.Provider value={settings.data?.aiSettings.scoreBands ?? DEFAULT_SCORE_BANDS}>
+              <CopilotPanel compact />
+            </ScoreBandsContext.Provider>
           </aside>
         </>
       )}

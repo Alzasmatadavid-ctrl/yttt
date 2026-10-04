@@ -18,10 +18,24 @@ const optionalString = z
   .optional()
   .transform((v) => (v && v.trim() !== '' ? v.trim() : undefined));
 
+/** Número entero positivo con valor por defecto (una variable vacía cuenta como no definida). */
+const positiveInt = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? def : Number(v)))
+    .pipe(z.number().int().min(1));
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
+  /**
+   * Proxies de confianza delante de KAI (para saber la IP real de cada visitante).
+   * Vacío = 1 en producción (Railway, Render, Caddy…) y ninguno en desarrollo.
+   * Un número = cuántos proxies hay delante; también admite IPs/rangos separados por comas.
+   */
+  TRUST_PROXY: optionalString,
 
   /** URL pública donde se abre la aplicación (frontend). */
   APP_URL: z.string().url().default('http://localhost:5173'),
@@ -68,6 +82,13 @@ const EnvSchema = z.object({
   // --- Administración del SaaS ---
   ADMIN_EMAIL: optionalString,
   ADMIN_PASSWORD: optionalString,
+  /** Solo si se pide expresamente: convierte en administrador a una cuenta YA existente con ADMIN_EMAIL. */
+  ADMIN_PROMOTE_EXISTING: bool(false),
+
+  // --- Formularios públicos (anti-abuso) ---
+  /** Leads nuevos que puede crear el formulario público de un negocio por hora y por día. */
+  PUBLIC_FORM_MAX_PER_HOUR: positiveInt(30),
+  PUBLIC_FORM_MAX_PER_DAY: positiveInt(200),
 
   // --- Frontend ---
   SERVE_FRONTEND: bool(false),
@@ -99,13 +120,50 @@ export const publicAppUrl = () => env.APP_URL.replace(/\/$/, '');
 export const isProduction = () => env.NODE_ENV === 'production';
 export const isTest = () => env.NODE_ENV === 'test';
 
+/** Proxies en redes privadas (Railway, Render, Docker, Caddy en la misma máquina…). */
+export const PRIVATE_PROXIES = 'loopback,linklocal,uniquelocal,100.64.0.0/10';
+
+export type TrustProxy = false | string | ((address: string, hop: number) => boolean);
+
+/**
+ * Valor de `trustProxy` para Fastify. Nunca `true`: confiar en cualquier X-Forwarded-For permitiría
+ * falsificar la IP y saltarse los límites de peticiones. Opciones de TRUST_PROXY:
+ *  - vacío: en producción, proxies de redes privadas (PRIVATE_PROXIES); en desarrollo, ninguno.
+ *  - false/0: ninguno (KAI recibe las conexiones directamente).
+ *  - true: igual que vacío en producción (proxies de redes privadas).
+ *  - un número N: confiar en los N saltos más cercanos (solo si KAI no es accesible sin pasar por el proxy).
+ *  - IPs o rangos separados por comas (p. ej. "10.0.0.0/8,173.245.48.0/20").
+ */
+export function trustProxySetting(value: string | undefined = env.TRUST_PROXY, production = isProduction()): TrustProxy {
+  const v = value?.trim().toLowerCase();
+  if (!v) return production ? PRIVATE_PROXIES : false;
+  if (['false', 'no', 'off', '0'].includes(v)) return false;
+  if (['true', 'yes', 'on'].includes(v)) return PRIVATE_PROXIES;
+  if (/^\d+$/.test(v)) {
+    const hops = Number(v);
+    return (_address: string, hop: number) => hop < hops;
+  }
+  return value!.trim();
+}
+
+/** El envío real de emails está configurado (Resend con su clave). */
+export const emailConfigured = () => env.EMAIL_PROVIDER === 'resend' && Boolean(env.RESEND_API_KEY);
+
+/** Avisos de configuración que conviene mostrar al arrancar (no impiden el arranque). */
+export function startupWarnings(): string[] {
+  const out: string[] = [];
+  if (isProduction() && !emailConfigured())
+    out.push('Email sin configurar (EMAIL_PROVIDER=resend y RESEND_API_KEY): no se enviarán emails de recuperación de contraseña ni invitaciones.');
+  return out;
+}
+
 /** Estado de cada integración, para mostrar en la interfaz qué está configurado. */
 export function integrationAvailability() {
   return {
     ai: resolveAiMode(),
     meta: Boolean(env.META_APP_SECRET && env.META_VERIFY_TOKEN),
     google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-    email: env.EMAIL_PROVIDER === 'resend' ? Boolean(env.RESEND_API_KEY) : false,
+    email: emailConfigured(),
   };
 }
 

@@ -197,10 +197,10 @@ function CalendlyCard({
   const tokenError = !tokenClean ? 'Pega tu token de Calendly.' : tokenClean.length < 20 ? 'Parece incompleto: el token es un texto muy largo. Cópialo entero.' : null;
 
   const connect = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const previousType = calendly?.calendarId && /^https?:\/\//.test(calendly.calendarId) ? calendly.calendarId : undefined;
-      // Al volver a conectar, primero se quita la conexión anterior (y su aviso en Calendly) para no duplicarlo.
-      if (calendly) await api.del('/integrations/calendar/calendly');
+      // Al volver a conectar NO se desconecta antes la conexión actual: el servidor comprueba primero el token nuevo y, solo si
+      // Calendly lo acepta, sustituye la conexión (y su aviso de reservas). Si el token está mal, la conexión anterior sigue funcionando.
       return api.post<CalendlyConnectResponse>('/integrations/calendly', { token: tokenClean, ...(previousType ? { eventTypeUri: previousType } : {}) });
     },
     onSuccess: (r) => {
@@ -353,7 +353,7 @@ function CalendlyCard({
           {calendly && (
             <p className="small muted">
               Por seguridad, KAI no muestra tu token guardado. Para ver tus tipos de evento o cambiar de cuenta, pega de nuevo tu token (el mismo u otro nuevo).
-              Ten en cuenta que la conexión actual se sustituye: si el token no es válido, Calendly quedará desconectado hasta que pegues uno correcto.
+              Si Calendly no acepta el token, no se cambia nada: KAI seguirá usando tu conexión actual.
             </p>
           )}
           <Field label="Token de acceso personal de Calendly" htmlFor={tokenId} error={touched ? tokenError : null} hint="Lo generas en Calendly en un minuto: abre la guía de abajo.">

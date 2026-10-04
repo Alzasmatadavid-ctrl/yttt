@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Users } from 'lucide-react';
+import { AlertTriangle, Plus, RotateCw, Search, Users } from 'lucide-react';
 import { LEAD_SOURCES, LEAD_STATUSES, LEAD_TEMPERATURES } from '@shared';
 import { api, errorText } from '../lib/api';
 import { timeAgo } from '../lib/format';
@@ -83,7 +83,7 @@ export default function Leads() {
     const t = setTimeout(() => setDebounced(search), 300);
     return () => clearTimeout(t);
   }, [search]);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['leads', 'list', debounced, status, temperature, source, sort],
     queryFn: () => api.get<{ leads: Lead[] }>('/leads', { search: debounced, status, temperature, source, sort, limit: 300 }),
   });
@@ -125,6 +125,18 @@ export default function Leads() {
           <div className="page-loading" style={{ minHeight: 200 }}>
             <Spinner />
           </div>
+        ) : !data ? (
+          // Un fallo de la API no es lo mismo que «no hay leads»: se explica y se puede reintentar.
+          <EmptyState
+            icon={AlertTriangle}
+            title="No se pudieron cargar los leads"
+            description={errorText(error)}
+            action={
+              <Button icon={RotateCw} loading={isFetching} onClick={() => void refetch()}>
+                Reintentar
+              </Button>
+            }
+          />
         ) : leads.length === 0 ? (
           <EmptyState icon={Users} title="No hay leads" description="Prueba a cambiar los filtros o crea un lead manualmente." />
         ) : (

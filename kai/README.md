@@ -8,18 +8,18 @@ KAI responde a tus leads de Instagram, WhatsApp, anuncios y formularios; los cua
 
 ## Qué incluye
 
-| Área | Qué hace |
-|---|---|
-| **KAI Setter** | Conversa, entiende, cualifica, agenda y hace seguimiento. Una sola pregunta por mensaje, con tu tono y tus palabras. Revisa cada mensaje antes de enviarlo (control de calidad) y, si no puede responder con seguridad, te pasa la conversación. |
-| **CRM** | Pipeline visual con 12 etapas (arrastrar y soltar), ficha de cada lead con su memoria (“se casa en septiembre”), puntuación interna 0–100 y temperatura. |
-| **Bandeja de entrada** | Todas las conversaciones en un sitio, con filtros (calientes, pendientes, requieren intervención…). Puedes escribir tú y pausar a KAI en cualquier momento. |
-| **Agenda** | Google Calendar o Calendly. KAI solo ofrece huecos libres de verdad. Recordatorios automáticos (al reservar, 24 h antes y 1 h antes) y mensajes de no-show. |
-| **Seguimientos** | Si el lead deja de responder, KAI le escribe con contexto (nunca “solo hago seguimiento”), respetando horas de descanso. |
-| **Panel y analítica** | Leads, respuesta, cualificación, llamadas, asistencia, clientes, ingresos y ROI estimado; hoy, 7 días, 30 días o fechas a medida. |
-| **KAI Copilot** | Pregúntale “¿qué leads calientes no han reservado?” o pídele “escribe a Ana”. Las acciones sensibles siempre te piden confirmación. |
-| **Simulador** | Habla con KAI como si fueras un lead para ver cómo responde, sin enviar nada a nadie. |
-| **Configuración visual** | Personalidad, preguntas de cualificación, puntuación, servicio y precio, objeciones, seguimientos, escalado y llamada. Sin tocar ningún “prompt”. |
-| **SaaS** | Multi-negocio, roles (Admin, Entrenador, Miembro del equipo), planes Starter / Pro / Agency con límites editables, panel de administración y registro de auditoría. |
+| Área | Dónde está en el menú | Qué hace |
+|---|---|---|
+| **KAI Setter** | Se configura en **Setter IA** | Conversa, entiende, cualifica, agenda y hace seguimiento. Una sola pregunta por mensaje, con tu tono y tus palabras. Revisa cada mensaje antes de enviarlo (control de calidad) y, si no puede responder con seguridad, te pasa la conversación y te avisa en **Avisos** (la campana de arriba). |
+| **CRM** | **Pipeline** y **Leads** | Pipeline visual con 12 etapas (arrastrar y soltar), ficha de cada lead con su memoria (“se casa en septiembre”), puntuación interna 0–100 y temperatura. |
+| **Bandeja** | **Bandeja** | Todas las conversaciones en un sitio, con los filtros Todos, Nuevos, Calientes, Cualificados, Pendientes, Agendados, No respondieron y Clientes. En **Pendientes** están las que esperan tu respuesta, incluidas las que KAI te ha pasado. Puedes escribir tú, tomar el control y pausar a KAI en cualquier momento. |
+| **Agenda** | **Agenda** (pestañas Semana y Disponibilidad) | Agenda propia de KAI, o Google Calendar o Calendly (se conectan en **Integraciones → Calendario**). KAI solo ofrece huecos libres de verdad. Recordatorios automáticos (al reservar, 24 h antes y 1 h antes) y mensajes de no-show. |
+| **Seguimientos** | **Setter IA → Seguimientos** | Si el lead deja de responder, KAI le escribe con contexto (nunca “solo hago seguimiento”), respetando horas de descanso. |
+| **Panel y analítica** | **Hoy** y **Analítica** | Leads, respuesta, cualificación, llamadas, asistencia, clientes, ingresos y ROI estimado. En Analítica eliges Hoy, 7 días, 30 días o Personalizado (fechas a medida, en los planes con analítica avanzada). |
+| **KAI Copilot** | **KAI Copilot** | Pregúntale “¿qué leads calientes no han reservado?” o pídele “escribe a Ana”. Las acciones sensibles siempre te piden confirmación. |
+| **Simulador** | **Simulador** | Habla con KAI como si fueras un lead (botón **Nueva prueba**) para ver cómo responde con tu configuración y tu agenda reales. Los mensajes de prueba no se envían a nadie: no salen por WhatsApp ni por Instagram. |
+| **Configuración visual** | **Setter IA**, **Integraciones** y **Ajustes** | **Setter IA**: Personalidad, Cualificación, Puntuación, Servicio y precio, Objeciones, Seguimientos, Escalado y Llamada, sin tocar ningún “prompt”. **Integraciones**: WhatsApp, Instagram y anuncios · Calendario · Formularios y webhooks. **Ajustes**: Negocio, Equipo, Plan y uso y Tu cuenta. |
+| **SaaS** | **Ajustes → Equipo** y **Ajustes → Plan y uso**; panel **Administración** | Multi-negocio, roles (Admin, Entrenador, Miembro del equipo), planes Starter / Pro / Agency con límites editables, panel de administración (Resumen, Negocios, Usuarios, Planes y Registros) y registro de auditoría. |
 
 ---
 
@@ -90,7 +90,7 @@ Cuando veas `ready`, abre <http://localhost:5173> en el navegador. Para pararlo:
 ### 8. Comprueba que funciona
 
 1. Entra con la cuenta demo o pulsa **Probar KAI** para crear tu cuenta (te guiará una configuración de 14 pasos).
-2. Ve a **Simulador**, empieza una conversación y escribe como si fueras un lead: “Hola, quiero perder grasa”.
+2. En el menú de la izquierda, abre **Simulador**, pulsa **Nueva prueba** y escribe como si fueras un lead: “Hola, quiero perder grasa”.
 3. KAI te responderá, irá haciendo preguntas y, cuando tenga información suficiente, te propondrá horarios de llamada reales según tu disponibilidad.
 
 ---
@@ -114,7 +114,7 @@ Todos se ejecutan dentro de la carpeta `kai`.
 | `npm run dev` | Arranca KAI en modo desarrollo (servidor en el puerto 3000 y web en el 5173). |
 | `npm run db:seed` | Crea la cuenta demo. Con `npm run db:seed -- --reset` la borra y la vuelve a crear. |
 | `npm run build` | Prepara la versión de producción (web + servidor). |
-| `npm start` | Arranca la versión de producción (después de `npm run build`). |
+| `npm start` | Arranca la versión compilada (después de `npm run build`). Para usarla en producción sin Docker, pon en `.env` `NODE_ENV=production` y `SERVE_FRONTEND=true` (ver `.env.example`). |
 | `npm test` | Ejecuta las pruebas automáticas. |
 | `npm run typecheck` | Comprueba que el código no tiene errores de tipos. |
 | `npm run db:migrate` | Aplica cambios de base de datos (el servidor también lo hace solo al arrancar). |
@@ -135,15 +135,18 @@ kai/
 │   │   ├── automation/     Cola de trabajos: recordatorios, seguimientos, no-shows
 │   │   ├── analytics/      Métricas y ROI
 │   │   ├── auth/           Cuentas, sesiones, roles y permisos
+│   │   ├── business/       Creación de negocios (también los adicionales del plan Agency)
 │   │   ├── settings/       Configuración del negocio y del setter, onboarding, equipo
 │   │   ├── admin/          Panel de administración del SaaS
 │   │   ├── plans/          Planes y límites
 │   │   ├── audit/          Registro de auditoría y errores
 │   │   ├── config/         Variables de entorno y valores por defecto
+│   │   ├── lib/            Dominio compartido con la web (etapas, permisos, etiquetas), cifrado y utilidades
 │   │   └── database/       Esquema, migraciones y datos demo
 │   └── test/           Pruebas automáticas
 ├── frontend/           Aplicación web (React)
 ├── docs/               Documentación
+├── scripts/            Arranque conjunto de servidor y web en desarrollo (npm run dev)
 ├── Dockerfile          Imagen para producción
 └── docker-compose.yml  KAI + PostgreSQL en tu propio servidor
 ```
@@ -152,7 +155,7 @@ kai/
 
 ## Transparencia, privacidad y seguridad
 
-- **Transparencia (Reglamento Europeo de IA, art. 50).** Por defecto KAI se presenta en su primer mensaje como asistente automatizado del equipo del entrenador. Puedes cambiarlo a “solo si se lo preguntan” en **Configurar KAI → Personalidad**, pero si un lead pregunta si habla con un bot, KAI **nunca lo niega**. Recomendación: mantener la presentación en el primer mensaje.
+- **Transparencia (Reglamento Europeo de IA, art. 50).** Por defecto KAI se presenta en su primer mensaje como asistente automatizado del equipo del entrenador. Puedes cambiarlo a “Solo si se lo preguntan” en **Setter IA → Personalidad**, pero si un lead pregunta si habla con un bot, KAI **nunca lo niega**. Recomendación: mantener la presentación en el primer mensaje.
 - **Salud.** KAI no diagnostica ni recomienda nada médico: ante lesiones, enfermedades, medicación o embarazo, responde con un mensaje prudente y te pasa la conversación.
 - **Bajas.** Si un lead pide que no le escriban más, KAI se despide y no vuelve a escribirle nunca.
 - **Datos.** Cada negocio solo ve sus datos. Los tokens de integraciones se guardan cifrados. Todas las acciones importantes quedan registradas (auditoría).

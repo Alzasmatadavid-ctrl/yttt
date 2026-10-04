@@ -1,11 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Globe, UserPlus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { Button, Field, Input } from '../../components/ui';
-import AuthShell, { FormError, PasswordInput, PasswordRules, isEmail, passwordIssue } from '../../components/AuthShell';
+import AuthShell, { FormError, PasswordInput, PasswordRules, forgetPreviousSession, isEmail, passwordIssue } from '../../components/AuthShell';
 
 type FormState = { name: string; email: string; password: string; businessName: string };
 type Errors = Partial<Record<keyof FormState, string>>;
@@ -21,6 +21,7 @@ function detectTimezone(): string | undefined {
 
 export default function Register() {
   const { refresh } = useAuth();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const timezone = useMemo(detectTimezone, []);
   const [form, setForm] = useState<FormState>({ name: '', email: '', password: '', businessName: '' });
@@ -44,6 +45,8 @@ export default function Register() {
         timezone,
       }),
     onSuccess: async () => {
+      // La cuenta nueva no debe ver nada que quedara en caché de una sesión anterior en esta pestaña.
+      forgetPreviousSession(qc, ['public-plans']);
       await refresh();
       navigate('/app/onboarding', { replace: true });
     },

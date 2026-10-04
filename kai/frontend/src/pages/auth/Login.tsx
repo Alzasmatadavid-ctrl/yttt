@@ -1,16 +1,17 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { LogIn } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { Button, Field, Input } from '../../components/ui';
-import AuthShell, { FormError, PasswordInput, isEmail, safeNext } from '../../components/AuthShell';
+import AuthShell, { FormError, PasswordInput, forgetPreviousSession, isEmail, safeNext } from '../../components/AuthShell';
 
 type Errors = Partial<Record<'email' | 'password', string>>;
 
 export default function Login() {
   const { refresh } = useAuth();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = safeNext(params.get('next'));
@@ -21,6 +22,8 @@ export default function Login() {
   const login = useMutation({
     mutationFn: () => api.post<{ ok: boolean }>('/auth/login', { email: email.trim(), password }),
     onSuccess: async () => {
+      // Puede quedar en caché lo de otra cuenta o negocio (sesión caducada, cierre de sesión desde otra pestaña…): se descarta.
+      forgetPreviousSession(qc);
       await refresh();
       navigate(next ?? '/app', { replace: true });
     },

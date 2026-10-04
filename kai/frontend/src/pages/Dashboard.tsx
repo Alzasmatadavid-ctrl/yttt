@@ -12,13 +12,15 @@ import {
   MessagesSquare,
   Plug,
   Repeat,
+  RotateCw,
+  Send,
   Target,
   TrendingUp,
   UserPlus,
   Users,
   Wallet,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, errorText } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { duration, money, pct, timeAgo, timeOnly, dayLabel, dateTime } from '../lib/format';
 import { Button, Callout, Card, EmptyState, PageHeader, PageLoading, Stat } from '../components/ui';
@@ -33,7 +35,7 @@ interface DashboardData {
   timezone: string;
   leads: { newToday: number; contacted: number; active: number; hot: number; qualified: number };
   conversion: { response: number; qualification: number; booking: number; attendance: number; conversion: number };
-  funnel30d: { leads: number; responded: number; qualified: number; booked: number; attended: number; clients: number; avgFirstResponseSeconds: number; messages: { kai: number } };
+  funnel30d: { leads: number; contacted: number; responded: number; qualified: number; booked: number; attended: number; clients: number; avgFirstResponseSeconds: number; messages: { kai: number } };
   activity: { activeConversations: number; pendingFollowUps: number; callsToday: number; upcomingCalls: number; leadsWithoutReply: number };
   callsToday: { appointment: Appointment; leadName: string; leadScore: number; goal: string | null }[];
   upcoming: { appointment: Appointment; leadName: string; leadScore: number; goal: string | null }[];
@@ -57,15 +59,34 @@ interface DashboardData {
 export default function Dashboard() {
   const { me } = useAuth();
   const navigate = useNavigate();
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardData>('/dashboard'), refetchInterval: 30_000 });
-  if (isLoading || !data) return <PageLoading />;
+  const { data, isLoading, error, refetch, isFetching } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardData>('/dashboard'), refetchInterval: 30_000 });
+  if (isLoading) return <PageLoading />;
+  if (!data) {
+    // Si la API falla, se explica y se puede reintentar (antes la pantalla se quedaba cargando para siempre).
+    return (
+      <div className="page">
+        <EmptyState
+          icon={AlertTriangle}
+          title="No se pudo cargar tu resumen de hoy"
+          description={errorText(error)}
+          action={
+            <Button icon={RotateCw} loading={isFetching} onClick={() => void refetch()}>
+              Reintentar
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
   const firstName = me?.user?.name.split(' ')[0] ?? '';
   const hour = new Date().getHours();
   const greeting = hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
   const { attention } = data;
   const handoffs = attention.alerts.filter((a) => a.alert.type === 'handoff');
   const otherAlerts = attention.alerts.filter((a) => a.alert.type !== 'handoff');
-  const attentionCount = handoffs.length + attention.waiting.length + attention.atRisk.length + otherAlerts.length;
+  // Las conversaciones en espera que ya tienen aviso de escalado se muestran una sola vez (como aviso): el contador cuenta lo mismo que se pinta.
+  const waiting = attention.waiting.filter((w) => !handoffs.some((h) => h.alert.conversationId === w.conversationId));
+  const attentionCount = handoffs.length + waiting.length + attention.atRisk.length + otherAlerts.length;
   const noLeadsYet = data.funnel30d.leads === 0 && data.leads.active === 0;
 
   return (
@@ -119,20 +140,18 @@ export default function Dashboard() {
                   <span className="subtle xs">{timeAgo(alert.createdAt)}</span>
                 </button>
               ))}
-              {attention.waiting
-                .filter((w) => !handoffs.some((h) => h.alert.conversationId === w.conversationId))
-                .map((w) => (
-                  <button key={w.conversationId} className="attention-item" onClick={() => navigate(`/app/inbox/${w.conversationId}`)}>
-                    <span className="attention-icon" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
-                      <MessagesSquare />
-                    </span>
-                    <div className="grow">
-                      <strong>{w.name || 'Lead'} espera tu respuesta</strong>
-                      <div className="muted small ellipsis">“{w.preview}”</div>
-                    </div>
-                    <ScoreBadge score={w.score} />
-                  </button>
-                ))}
+              {waiting.map((w) => (
+                <button key={w.conversationId} className="attention-item" onClick={() => navigate(`/app/inbox/${w.conversationId}`)}>
+                  <span className="attention-icon" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
+                    <MessagesSquare />
+                  </span>
+                  <div className="grow">
+                    <strong>{w.name || 'Lead'} espera tu respuesta</strong>
+                    <div className="muted small ellipsis">“{w.preview}”</div>
+                  </div>
+                  <ScoreBadge score={w.score} />
+                </button>
+              ))}
               {attention.atRisk.map((l) => (
                 <button key={l.id} className="attention-item" onClick={() => navigate(`/app/leads/${l.id}`)}>
                   <span className="attention-icon" style={{ background: 'var(--hot-soft)', color: 'var(--hot)' }}>
@@ -225,10 +244,10 @@ export default function Dashboard() {
       </div>
       <div className="grid-5">
         <Stat label="Nuevos hoy" value={data.leads.newToday} icon={UserPlus} onClick={() => navigate('/app/leads')} />
+        <Stat label="Contactados (30 días)" value={data.funnel30d.contacted} sub="KAI o tu equipo ya les han escrito" icon={Send} onClick={() => navigate('/app/leads')} />
         <Stat label="Activos (7 días)" value={data.leads.active} icon={Users} onClick={() => navigate('/app/inbox')} />
         <Stat label="Calientes" value={data.leads.hot} icon={Flame} onClick={() => navigate('/app/inbox?filtro=hot')} />
         <Stat label="Cualificados" value={data.leads.qualified} icon={Target} onClick={() => navigate('/app/pipeline')} />
-        <Stat label="Sin respuesta +24 h" value={data.activity.leadsWithoutReply} icon={Clock} onClick={() => navigate('/app/inbox?filtro=no_reply')} />
       </div>
 
       <div className="grid-2 mt-16" style={{ alignItems: 'start' }}>
@@ -270,10 +289,23 @@ export default function Dashboard() {
                 <strong className="stat-value tnum">{data.activity.pendingFollowUps}</strong>
               </div>
               <div className="col gap-4">
-                <span className="subtle small">Llamadas hoy · próximos 7 días</span>
-                <strong className="stat-value tnum">
-                  {data.activity.callsToday} · {data.activity.upcomingCalls}
-                </strong>
+                <span className="subtle small">Llamadas hoy</span>
+                <strong className="stat-value tnum">{data.activity.callsToday}</strong>
+              </div>
+              <div className="col gap-4">
+                <span className="subtle small">Llamadas próximas (7 días)</span>
+                <strong className="stat-value tnum">{data.activity.upcomingCalls}</strong>
+              </div>
+              <div className="col gap-4">
+                <span className="subtle small">
+                  <Clock size={12} style={{ verticalAlign: '-1px' }} aria-hidden /> Leads sin respuesta (+24 h)
+                </span>
+                <strong className="stat-value tnum">{data.activity.leadsWithoutReply}</strong>
+                {data.activity.leadsWithoutReply > 0 && (
+                  <a href="/app/inbox?filtro=no_reply" className="xs" onClick={(e) => { e.preventDefault(); navigate('/app/inbox?filtro=no_reply'); }}>
+                    Ver en la bandeja
+                  </a>
+                )}
               </div>
               <div className="col gap-4">
                 <span className="subtle small">Tiempo medio de primera respuesta</span>

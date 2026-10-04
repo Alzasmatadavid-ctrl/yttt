@@ -9,26 +9,47 @@
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { aiSettings, appointments, businesses, conversations, leads, trainers } from '../database/schema.js';
+import { aiSettings, appointments, businesses, conversations, followUps, leads, trainers } from '../database/schema.js';
 import { CALL_STATUSES, CLOSED_STATUSES } from '../lib/domain.js';
 import { errorMessage } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { addDays } from '../lib/time.js';
 import { logError } from '../audit/audit.service.js';
 import { env } from '../config/env.js';
-import { claimDueJobs, completeJob, failJob, releaseStaleJobs, scheduleJob, type Job } from './jobs.js';
+import {
+  cancelClaimedJob,
+  cancelJobsForBusiness,
+  claimDueJobs,
+  completeJob,
+  failJob,
+  hasActiveJob,
+  releaseStaleJobs,
+  scheduleJob,
+  touchJob,
+  type Job,
+  type JobType,
+} from './jobs.js';
 import { composeFollowUp, runFirstContact, runSetterReply } from '../ai/setter/setter-engine.js';
-import { conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp } from './followups.js';
+import { expireOldActions } from '../ai/copilot/copilot-actions.js';
+import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp } from './followups.js';
 import { sendMessage } from '../crm/messaging.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { getAutomation } from './reminders.js';
-import { confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
+import { configuredMessage, confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
 import { requestOutcomeAlert } from '../calendar/calendar.service.js';
 import { rollupAnalyticsForAll } from '../analytics/analytics.service.js';
 import { purgeExpiredSessions } from '../auth/sessions.js';
 import { DEFAULT_TONE } from '../lib/domain.js';
 
 type Handler = (job: Job) => Promise<void>;
+
+/**
+ * Márgenes para no enviar recordatorios a destiempo cuando el trabajo se ejecuta tarde
+ * (servidor caído o dormido, reintentos…): un “mañana a las 18:00” no tiene sentido una hora antes,
+ * ni “en una hora” cuando faltan cinco minutos.
+ */
+const REMINDER_24H_MIN_LEAD_MS = 2 * 3600_000;
+const REMINDER_1H_MIN_LEAD_MS = 15 * 60_000;
 
 async function appointmentContext(businessId: string, appointmentId: string) {
   const db = getDb();
@@ -43,6 +64,15 @@ async function appointmentContext(businessId: string, appointmentId: string) {
   const [settings] = await db.select().from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
   const [trainer] = await db.select().from(trainers).where(eq(trainers.businessId, businessId)).limit(1);
   let conversationId = row.appointment.conversationId;
+  if (conversationId) {
+    // Nunca escribir a otra persona: la conversación guardada tiene que ser del lead de la cita.
+    const [own] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId), eq(conversations.leadId, row.lead.id)))
+      .limit(1);
+    if (!own) conversationId = null;
+  }
   if (!conversationId) {
     const [conv] = await db
       .select({ id: conversations.id })
@@ -93,6 +123,10 @@ const handlers: Record<string, Handler> = {
     if (lead.lastInboundAt && lead.lastInboundAt > fu.createdAt) return markFollowUp(fu.id, 'cancelled', { note: 'El lead respondió' });
     if (CLOSED_STATUSES.includes(lead.status) || CALL_STATUSES.includes(lead.status)) return markFollowUp(fu.id, 'cancelled', { note: `Etapa ${lead.status}` });
     if (!(await conversationIsActiveForKai(businessId, fu.conversationId))) return markFollowUp(fu.id, 'skipped', { note: 'KAI pausado en la conversación' });
+    // Antes de redactar con IA: si el canal ya no deja escribir (ventana de 24 h cerrada y sin plantilla), no se envía.
+    if (!(await canSendFollowUpNow(businessId, fu.conversationId))) {
+      return markFollowUp(fu.id, 'skipped', { note: 'Fuera de la ventana de 24 h del canal: no se puede escribir al lead hasta que vuelva a escribir.' });
+    }
     const automation = await getAutomation(businessId, 'followup_no_reply');
     if (!automation?.enabled) return markFollowUp(fu.id, 'cancelled', { note: 'Automatización desactivada' });
     const steps = automation.config.steps ?? [];
@@ -123,10 +157,12 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const ctx = await appointmentContext(businessId, (job.payload as { appointmentId: string }).appointmentId);
     if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || !ctx.conversationId) return;
+    if (ctx.appointment.startsAt.getTime() <= Date.now()) return; // la llamada ya empezó: no tiene sentido confirmarla
+    const automation = await getAutomation(businessId, 'appointment_reminders');
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
-      text: confirmationText(ctx.textCtx),
+      text: confirmationText(ctx.textCtx, configuredMessage(automation?.config, 'confirmation')),
       sender: { type: 'kai' },
       purpose: 'confirmation',
       templateExtraParams: reminderTemplateParams(ctx.textCtx),
@@ -142,10 +178,17 @@ const handlers: Record<string, Handler> = {
     if (!ctx || ctx.appointment.status !== 'scheduled' || !ctx.conversationId) return;
     if (kind === '24h' && ctx.appointment.reminder24hSentAt) return;
     if (kind === '1h' && ctx.appointment.reminder1hSentAt) return;
+    // Trabajo ejecutado tarde: si ya no queda margen, el recordatorio sería falso o inútil.
+    const leadTime = ctx.appointment.startsAt.getTime() - Date.now();
+    if (leadTime < (kind === '24h' ? REMINDER_24H_MIN_LEAD_MS : REMINDER_1H_MIN_LEAD_MS)) {
+      logger.info('appointment_reminder.too_late', { appointmentId, kind, minutesLeft: Math.round(leadTime / 60_000) });
+      return;
+    }
+    const automation = await getAutomation(businessId, 'appointment_reminders');
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
-      text: reminderText(ctx.textCtx, kind),
+      text: reminderText(ctx.textCtx, kind, configuredMessage(automation?.config, kind === '24h' ? 'reminder24h' : 'reminder1h')),
       sender: { type: 'kai' },
       purpose: 'reminder',
       templateExtraParams: reminderTemplateParams(ctx.textCtx),
@@ -173,10 +216,12 @@ const handlers: Record<string, Handler> = {
     if (!ctx || ctx.appointment.status !== 'no_show' || !ctx.conversationId || ctx.lead.optedOut) return;
     if (ctx.lead.lastInboundAt && ctx.lead.lastInboundAt > ctx.appointment.updatedAt) return; // ya escribió
     if (!(await conversationIsActiveForKai(businessId, ctx.conversationId))) return;
+    const recovery = await getAutomation(businessId, 'no_show_recovery');
+    if (recovery && !recovery.enabled) return; // se desactivó después de marcar el no-show
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
-      text: noShowText(ctx.textCtx),
+      text: noShowText(ctx.textCtx, configuredMessage(recovery?.config, 'noShow')),
       sender: { type: 'kai' },
       purpose: 'no_show',
       metadata: { appointmentId: ctx.appointment.id, kind: 'no_show' },
@@ -196,10 +241,28 @@ const handlers: Record<string, Handler> = {
   async maintenance(job) {
     await purgeExpiredSessions();
     await releaseStaleJobs();
+    await expireOldActions();
     await scheduleJob({ type: 'maintenance', runAt: new Date(Date.now() + 6 * 3600_000), dedupeKey: 'system:maintenance' });
     void job;
   },
 };
+
+/**
+ * Cuenta suspendida (o eliminada): no se envía nada en su nombre. Se cancelan todos sus trabajos pendientes
+ * y sus seguimientos programados, para que no salga una avalancha de mensajes antiguos si se reactiva.
+ */
+async function stopBusinessAutomations(businessId: string, note: string) {
+  await cancelJobsForBusiness(businessId, note);
+  await getDb()
+    .update(followUps)
+    .set({ status: 'cancelled', note })
+    .where(and(eq(followUps.businessId, businessId), eq(followUps.status, 'scheduled')));
+}
+
+async function businessIsActive(businessId: string): Promise<boolean> {
+  const [biz] = await getDb().select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return biz?.status === 'active';
+}
 
 function nextUtcHour(hour: number) {
   const d = new Date();
@@ -215,6 +278,13 @@ export async function runJob(job: Job): Promise<void> {
     return;
   }
   try {
+    if (job.businessId && !(await businessIsActive(job.businessId))) {
+      const note = 'Cuenta suspendida: no se envía nada.';
+      await stopBusinessAutomations(job.businessId, note);
+      await cancelClaimedJob(job.id, note);
+      logger.info('worker.business_suspended', { jobId: job.id, type: job.type, businessId: job.businessId });
+      return;
+    }
     await handler(job);
     await completeJob(job.id);
   } catch (err) {
@@ -223,25 +293,53 @@ export async function runJob(job: Job): Promise<void> {
   }
 }
 
+const HOUSEKEEPING_EVERY_MS = 60_000;
+let lastHousekeepingAt = 0;
+
+/**
+ * Tareas de la propia cola, como mucho una vez por minuto y por proceso (también con el cron externo,
+ * que no arranca el bucle interno): liberar trabajos huérfanos y asegurar los trabajos del sistema.
+ */
+async function housekeeping(force = false) {
+  if (!force && Date.now() - lastHousekeepingAt < HOUSEKEEPING_EVERY_MS) return;
+  lastHousekeepingAt = Date.now();
+  try {
+    await releaseStaleJobs();
+    await ensureSystemJobs();
+  } catch (err) {
+    logger.error('worker.housekeeping', { error: errorMessage(err) });
+  }
+}
+
 /** Ejecuta los trabajos vencidos (usado por el bucle interno y por el endpoint de cron). */
-export async function runDueJobs(limit = 10): Promise<number> {
+export async function runDueJobs(limit = 10, opts: { forceHousekeeping?: boolean } = {}): Promise<number> {
+  await housekeeping(opts.forceHousekeeping);
   const jobs = await claimDueJobs(limit);
   // Secuencial por conversación para no pisarse; distintos negocios podrían paralelizarse.
-  for (const job of jobs) await runJob(job);
+  for (const job of jobs) {
+    // Si otro proceso lo liberó y lo volvió a reclamar mientras esperaba su turno, no se ejecuta dos veces.
+    if (await touchJob(job)) await runJob(job);
+  }
   return jobs.length;
 }
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 
+/** Programa los trabajos periódicos del sistema si no hay ya uno pendiente o en marcha. */
 export async function ensureSystemJobs() {
-  await scheduleJob({ type: 'analytics_rollup', runAt: nextUtcHour(2), dedupeKey: 'system:analytics_rollup' });
-  await scheduleJob({ type: 'maintenance', runAt: new Date(Date.now() + 60_000), dedupeKey: 'system:maintenance' });
+  const system: { type: JobType; runAt: Date; dedupeKey: string }[] = [
+    { type: 'analytics_rollup', runAt: nextUtcHour(2), dedupeKey: 'system:analytics_rollup' },
+    { type: 'maintenance', runAt: new Date(Date.now() + 60_000), dedupeKey: 'system:maintenance' },
+  ];
+  for (const job of system) {
+    if (!(await hasActiveJob(job.dedupeKey))) await scheduleJob(job);
+  }
 }
 
 export function startWorker() {
   if (timer) return;
-  void ensureSystemJobs().catch((err) => logger.error('worker.system_jobs', { error: errorMessage(err) }));
+  void housekeeping(true);
   timer = setInterval(async () => {
     if (running) return;
     running = true;

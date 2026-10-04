@@ -59,6 +59,9 @@ const MODALITIES: { value: Trainer['modality']; label: string; description: stri
 
 const MAX_AD_SPEND_CENTS = 100_000_000;
 
+/** Cómo se muestra la moneda junto a un importe: «€» para el euro y el código para el resto («MXN»), igual que en Setter IA. */
+const currencySymbol = (currency: string) => (currency === 'EUR' ? '€' : currency);
+
 /** Hora actual en una zona horaria (“14:05”), o null si la zona no es válida. */
 function nowIn(timeZone: string): string | null {
   try {
@@ -97,7 +100,7 @@ function validateBusiness(d: BusinessDraft): BusinessErrors {
   if (!/^[A-Z]{3}$/.test(d.currency)) e.currency = 'Elige una moneda.';
   const cents = parseEurosToCents(d.adSpend);
   if (cents === null) e.adSpend = 'Escribe un importe válido, por ejemplo 300 o 249,90.';
-  else if (cents > MAX_AD_SPEND_CENTS) e.adSpend = 'El importe máximo es 1.000.000 €.';
+  else if (cents > MAX_AD_SPEND_CENTS) e.adSpend = 'El importe máximo es 1.000.000.';
   return e;
 }
 
@@ -158,7 +161,7 @@ function BusinessCard({ settings, canEdit, onDirtyChange }: { settings: Settings
             <Select id={ids.currency} value={draft.currency} options={currencyOptions} disabled={!canEdit} onChange={(e) => set('currency', e.target.value)} />
           </Field>
           <Field
-            label="Inversión mensual en anuncios (en euros)"
+            label={`Inversión mensual en anuncios (${draft.currency === 'EUR' ? 'en euros' : `en ${draft.currency}`})`}
             htmlFor={ids.adSpend}
             error={errors.adSpend}
             hint="Lo que gastas al mes en publicidad (Meta, Google…). Solo sirve para estimar tu ROI (retorno de la inversión) en Analítica. Si no haces anuncios, déjalo en 0."
@@ -173,7 +176,7 @@ function BusinessCard({ settings, canEdit, onDirtyChange }: { settings: Settings
                 placeholder="0"
                 onChange={(e) => set('adSpend', e.target.value)}
               />
-              <span className="input-suffix">€ / mes</span>
+              <span className="input-suffix">{currencySymbol(draft.currency)} / mes</span>
             </div>
           </Field>
         </div>
@@ -185,7 +188,7 @@ function BusinessCard({ settings, canEdit, onDirtyChange }: { settings: Settings
         )}
         {adSpendCents !== null && adSpendCents > 0 && !errors.adSpend && (
           <p className="subtle xs">
-            Se tendrá en cuenta como {money(adSpendCents, 'EUR')} al mes en la estimación del ROI. Puedes consultarlo en <Link to="/app/analitica">Analítica</Link>.
+            Se tendrá en cuenta como {money(adSpendCents, draft.currency)} al mes en la estimación del ROI. Puedes consultarlo en <Link to="/app/analitica">Analítica</Link>.
           </p>
         )}
       </div>

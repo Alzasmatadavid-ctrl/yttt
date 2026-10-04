@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CalendarCheck, Check, Circle, Eye, EyeOff, HandHelping, MessagesSquare, type LucideIcon } from 'lucide-react';
 import { Logo } from './brand';
 import { Callout, Input } from './ui';
@@ -22,6 +23,18 @@ export function useDocumentTitle(title: string) {
 }
 
 export { safeNext } from '../lib/nav';
+
+/**
+ * Al empezar una sesión nueva (entrar, crear cuenta o aceptar una invitación) descarta de la caché los datos de la sesión
+ * anterior de esta pestaña (panel, bandeja, ajustes, conversaciones…). Así no se ven, ni un instante, datos de otra cuenta o
+ * de otro negocio mientras se cargan los nuevos. Se conserva la sesión (`me`, que se vuelve a pedir justo después) y las
+ * consultas públicas que se indiquen en `keep`.
+ */
+export function forgetPreviousSession(qc: QueryClient, keep: readonly string[] = []) {
+  const kept = new Set(['me', ...keep]);
+  void qc.cancelQueries({ predicate: (q) => !kept.has(String(q.queryKey[0])) });
+  qc.removeQueries({ predicate: (q) => !kept.has(String(q.queryKey[0])) });
+}
 
 export const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 

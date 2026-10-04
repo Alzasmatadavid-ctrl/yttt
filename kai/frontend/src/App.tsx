@@ -32,10 +32,17 @@ const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
 const AdminPlans = lazy(() => import('./pages/admin/AdminPlans'));
 const AdminLogs = lazy(() => import('./pages/admin/AdminLogs'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const NoBusiness = lazy(() => import('./pages/NoBusiness'));
 const Legal = lazy(() => import('./pages/Legal'));
 
 /** Páginas que se pueden abrir con el onboarding a medias (los pasos 13 y 14 llevan a Integraciones, y Google vuelve allí). */
 const OPEN_DURING_ONBOARDING = ['/app/integraciones'];
+
+/**
+ * Pantalla para una cuenta con sesión que no pertenece a ningún negocio (p. ej., un miembro al que han quitado del equipo).
+ * No puede ser /registro: está reservada a quien no tiene sesión y devolvería a /app, que a su vez mandaría aquí (bucle).
+ */
+const NO_BUSINESS_PATH = '/sin-negocio';
 
 function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allowOnboarding?: boolean }) {
   const { me, loading, activeBusiness } = useAuth();
@@ -43,7 +50,7 @@ function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allow
   if (loading) return <PageLoading />;
   if (!me?.user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (!activeBusiness) {
-    return me.user.platformRole === 'admin' ? <Navigate to="/admin" replace /> : <Navigate to="/registro" replace />;
+    return me.user.platformRole === 'admin' ? <Navigate to="/admin" replace /> : <Navigate to={NO_BUSINESS_PATH} replace />;
   }
   const openDuringOnboarding = allowOnboarding || OPEN_DURING_ONBOARDING.some((p) => location.pathname.startsWith(p));
   if (!openDuringOnboarding && !activeBusiness.onboardingCompletedAt && activeBusiness.role === 'trainer') return <Navigate to="/app/onboarding" replace />;
@@ -64,7 +71,7 @@ function GuestOnly({ children }: { children: ReactNode }) {
   if (loading) return <PageLoading />;
   if (me?.user) {
     const next = safeNext(new URLSearchParams(location.search).get('next'));
-    const fallback = me.businesses.length ? '/app' : me.user.platformRole === 'admin' ? '/admin' : '/app';
+    const fallback = me.businesses.length ? '/app' : me.user.platformRole === 'admin' ? '/admin' : NO_BUSINESS_PATH;
     return <Navigate to={next ?? fallback} replace />;
   }
   return <>{children}</>;
@@ -80,6 +87,7 @@ export default function App() {
         <Route path="/recuperar" element={<Forgot />} />
         <Route path="/restablecer" element={<Reset />} />
         <Route path="/invitacion" element={<Invitation />} />
+        <Route path={NO_BUSINESS_PATH} element={<NoBusiness />} />
         <Route path="/privacidad" element={<Legal />} />
         <Route path="/terminos" element={<Legal />} />
         <Route path="/app/onboarding" element={<RequireAuth allowOnboarding><Onboarding /></RequireAuth>} />

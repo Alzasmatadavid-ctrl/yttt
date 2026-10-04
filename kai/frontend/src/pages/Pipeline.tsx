@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, SquareKanban } from 'lucide-react';
-import { LEAD_STATUSES, type LeadStatus } from '@shared';
+import { AlertTriangle, ArrowRightLeft, Check, RotateCw, Search, SquareKanban } from 'lucide-react';
+import { LEAD_STATUSES, leadStatusLabel, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
-import { money, timeAgo } from '../lib/format';
+import { money, parseOptionalAmount, timeAgo } from '../lib/format';
+import { useBusinessSettings } from '../lib/business';
 import { Button, EmptyState, Modal, PageHeader, PageLoading, useToast, Field, Input } from '../components/ui';
 import { LeadAvatar, ScoreBadge, TemperatureBadge } from '../components/lead-bits';
-import type { Lead, SettingsResponse } from '../lib/types';
+import type { Lead } from '../lib/types';
 
 export default function Pipeline() {
   const navigate = useNavigate();
@@ -17,9 +18,12 @@ export default function Pipeline() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<LeadStatus | null>(null);
   const [clientModal, setClientModal] = useState<{ leadId: string } | null>(null);
+  // Alternativa a arrastrar (móvil y teclado): botón «Mover» de cada tarjeta.
+  const [moveFor, setMoveFor] = useState<Lead | null>(null);
   const [deal, setDeal] = useState('');
-  const { data, isLoading } = useQuery({ queryKey: ['leads', 'pipeline'], queryFn: () => api.get<{ leads: Lead[] }>('/leads', { limit: 500, sort: 'score' }), refetchInterval: 20_000 });
-  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings') });
+  const [dealError, setDealError] = useState<string | null>(null);
+  const { data, isLoading, error, refetch, isFetching } = useQuery({ queryKey: ['leads', 'pipeline'], queryFn: () => api.get<{ leads: Lead[] }>('/leads', { limit: 500, sort: 'score' }), refetchInterval: 20_000 });
+  const settings = useBusinessSettings();
   const price = settings.data?.services.find((s) => s.isPrimary)?.priceCents ?? 0;
   const currency = settings.data?.business.currency ?? 'EUR';
 
@@ -50,25 +54,55 @@ export default function Pipeline() {
   }, [leads]);
 
   if (isLoading) return <PageLoading />;
+  if (!data) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon={AlertTriangle}
+          title="No se pudo cargar el pipeline"
+          description={errorText(error)}
+          action={
+            <Button icon={RotateCw} loading={isFetching} onClick={() => void refetch()}>
+              Reintentar
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
-  const drop = (status: LeadStatus) => {
-    setOverCol(null);
-    const lead = leads.find((l) => l.id === dragId);
-    setDragId(null);
-    if (!lead || lead.status === status) return;
+  /** Cambia la etapa de un lead (al soltarlo en una columna o desde «Mover»). «Cliente» pide antes el importe. */
+  const changeStatus = (lead: Lead, status: LeadStatus) => {
+    if (lead.status === status) return;
     if (status === 'client') {
       setDeal('');
+      setDealError(null);
       setClientModal({ leadId: lead.id });
       return;
     }
     move.mutate({ leadId: lead.id, status });
   };
 
+  const drop = (status: LeadStatus) => {
+    setOverCol(null);
+    const lead = leads.find((l) => l.id === dragId);
+    setDragId(null);
+    if (lead) changeStatus(lead, status);
+  };
+
+  const confirmClient = () => {
+    if (!clientModal) return;
+    const amount = parseOptionalAmount(deal);
+    if (amount.error) return setDealError(amount.error);
+    move.mutate({ leadId: clientModal.leadId, status: 'client', dealValueCents: amount.cents });
+    setClientModal(null);
+  };
+
   return (
     <div className="page" style={{ maxWidth: 'none' }}>
       <PageHeader
         title="Pipeline"
-        description="Arrastra los leads entre etapas. KAI también los mueve solo según lo que pasa en cada conversación."
+        description="Arrastra los leads entre etapas o usa el botón «Mover» de cada tarjeta. KAI también los mueve solo según lo que pasa en cada conversación."
         actions={
           <div className="input-group" style={{ width: 260 }}>
             <Search />
@@ -109,7 +143,7 @@ export default function Pipeline() {
                 )}
                 <div className="board-cards">
                   {col.map((l) => (
-                    <button
+                    <div
                       key={l.id}
                       className={`lead-card ${dragId === l.id ? 'dragging' : ''}`}
                       draggable
@@ -118,19 +152,25 @@ export default function Pipeline() {
                         e.dataTransfer.effectAllowed = 'move';
                       }}
                       onDragEnd={() => setDragId(null)}
-                      onClick={() => navigate(`/app/leads/${l.id}`)}
                     >
-                      <div className="row" style={{ gap: 8 }}>
-                        <LeadAvatar name={l.name} url={l.avatarUrl} size={28} channel={l.source} />
-                        <strong className="ellipsis grow small">{l.name || 'Sin nombre'}</strong>
-                        <ScoreBadge score={l.score} />
-                      </div>
-                      {l.goalSummary && <div className="muted xs ellipsis">{l.goalSummary}</div>}
-                      <div className="row-between">
+                      <button type="button" className="lead-card-main" onClick={() => navigate(`/app/leads/${l.id}`)}>
+                        <span className="row" style={{ gap: 8 }}>
+                          <LeadAvatar name={l.name} url={l.avatarUrl} size={28} channel={l.source} />
+                          <strong className="ellipsis grow small">{l.name || 'Sin nombre'}</strong>
+                          <ScoreBadge score={l.score} />
+                        </span>
+                        {l.goalSummary && <span className="muted xs ellipsis">{l.goalSummary}</span>}
+                      </button>
+                      <div className="row-between" style={{ gap: 6 }}>
                         <TemperatureBadge temperature={l.temperature} />
-                        <span className="subtle xs">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</span>
+                        <span className="row" style={{ gap: 4 }}>
+                          <span className="subtle xs">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</span>
+                          <Button variant="ghost" size="sm" iconOnly icon={ArrowRightLeft} className="lead-card-move" onClick={() => setMoveFor(l)} title="Mover a otra etapa">
+                            {`Mover a ${l.name || 'este lead'} a otra etapa`}
+                          </Button>
+                        </span>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -138,6 +178,37 @@ export default function Pipeline() {
           })}
         </div>
       )}
+      <Modal open={Boolean(moveFor)} onClose={() => setMoveFor(null)} title={`Mover a ${moveFor?.name || 'este lead'}`}>
+        {moveFor && (
+          <>
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              Ahora está en <strong>{leadStatusLabel(moveFor.status)}</strong>. Elige la nueva etapa:
+            </p>
+            <div className="stage-options">
+              {LEAD_STATUSES.map((s) => {
+                const current = s.key === moveFor.status;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    className="option"
+                    aria-pressed={current}
+                    disabled={current}
+                    onClick={() => {
+                      const lead = moveFor;
+                      setMoveFor(null);
+                      changeStatus(lead, s.key);
+                    }}
+                  >
+                    <span>{s.label}</span>
+                    {current && <Check aria-label="Etapa actual" />}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Modal>
       <Modal
         open={Boolean(clientModal)}
         onClose={() => setClientModal(null)}
@@ -145,20 +216,25 @@ export default function Pipeline() {
         footer={
           <>
             <Button onClick={() => setClientModal(null)}>Cancelar</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (clientModal) move.mutate({ leadId: clientModal.leadId, status: 'client', dealValueCents: deal ? Math.round(Number(deal.replace(',', '.')) * 100) : null });
-                setClientModal(null);
-              }}
-            >
+            <Button variant="primary" onClick={confirmClient}>
               Marcar como cliente
             </Button>
           </>
         }
       >
-        <Field label="Importe de la venta (opcional)" hint="Se usa para calcular ingresos y ROI. Si lo dejas vacío, se toma el precio del servicio principal.">
-          <Input inputMode="decimal" value={deal} onChange={(e) => setDeal(e.target.value)} placeholder={price ? String(price / 100) : 'Ej. 297'} />
+        <Field label="Importe de la venta (opcional)" hint="Se usa para calcular ingresos y ROI. Si lo dejas vacío, se toma el precio del servicio principal." error={dealError}>
+          <Input
+            inputMode="decimal"
+            value={deal}
+            onChange={(e) => {
+              setDeal(e.target.value);
+              setDealError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') confirmClient();
+            }}
+            placeholder={price ? String(price / 100).replace('.', ',') : 'Ej. 297 o 1.200,50'}
+          />
         </Field>
       </Modal>
     </div>

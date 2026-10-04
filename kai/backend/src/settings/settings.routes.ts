@@ -80,17 +80,38 @@ const TrainerSchema = z.object({
   credentials: z.string().trim().max(1000),
 });
 
-const ServiceSchema = z.object({
+/**
+ * Campos de un servicio SIN valores por defecto. Las actualizaciones parciales usan
+ * `ServiceFields.partial()`: en Zod 4 los `.default()` se siguen aplicando dentro de `.partial()`
+ * y machacarían los campos que no se envían (reactivar un servicio, perder el principal…).
+ */
+const ServiceFields = z.object({
   name: z.string().trim().min(2).max(120),
-  description: z.string().trim().max(1000).default(''),
+  description: z.string().trim().max(1000),
   priceCents: z.number().int().min(0).max(100_000_000),
-  currency: z.string().length(3).default('EUR'),
+  currency: z.string().trim().length(3).toUpperCase(),
   billingPeriod: z.enum(['one_time', 'monthly', 'quarterly', 'semiannual', 'annual']),
-  durationWeeks: z.number().int().min(1).max(520).nullable().optional(),
-  includes: z.array(z.string().trim().min(1).max(120)).max(15).default([]),
-  isPrimary: z.boolean().default(false),
-  isActive: z.boolean().default(true),
+  durationWeeks: z.number().int().min(1).max(520).nullable(),
+  includes: z.array(z.string().trim().min(1).max(120)).max(15),
+  isPrimary: z.boolean(),
+  isActive: z.boolean(),
 });
+
+/** Alta de un servicio: aquí sí se aplican los valores por defecto. */
+const ServiceSchema = ServiceFields.extend({
+  description: ServiceFields.shape.description.default(''),
+  currency: ServiceFields.shape.currency.default('EUR'),
+  durationWeeks: ServiceFields.shape.durationWeeks.optional(),
+  includes: ServiceFields.shape.includes.default([]),
+  isPrimary: ServiceFields.shape.isPrimary.default(false),
+  isActive: ServiceFields.shape.isActive.default(true),
+});
+
+/** Edición: solo se modifican los campos enviados. */
+const ServicePatchSchema = ServiceFields.partial();
+
+/** Servicio principal (onboarding): siempre es el principal, así que `isPrimary` no se acepta. */
+const PrimaryServiceSchema = ServiceFields.omit({ isPrimary: true }).partial().extend({ name: ServiceFields.shape.name });
 
 const RuleSchema = z.object({
   key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,40}$/, 'Clave en minúsculas y sin espacios'),
@@ -281,7 +302,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /** Crea o actualiza el servicio principal (usado por el onboarding). */
   app.put('/settings/primary-service', async (request) => {
     const ctx = await requireTenant(request, 'settings:write');
-    const body = parse(ServiceSchema.partial().extend({ name: z.string().trim().min(2).max(120) }), request.body);
+    const body = parse(PrimaryServiceSchema, request.body);
     const db = getDb();
     const [primary] = await db
       .select()
@@ -298,7 +319,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.patch('/settings/services/:id', async (request) => {
     const ctx = await requireTenant(request, 'settings:write');
     const { id } = parse(uuidParam, request.params);
-    const body = parse(ServiceSchema.partial(), request.body);
+    const body = parse(ServicePatchSchema, request.body);
     const db = getDb();
     if (body.isPrimary) await db.update(services).set({ isPrimary: false }).where(eq(services.businessId, ctx.businessId));
     const [row] = await db

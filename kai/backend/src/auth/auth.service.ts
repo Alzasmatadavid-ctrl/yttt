@@ -1,9 +1,11 @@
 import { and, eq, sql, gt, isNull } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { businesses, invitations, memberships, passwordResetTokens, plans, users } from '../database/schema.js';
-import { env, publicAppUrl } from '../config/env.js';
+import { publicAppUrl } from '../config/env.js';
 import { hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto.js';
-import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../lib/errors.js';
+import { AttemptLimiter, minutesFromMs } from '../lib/throttle.js';
+import { runInBackground } from '../lib/background.js';
 import { createBusiness } from '../business/business.service.js';
 import { sendEmail } from '../integrations/email/email.service.js';
 import { audit } from '../audit/audit.service.js';
@@ -15,6 +17,14 @@ export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const RESET_TTL_MS = 60 * 60_000; // 1 hora
 const INVITE_TTL_MS = 7 * 24 * 3600_000; // 7 días
+
+/**
+ * Límites por cuenta (además del límite por IP de las rutas): frenan la fuerza bruta aunque
+ * el atacante cambie de IP en cada intento.
+ */
+export const loginFailures = new AttemptLimiter({ max: 10, windowMs: 15 * 60_000 });
+export const resetRequests = new AttemptLimiter({ max: 3, windowMs: 60 * 60_000 });
+export const invitationFailures = new AttemptLimiter({ max: 10, windowMs: 15 * 60_000 });
 
 export function validatePasswordStrength(password: string) {
   if (password.length < 10) throw badRequest('La contraseña debe tener al menos 10 caracteres.');
@@ -30,14 +40,15 @@ export async function registerTrainer(input: { name: string; email: string; pass
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing) throw conflict('Ya existe una cuenta con ese email.');
 
-  const isPlatformAdmin = Boolean(env.ADMIN_EMAIL && normalizeEmail(env.ADMIN_EMAIL) === email);
+  // El registro público SIEMPRE crea cuentas normales: la de administración solo se crea al arrancar
+  // (ver database/bootstrap.ts), aunque alguien se registre con el email de ADMIN_EMAIL.
   const [user] = await db
     .insert(users)
     .values({
       email,
       name: input.name.trim(),
       passwordHash: await hashPassword(input.password),
-      platformRole: isPlatformAdmin ? 'admin' : 'user',
+      platformRole: 'user',
     })
     .returning();
 
@@ -53,11 +64,21 @@ export async function registerTrainer(input: { name: string; email: string; pass
 
 export async function authenticate(emailRaw: string, password: string) {
   const email = normalizeEmail(emailRaw);
+  // Se cuenta por email exista o no la cuenta: el bloqueo no revela qué emails están registrados.
+  const wait = loginFailures.retryAfterMs(email);
+  if (wait > 0)
+    throw tooManyRequests(
+      `Demasiados intentos fallidos con este email. Espera ${minutesFromMs(wait)} min o restablece tu contraseña con «¿Has olvidado tu contraseña?».`,
+    );
   const [user] = await getDb().select().from(users).where(eq(users.email, email)).limit(1);
   // Mismo coste de tiempo exista o no el usuario (evita enumerar cuentas).
   const ok = user ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, await dummyHash());
-  if (!user || !ok) throw unauthorized('Email o contraseña incorrectos.');
+  if (!user || !ok) {
+    loginFailures.hit(email);
+    throw unauthorized('Email o contraseña incorrectos.');
+  }
   if (!user.isActive) throw forbidden('Esta cuenta está desactivada. Contacta con soporte.');
+  loginFailures.reset(email);
   await getDb().update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
   return user;
 }
@@ -83,14 +104,26 @@ export async function listUserBusinesses(userId: string) {
     .orderBy(memberships.createdAt);
 }
 
+/**
+ * Solicitud de “he olvidado mi contraseña”. La respuesta es idéntica (y tarda lo mismo) exista o no
+ * la cuenta: el token, el email y la auditoría se hacen después de responder, en segundo plano.
+ */
 export async function requestPasswordReset(emailRaw: string) {
   const db = getDb();
   const email = normalizeEmail(emailRaw);
   const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-  // Respuesta idéntica exista o no la cuenta.
   if (!user || !user.isActive) return;
+  // Como mucho unos pocos emails por hora a la misma dirección (evita usar KAI para bombardear un buzón).
+  if (resetRequests.isBlocked(email)) return;
+  resetRequests.hit(email);
+  runInBackground('auth.password_reset_email', () => deliverPasswordReset(user), { userId: user.id });
+}
+
+async function deliverPasswordReset(user: { id: string; email: string; name: string }) {
   const token = randomToken(32);
-  await db.insert(passwordResetTokens).values({ userId: user.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) });
+  await getDb()
+    .insert(passwordResetTokens)
+    .values({ userId: user.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) });
   const link = `${publicAppUrl()}/restablecer?token=${encodeURIComponent(token)}`;
   await sendEmail({
     to: user.email,
@@ -100,20 +133,32 @@ export async function requestPasswordReset(emailRaw: string) {
   await audit({ actorType: 'user', actorUserId: user.id, action: 'auth.password_reset_requested', entityType: 'user', entityId: user.id });
 }
 
+/** Invalida todos los enlaces de restablecimiento pendientes de un usuario. */
+async function invalidateResetTokens(userId: string) {
+  await getDb()
+    .update(passwordResetTokens)
+    .set({ usedAt: new Date() })
+    .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.usedAt)));
+}
+
 export async function resetPassword(token: string, newPassword: string) {
   validatePasswordStrength(newPassword);
   const db = getDb();
+  // Consumo atómico: si llegan dos peticiones con el mismo enlace, solo una lo usa.
   const [row] = await db
-    .select()
-    .from(passwordResetTokens)
+    .update(passwordResetTokens)
+    .set({ usedAt: new Date() })
     .where(
       and(eq(passwordResetTokens.tokenHash, sha256(token)), isNull(passwordResetTokens.usedAt), gt(passwordResetTokens.expiresAt, new Date())),
     )
-    .limit(1);
+    .returning({ userId: passwordResetTokens.userId });
   if (!row) throw badRequest('El enlace no es válido o ha caducado. Solicita uno nuevo.');
   await db.update(users).set({ passwordHash: await hashPassword(newPassword), updatedAt: new Date() }).where(eq(users.id, row.userId));
-  await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, row.id));
+  // Cualquier otro enlace que se hubiera pedido antes deja de servir.
+  await invalidateResetTokens(row.userId);
   await destroyUserSessions(row.userId);
+  const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, row.userId)).limit(1);
+  if (user) loginFailures.reset(user.email);
   await audit({ actorType: 'user', actorUserId: row.userId, action: 'auth.password_reset', entityType: 'user', entityId: row.userId });
 }
 
@@ -124,6 +169,7 @@ export async function changePassword(userId: string, current: string, next: stri
   if (!(await verifyPassword(current, user.passwordHash))) throw badRequest('La contraseña actual no es correcta.');
   validatePasswordStrength(next);
   await db.update(users).set({ passwordHash: await hashPassword(next), updatedAt: new Date() }).where(eq(users.id, userId));
+  await invalidateResetTokens(userId);
   await destroyUserSessions(userId, keepToken);
   await audit({ actorType: 'user', actorUserId: userId, action: 'auth.password_changed', entityType: 'user', entityId: userId });
 }
@@ -179,8 +225,12 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
   let [user] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
   if (user) {
     if (input.currentUserId !== user.id) {
-      if (!input.password || !(await verifyPassword(input.password, user.passwordHash)))
+      if (invitationFailures.isBlocked(invitation.id))
+        throw tooManyRequests('Demasiados intentos con esta invitación. Espera unos minutos e inténtalo de nuevo.');
+      if (!input.password || !(await verifyPassword(input.password, user.passwordHash))) {
+        invitationFailures.hit(invitation.id);
         throw unauthorized('Inicia sesión con la cuenta invitada para aceptar.');
+      }
     }
   } else {
     if (!input.name || !input.password) throw badRequest('Indica tu nombre y una contraseña.');

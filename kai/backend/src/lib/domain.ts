@@ -293,6 +293,15 @@ export interface AutomationConfig {
   reminder24h?: boolean;
   reminder1h?: boolean;
   delayMinutes?: number;
+  /**
+   * Textos editables (vacíos o ausentes = texto por defecto de KAI, adaptado al tono).
+   * Variables: {nombre}, {fecha}, {hora}, {llamada}, {entrenador}, {enlace}.
+   * Los tres primeros son de “appointment_reminders”; `noShowMessage`, de “no_show_recovery”.
+   */
+  confirmationMessage?: string;
+  reminder24hMessage?: string;
+  reminder1hMessage?: string;
+  noShowMessage?: string;
 }
 
 export const AUTOMATION_LABELS: Record<AutomationType, string> = {

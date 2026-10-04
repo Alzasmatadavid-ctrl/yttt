@@ -6,18 +6,23 @@ import { LEAD_SOURCES, LEAD_STATUS_KEYS, LEAD_TEMPERATURES, type LeadSource, typ
 import {
   createLead,
   deleteLead,
+  getLead,
   getLeadProfile,
   listLeads,
+  markOptedIn,
+  markOptedOut,
   setLeadStatus,
   updateLead,
   recomputeLeadScore,
 } from './leads.service.js';
 import {
+  getConversation,
   getConversationDetail,
   getOrCreateConversation,
   inboxCounts,
   listInbox,
   markConversationRead,
+  markHandoffAttended,
   releaseConversation,
   takeOverConversation,
   type InboxFilter,
@@ -131,6 +136,30 @@ export async function crmRoutes(app: FastifyInstance) {
     return { lead };
   });
 
+  // Baja / alta manual: p. ej. el lead pidió por teléfono o por email que no le escriban más.
+  app.post('/leads/:id/opt-out', async (request) => {
+    const ctx = await requireTenant(request, 'leads:write');
+    const { id } = parse(uuidParam, request.params);
+    const body = parse(z.object({ optedOut: z.boolean(), reason: z.string().trim().max(300).optional() }), request.body);
+    const lead = await getLead(ctx.businessId, id);
+    if (lead.optedOut !== body.optedOut) {
+      const actor = { type: 'user' as const, userId: ctx.userId };
+      if (body.optedOut) await markOptedOut(ctx.businessId, id, actor, { manual: true, reason: body.reason });
+      else await markOptedIn(ctx.businessId, id, actor);
+      await audit({
+        businessId: ctx.businessId,
+        actorType: 'user',
+        actorUserId: ctx.userId,
+        action: body.optedOut ? 'lead.opted_out' : 'lead.opted_in',
+        entityType: 'lead',
+        entityId: id,
+        metadata: { manual: true, reason: body.reason },
+        ip: request.ip,
+      });
+    }
+    return { lead: await getLead(ctx.businessId, id) };
+  });
+
   app.post('/leads/:id/rescore', async (request) => {
     const ctx = await requireTenant(request, 'leads:write');
     const { id } = parse(uuidParam, request.params);
@@ -204,6 +233,8 @@ export async function crmRoutes(app: FastifyInstance) {
     const body = parse(z.object({ text: z.string().trim().min(1, 'Escribe un mensaje').max(4000), pauseKai: z.boolean().default(true) }), request.body);
     if (body.pauseKai) await takeOverConversation(ctx.businessId, id, ctx.userId);
     const result = await sendMessage({ businessId: ctx.businessId, conversationId: id, text: body.text, sender: { type: 'human', userId: ctx.userId }, purpose: 'manual' });
+    // Si KAI había escalado la conversación y el entrenador ya ha contestado, el escalado queda atendido.
+    if (result.delivered) await markHandoffAttended(ctx.businessId, id, { type: 'user', userId: ctx.userId });
     return { message: result.message, delivered: result.delivered, blockedReason: result.blockedReason ?? null };
   });
 
@@ -212,6 +243,15 @@ export async function crmRoutes(app: FastifyInstance) {
     const { id } = parse(uuidParam, request.params);
     await takeOverConversation(ctx.businessId, id, ctx.userId);
     return { ok: true };
+  });
+
+  // «Marcar como atendido»: cierra el escalado sin devolver la conversación a KAI.
+  app.post('/conversations/:id/handoff-attended', async (request) => {
+    const ctx = await requireTenant(request, 'conversations:reply');
+    const { id } = parse(uuidParam, request.params);
+    await getConversation(ctx.businessId, id);
+    const changed = await markHandoffAttended(ctx.businessId, id, { type: 'user', userId: ctx.userId });
+    return { ok: true, changed };
   });
 
   app.post('/conversations/:id/release', async (request) => {

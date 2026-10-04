@@ -183,18 +183,18 @@ export function FieldFoot({ hint, value, max }: { hint: ReactNode; value: string
 
 // ───────────── Importes ─────────────
 
-/** Céntimos → texto editable en euros (“300”, “149,90”). */
+/** Céntimos → texto editable (“300”, “149,90”), en la moneda del negocio. */
 export function centsToInput(cents: number | null | undefined): string {
   const c = Math.max(0, Math.round(cents ?? 0));
   return c % 100 === 0 ? String(c / 100) : (c / 100).toFixed(2).replace('.', ',');
 }
 
 /**
- * Texto en euros → céntimos. Acepta “300”, “300,5”, “1.250,90” o “1250.90”.
+ * Importe escrito → céntimos. Acepta “300”, “300,5”, “1.250,90” o “1250.90” (con o sin símbolo de moneda: “300 €”, “$300”).
  * Devuelve null si no es un importe válido. Vacío = 0.
  */
 export function parseEurosToCents(raw: string): number | null {
-  const s = raw.trim().replace(/\s|€/g, '');
+  const s = raw.trim().replace(/[\s\p{Sc}]/gu, '');
   if (!s) return 0;
   let normalized: string;
   if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(s)) normalized = s.replace(/\./g, '').replace(',', '.');
