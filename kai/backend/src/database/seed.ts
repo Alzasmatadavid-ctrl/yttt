@@ -33,7 +33,7 @@ import { createBusiness } from '../business/business.service.js';
 import { MEDICAL_MESSAGE } from '../ai/setter/setter-engine.js';
 import { DEFAULT_QUALIFICATION_RULES } from '../config/defaults.js';
 import { env, isProduction } from '../config/env.js';
-import { planDemoReset, PUBLIC_DEMO_PASSWORD, seedEnvironmentProblem } from './seed-safety.js';
+import { isRemoteDatabaseUrl, planDemoReset, PUBLIC_DEMO_PASSWORD, seedEnvironmentProblem } from './seed-safety.js';
 import { computeScore, temperatureFor } from '../crm/scoring.js';
 import { hashPassword } from '../lib/crypto.js';
 import type {
@@ -519,7 +519,7 @@ async function removeExistingDemo(): Promise<boolean> {
 
 async function seed() {
   const problem = seedEnvironmentProblem({
-    production: isProduction(),
+    production: isProduction() || isRemoteDatabaseUrl(env.DATABASE_URL),
     force,
     demoEmail: DEMO_EMAIL,
     demoPassword: process.env.DEMO_PASSWORD,
@@ -806,11 +806,21 @@ async function createDemoLead(businessId: string, userId: string, spec: DemoLead
   }
 }
 
-try {
-  await seed();
-} catch (err) {
-  console.error('✖ No se pudieron crear los datos demo:', err);
-  process.exitCode = 1;
-} finally {
-  await closeDatabase().catch(() => undefined);
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log(`Datos demo de KAI (solo para tu ordenador).
+
+  npm run db:seed                 Crea la cuenta demo si no existe
+  npm run db:seed -- --reset      Borra la demo anterior y la vuelve a crear
+  npm run db:seed -- --force      Permite ejecutarlo en producción (con DEMO_PASSWORD propia)
+
+Cuenta: ${DEMO_EMAIL} (cámbiala con DEMO_EMAIL y DEMO_PASSWORD).`);
+} else {
+  try {
+    await seed();
+  } catch (err) {
+    console.error('✖ No se pudieron crear los datos demo:', err);
+    process.exitCode = 1;
+  } finally {
+    await closeDatabase().catch(() => undefined);
+  }
 }

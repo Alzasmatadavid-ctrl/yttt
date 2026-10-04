@@ -642,7 +642,7 @@ export const alerts = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     businessId: businessRef(),
     type: text('type')
-      .$type<'handoff' | 'call_outcome' | 'integration_error' | 'limit_reached' | 'delivery_blocked' | 'new_lead_manual' | 'no_availability'>()
+      .$type<'handoff' | 'call_outcome' | 'integration_error' | 'limit_reached' | 'delivery_blocked' | 'new_lead_manual' | 'no_availability' | 'client_message'>()
       .notNull(),
     severity: text('severity').$type<'info' | 'warning' | 'critical'>().notNull().default('warning'),
     title: text('title').notNull(),

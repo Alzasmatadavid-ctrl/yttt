@@ -304,9 +304,10 @@ describe('motor de reglas', () => {
   const botNote = 'El lead pregunta si eres un bot: responde con honestidad que eres el asistente automatizado del equipo de Álex.';
 
   it('con la cita agendada, responde con transparencia si le preguntan si es un bot', async () => {
-    const out = await new RuleBasedSetterAgent().respond(agentInput({ leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }), extraNote: botNote }));
+    const appt = makeAppointment();
+    const out = await new RuleBasedSetterAgent().respond(agentInput({ leadCtx: makeLeadContext({ upcomingAppointment: appt }), extraNote: botNote }));
     expect(out.text).toMatch(/asistente automatizado/);
-    expect(validateReply(out.text, makeValidationContext({ allowedPricesCents: [19700] })).ok).toBe(true);
+    expect(validateReply(out.text, makeValidationContext({ allowedPricesCents: [19700], allowedTimes: [appt.startsAt], now: NOW })).ok).toBe(true);
   });
 
   it('con la cita agendada, da el precio real sin proponer otra llamada', async () => {

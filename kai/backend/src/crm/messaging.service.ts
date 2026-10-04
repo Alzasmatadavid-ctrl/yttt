@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { leads } from '../database/schema.js';
+import { conversations, leads, messages } from '../database/schema.js';
 import type { TemplateRef } from '../lib/domain.js';
 import { badRequest } from '../lib/errors.js';
 import { firstName } from '../lib/text.js';
@@ -10,7 +10,7 @@ import type { ChannelSendContext } from '../integrations/channels/types.js';
 import { connectionCredentials, getActiveConnection, markConnectionError } from '../integrations/connections.service.js';
 import { friendlyMetaError, GraphApiError } from '../integrations/meta/graph.js';
 import { incrementUsage } from '../plans/plans.service.js';
-import { createAlert } from './alerts.service.js';
+import { createAlert, resolveAlertsFor } from './alerts.service.js';
 import { getConversation, insertMessage, type Message } from './conversations.service.js';
 import { applyPipelineEvent, cancelPendingAutomationsForLead, recordLeadEvent } from './leads.service.js';
 
@@ -132,10 +132,15 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     } else {
       ({ externalId } = await adapter.sendText(ctx, text, { humanAgent: humanAgentTag }));
     }
-    const message = await insertMessage({ ...base, content, contentType, externalId, status: 'sent', metadata });
+    const message = await recordSentMessage({ ...base, content, contentType, externalId, status: 'sent', metadata });
     // Los leads del simulador no consumen el cupo mensual de mensajes de KAI.
     if (input.sender.type === 'kai' && !lead.isTest) await incrementUsage(input.businessId, 'ai_messages');
-    if (input.sender.type === 'human') await cancelPendingAutomationsForLead(input.businessId, lead.id, ['no_reply']);
+    if (input.sender.type === 'human') {
+      await cancelPendingAutomationsForLead(input.businessId, lead.id, ['no_reply']);
+      // El entrenador ya ha contestado: los avisos de «te ha escrito» o «contacto manual» quedan atendidos.
+      await resolveAlertsFor(input.businessId, { leadId: lead.id, type: 'client_message' });
+      await resolveAlertsFor(input.businessId, { leadId: lead.id, type: 'new_lead_manual' });
+    }
     await recordLeadEvent(input.businessId, lead.id, 'message_out', { type: input.sender.type === 'human' ? 'user' : input.sender.type, userId: input.sender.userId }, { purpose: input.purpose, messageId: message.id });
     await applyPipelineEvent(input.businessId, lead.id, 'outbound_sent', { type: input.sender.type === 'human' ? 'user' : 'kai', userId: input.sender.userId });
     return { message, delivered: true };
@@ -157,5 +162,33 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
       conversationId: conv.id,
     });
     return { message, delivered: false, blockedReason: reason };
+  }
+}
+
+/**
+ * Guarda un mensaje ya enviado. Si el eco de Instagram llegó antes y lo registró como escrito por el
+ * entrenador desde la app (mismo id de Meta), se corrige esa fila en vez de dar el envío por fallido,
+ * y si lo envió KAI se deshace la pausa que el eco puso en la conversación.
+ */
+async function recordSentMessage(input: Parameters<typeof insertMessage>[0]): Promise<Message> {
+  try {
+    return await insertMessage(input);
+  } catch (err) {
+    if (!input.externalId) throw err;
+    const db = getDb();
+    const [echo] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.businessId, input.businessId), eq(messages.externalId, input.externalId)))
+      .limit(1);
+    if (!echo) throw err;
+    const [fixed] = await db
+      .update(messages)
+      .set({ senderType: input.senderType, senderUserId: input.senderUserId ?? null, content: input.content, contentType: input.contentType ?? 'text', metadata: input.metadata ?? {} })
+      .where(eq(messages.id, echo.id))
+      .returning();
+    if (input.senderType === 'kai')
+      await db.update(conversations).set({ aiEnabled: true, updatedAt: new Date() }).where(eq(conversations.id, input.conversationId));
+    return fixed;
   }
 }

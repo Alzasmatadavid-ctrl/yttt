@@ -204,6 +204,10 @@ export default function AppLayout() {
     mutationFn: (enabled: boolean) => api.put('/settings/ai', { autopilotEnabled: enabled }),
     onSuccess: (_d, enabled) => {
       void qc.invalidateQueries({ queryKey: ['settings'] });
+      // Lo que «necesita tu respuesta» depende de si KAI está contestando.
+      void qc.invalidateQueries({ queryKey: ['inbox'] });
+      void qc.invalidateQueries({ queryKey: ['inbox-counts'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast(enabled ? 'KAI vuelve a responder automáticamente' : 'KAI en pausa: no responderá automáticamente');
       setConfirmAutopilot(false);
     },

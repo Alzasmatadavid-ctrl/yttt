@@ -129,7 +129,7 @@ function InviteModal({ open, onClose, members, invitations }: { open: boolean; o
   const copy = async () => {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(result.link);
+      await navigator.clipboard.writeText(result.link ?? '');
       setCopied(true);
       toast('Enlace copiado');
     } catch {
@@ -157,7 +157,7 @@ function InviteModal({ open, onClose, members, invitations }: { open: boolean; o
           </Callout>
           <Field label="Enlace de invitación" htmlFor={ids.link} hint={`Válido hasta el ${longDate(result.invitation.expiresAt)}. Por seguridad, solo se muestra ahora: si lo pierdes, anula esta invitación y crea otra.`}>
             <div className="row">
-              <Input id={ids.link} readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="grow" />
+              <Input id={ids.link} readOnly value={result.link ?? ''} onFocus={(e) => e.currentTarget.select()} className="grow" />
               <Button icon={copied ? Check : Copy} onClick={() => void copy()}>
                 {copied ? 'Copiado' : 'Copiar'}
               </Button>

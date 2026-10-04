@@ -1,7 +1,7 @@
 import { and, eq, sql, gt, isNull } from 'drizzle-orm';
 import { getDb, type Database } from '../database/client.js';
 import { businesses, invitations, memberships, passwordResetTokens, plans, users } from '../database/schema.js';
-import { publicAppUrl } from '../config/env.js';
+import { emailConfigured, publicAppUrl } from '../config/env.js';
 import { hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../lib/errors.js';
 import { AttemptLimiter, minutesFromMs } from '../lib/throttle.js';
@@ -215,14 +215,16 @@ export async function inviteMember(businessId: string, invitedBy: string, emailR
     .returning();
   const [biz] = await db.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const link = `${publicAppUrl()}/invitacion?token=${encodeURIComponent(token)}`;
-  const emailed = await sendEmail({
+  // Solo cuenta como enviado si hay un proveedor real (en desarrollo el email solo sale en la consola).
+  const emailed = (await sendEmail({
     to: email,
     subject: `Te han invitado a ${biz?.name ?? 'un equipo'} en KAI`,
     text: `Hola,\n\nTe han invitado a unirte a ${biz?.name ?? 'un equipo'} en KAI.\nAcepta la invitación aquí (válida 7 días):\n${link}\n\n— KAI`,
-  });
+  })) && emailConfigured();
   await audit({ businessId, actorType: 'user', actorUserId: invitedBy, action: 'team.invited', entityType: 'invitation', entityId: invite.id, metadata: { email, role } });
-  // El enlace se devuelve para poder copiarlo si no hay proveedor de email configurado.
-  return { invitation: invite, link, emailed };
+  // El enlace solo se devuelve si no se ha podido enviar por email (para copiarlo a mano):
+  // así nadie puede usar una invitación a un email ajeno para probar contraseñas de esa cuenta.
+  return { invitation: invite, link: emailed ? null : link, emailed };
 }
 
 export async function getInvitation(token: string) {
@@ -242,13 +244,22 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
   const { invitation } = await getInvitation(token);
   let [user] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
   if (user) {
+    // Las cuentas de administración de la plataforma no pueden unirse a negocios.
+    if (user.platformRole === 'admin') throw forbidden('Esta cuenta no puede unirse a un equipo. Usa otro email.');
+    if (!user.isActive) throw forbidden('Esta cuenta está desactivada. Contacta con soporte.');
     if (input.currentUserId !== user.id) {
-      if (invitationFailures.isBlocked(invitation.id))
-        throw tooManyRequests('Demasiados intentos con esta invitación. Espera unos minutos e inténtalo de nuevo.');
+      // Mismo límite por cuenta que el inicio de sesión: una invitación no sirve para probar contraseñas.
+      const wait = loginFailures.retryAfterMs(user.email);
+      if (wait > 0 || invitationFailures.isBlocked(invitation.id))
+        throw tooManyRequests(
+          `Demasiados intentos fallidos. Espera ${minutesFromMs(Math.max(wait, 60_000))} min o restablece tu contraseña con «¿Has olvidado tu contraseña?».`,
+        );
       if (!input.password || !(await verifyPassword(input.password, user.passwordHash))) {
         invitationFailures.hit(invitation.id);
+        loginFailures.hit(user.email);
         throw unauthorized('Inicia sesión con la cuenta invitada para aceptar.');
       }
+      loginFailures.reset(user.email);
     }
   } else {
     if (!input.name || !input.password) throw badRequest('Indica tu nombre y una contraseña.');

@@ -5,7 +5,7 @@
 import { and, desc, eq, gt, lt } from 'drizzle-orm';
 import { getDb } from '../../database/client.js';
 import { aiSettings, automations, conversations, pendingActions } from '../../database/schema.js';
-import { AUTOMATION_LABELS, isLeadStatus, leadStatusLabel, type AiTone, type AutomationType, type LeadStatus, type Permission } from '../../lib/domain.js';
+import { AUTOMATION_LABELS, MAX_VOCAB_WORD_LENGTH, isLeadStatus, leadStatusLabel, type AiTone, type AutomationType, type LeadStatus, type Permission } from '../../lib/domain.js';
 import { badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit } from '../../audit/audit.service.js';
 import type { TenantContext } from '../../auth/guards.js';
@@ -143,7 +143,7 @@ async function normalizePayload(businessId: string, type: PendingActionType, p: 
       return { leadId: await needLead() };
     case 'update_tone': {
       const words = Array.isArray(p.addWordsToAvoid) ? (p.addWordsToAvoid as unknown[]).filter((w): w is string => typeof w === 'string') : [];
-      const addWordsToAvoid = [...new Set(words.map((w) => w.trim()).filter((w) => w.length >= 2 && w.length <= 60))].slice(0, 20);
+      const addWordsToAvoid = [...new Set(words.map((w) => w.trim()).filter((w) => w.length >= 2 && w.length <= MAX_VOCAB_WORD_LENGTH))].slice(0, 20);
       return { tone: sanitizeTone(p.tone), ...(addWordsToAvoid.length ? { addWordsToAvoid } : {}) };
     }
     case 'toggle_automation':
@@ -315,10 +315,16 @@ export async function confirmPendingAction(ctx: TenantContext, id: string) {
         const [settings] = await db.select().from(aiSettings).where(eq(aiSettings.businessId, ctx.businessId)).limit(1);
         if (!settings) throw notFound();
         const tone: AiTone = { ...settings.tone, ...sanitizeTone(p.tone) };
-        const addAvoid = Array.isArray(p.addWordsToAvoid) ? (p.addWordsToAvoid as unknown[]).filter((w): w is string => typeof w === 'string') : [];
+        const addAvoid = Array.isArray(p.addWordsToAvoid)
+          ? (p.addWordsToAvoid as unknown[]).filter((w): w is string => typeof w === 'string').map((w) => w.trim()).filter((w) => w && w.length <= MAX_VOCAB_WORD_LENGTH)
+          : [];
+        // Sin duplicados aunque cambien mayúsculas (igual que al describir la acción).
+        const known = new Set(settings.wordsToAvoid.map((w) => w.toLowerCase()));
+        const merged = [...settings.wordsToAvoid];
+        for (const w of addAvoid) if (!known.has(w.toLowerCase())) (known.add(w.toLowerCase()), merged.push(w));
         await db
           .update(aiSettings)
-          .set({ tone, wordsToAvoid: [...new Set([...settings.wordsToAvoid, ...addAvoid])].slice(0, 100), updatedAt: new Date() })
+          .set({ tone, wordsToAvoid: merged.slice(0, 100), updatedAt: new Date() })
           .where(eq(aiSettings.businessId, ctx.businessId));
         result = { tone };
         break;

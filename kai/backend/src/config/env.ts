@@ -153,9 +153,19 @@ export function trustProxySetting(value: string | undefined = env.TRUST_PROXY, p
 /** El envío real de emails está configurado (Resend con su clave). */
 export const emailConfigured = () => env.EMAIL_PROVIDER === 'resend' && Boolean(env.RESEND_API_KEY);
 
+/** Motivo por el que ADMIN_PASSWORD no vale para la cuenta más privilegiada (null si es válida). */
+export function adminPasswordProblem(password: string | undefined): string | null {
+  if (!password) return null;
+  if (password.length < 12 || password.length > 200 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password))
+    return 'ADMIN_PASSWORD es demasiado débil: usa al menos 12 caracteres combinando letras y números. La cuenta de administración no se crea hasta que la cambies.';
+  return null;
+}
+
 /** Avisos de configuración que conviene mostrar al arrancar (no impiden el arranque). */
 export function startupWarnings(): string[] {
   const out: string[] = [];
+  const adminProblem = env.ADMIN_EMAIL ? adminPasswordProblem(env.ADMIN_PASSWORD) : null;
+  if (adminProblem) out.push(adminProblem);
   if (isProduction() && !emailConfigured())
     out.push('Email sin configurar (EMAIL_PROVIDER=resend y RESEND_API_KEY): no se enviarán emails de recuperación de contraseña ni invitaciones.');
   return out;

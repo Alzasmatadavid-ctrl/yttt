@@ -130,7 +130,7 @@ export async function buildApp(opts: { logger?: boolean; trustProxy?: TrustProxy
       const message = status === 413 ? 'El contenido enviado es demasiado grande.' : status === 415 ? 'Formato de contenido no admitido.' : 'Petición no válida.';
       return reply.code(status).send({ error: 'bad_request', message });
     }
-    await logError('http', error, { url: request.url, method: request.method }, request.tenant?.businessId ?? null);
+    await logError('http', error, { url: redactUrl(request.url), method: request.method }, request.tenant?.businessId ?? null);
     return reply.code(500).send({ error: 'internal', message: 'Ha ocurrido un error inesperado. Ya lo hemos registrado.' });
   });
 

@@ -9,6 +9,7 @@ import { getDb } from '../../database/client.js';
 import {
   aiSettings,
   appointments,
+  availabilitySettings,
   businesses,
   conversations,
   leads,
@@ -41,6 +42,8 @@ export interface BusinessContext {
   rules: RuleRow[];
   objections: ObjectionRow[];
   calendarProvider: 'internal' | 'google' | 'calendly';
+  /** Antelación mínima para reservar (Agenda → Disponibilidad): un horario ofrecido que ya no la cumple no se vuelve a ofrecer. */
+  minNoticeMinutes?: number;
 }
 
 export interface LeadContext {
@@ -92,7 +95,17 @@ export async function loadBusinessContext(businessId: string): Promise<BusinessC
     getCalendarConnection(businessId),
   ]);
   if (!business || !trainer || !settings) throw notFound('Configuración del negocio incompleta.');
-  return { business, trainer, settings, services: svc, rules, objections: objs, calendarProvider: calendar?.provider ?? 'internal' };
+  const [avail] = await db.select({ minNotice: availabilitySettings.minNoticeMinutes }).from(availabilitySettings).where(eq(availabilitySettings.businessId, businessId)).limit(1);
+  return {
+    business,
+    trainer,
+    settings,
+    services: svc,
+    rules,
+    objections: objs,
+    calendarProvider: calendar?.provider ?? 'internal',
+    minNoticeMinutes: avail?.minNotice ?? 120,
+  };
 }
 
 export async function loadLeadContext(businessId: string, leadId: string): Promise<LeadContext> {

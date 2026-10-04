@@ -30,7 +30,7 @@ APP_URL=https://kai-production.up.railway.app
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 ENCRYPTION_KEY=<pega aquí la clave generada>
 ADMIN_EMAIL=tu@email.com
-ADMIN_PASSWORD=<una contraseña larga>
+ADMIN_PASSWORD=<mínimo 12 caracteres con letras y números>
 ANTHROPIC_API_KEY=sk-ant-...
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=re_...
@@ -107,7 +107,7 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 
 - [ ] `NODE_ENV=production`, `ENCRYPTION_KEY` y `DATABASE_URL` configuradas (sin ellas KAI no arranca en producción, a propósito).
 - [ ] `APP_URL` con `https://` y tu dominio definitivo (las cookies de sesión se marcan como seguras).
-- [ ] `ADMIN_PASSWORD` larga y única. Tras el primer arranque puedes borrarla de las variables: la cuenta ya existe.
+- [ ] `ADMIN_PASSWORD` larga y única (mínimo 12 caracteres con letras y números; si es más débil, la cuenta no se crea). Tras el primer arranque puedes borrarla de las variables: la cuenta ya existe.
 - [ ] Email real configurado (Resend) para recuperar contraseñas e invitaciones (sin él, en producción no se envía ningún email).
 - [ ] Entra con la cuenta de `ADMIN_EMAIL` y comprueba que ves el panel de **Administración**.
 - [ ] Copias de seguridad de la base de datos activadas (Railway, Neon y Supabase las incluyen).

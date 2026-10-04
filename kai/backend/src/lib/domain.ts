@@ -80,7 +80,26 @@ export type StandardQualificationKey = (typeof STANDARD_QUALIFICATION_KEYS)[numb
 export const ONE_QUESTION_MESSAGE = 'Escribe una sola pregunta: KAI hace solo una pregunta por mensaje.';
 
 /** ¿El texto contiene más de una pregunta? (más de un «?»). */
-export const hasSeveralQuestions = (text: string) => (text.match(/\?/g) ?? []).length > 1;
+/** Interrogativos con tilde (“qué”, “cuándo”…): sin tilde suelen ser conjunciones (“que”, “cuando”). */
+const RX_INTERROGATIVE = /(?<!\p{L})(?:qué|cuánt[oa]s?|cómo|cuándo|dónde|cuál(?:es)?|quién(?:es)?)(?!\p{L})/iu;
+
+/**
+ * Número de preguntas de un texto. Cuenta los “¿” y los “?” (lo que haya más) y, dentro de una misma pregunta,
+ * los interrogativos unidos por coma, “y” u “o”: “¿Cuántos kilos quieres perder, cuándo quieres empezar y cuánto
+ * puedes invertir?” son tres preguntas aunque lleve un solo “?”.
+ */
+export function questionCount(text: string): number {
+  const marks = Math.max((text.match(/¿/g) ?? []).length, (text.match(/\?/g) ?? []).length);
+  let extra = 0;
+  for (const q of text.match(/¿[^?¿]*\?/g) ?? []) {
+    const parts = q.split(/,|;|\s+(?:y|e|o|u|ni)\s+/i);
+    const asking = parts.filter((p) => RX_INTERROGATIVE.test(p)).length;
+    if (asking >= 2) extra += asking - 1;
+  }
+  return marks + extra;
+}
+
+export const hasSeveralQuestions = (text: string) => questionCount(text) > 1;
 
 export type SignalLevel = 'high' | 'medium' | 'low';
 export type BudgetLevel = 'yes' | 'maybe' | 'no';
@@ -338,3 +357,6 @@ export const BILLING_PERIOD_LABELS: Record<string, string> = {
   semiannual: 'al semestre',
   annual: 'al año',
 };
+
+/** Longitud máxima de cada palabra o expresión de «palabras a usar / a evitar» (Ajustes de KAI y Copilot). */
+export const MAX_VOCAB_WORD_LENGTH = 40;

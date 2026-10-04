@@ -226,7 +226,7 @@ class CopilotTools {
         const rows = await getDb()
           .select({ a: appointments, name: leads.name })
           .from(appointments)
-          .innerJoin(leads, eq(leads.id, appointments.leadId))
+          .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, appointments.businessId)))
           .where(
             and(
               eq(appointments.businessId, b),

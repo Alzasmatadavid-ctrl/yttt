@@ -6,6 +6,21 @@
 /** Contraseña demo por defecto: es pública (está en el código y en .env.example). */
 export const PUBLIC_DEMO_PASSWORD = 'KaiDemo2026';
 
+/**
+ * true si DATABASE_URL apunta a una base de datos que no está en este ordenador (ni en el docker-compose local).
+ * El seed lo trata como producción aunque NODE_ENV no lo diga: el .env de un servidor puede no llevarlo.
+ */
+export function isRemoteDatabaseUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return true; // Dirección rara: mejor pedir --force.
+  }
+  return !['localhost', '127.0.0.1', '::1', 'db', 'postgres', ''].includes(host);
+}
+
 /** Devuelve el motivo por el que NO se debe ejecutar el seed con esta configuración, o null si se puede. */
 export function seedEnvironmentProblem(cfg: {
   production: boolean;
@@ -18,7 +33,7 @@ export function seedEnvironmentProblem(cfg: {
   if (cfg.adminEmail && cfg.adminEmail.trim().toLowerCase() === demoEmail)
     return 'DEMO_EMAIL coincide con ADMIN_EMAIL. Usa un email distinto para la cuenta demo.';
   if (!cfg.production) return null;
-  if (!cfg.force) return 'Estás en producción. Los datos demo solo deberían crearse en local. Si de verdad quieres hacerlo, añade --force.';
+  if (!cfg.force) return 'Estás en producción (o la base de datos no está en este ordenador). Los datos demo solo deberían crearse en local. Si de verdad quieres hacerlo, añade --force.';
   const pwd = cfg.demoPassword ?? '';
   if (!pwd || pwd === PUBLIC_DEMO_PASSWORD || pwd.length < 12 || !/[a-zA-Z]/.test(pwd) || !/[0-9]/.test(pwd))
     return 'En producción la cuenta demo necesita una DEMO_PASSWORD propia (al menos 12 caracteres con letras y números, distinta de la de ejemplo).';

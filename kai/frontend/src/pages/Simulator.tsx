@@ -83,6 +83,7 @@ const DIRECTIVE_LABELS: Record<string, string> = {
   reassure_call: 'Resolver dudas sobre la llamada',
   first_contact: 'Primer contacto',
   cancel_booking: 'Cancelar la llamada',
+  confirm_cancel: '¿Cancelar o mover la llamada?',
   handoff: 'Pasar a una persona',
   medical_notice: 'Aviso por tema médico',
   medical_redirect: 'Derivar a un profesional sanitario',

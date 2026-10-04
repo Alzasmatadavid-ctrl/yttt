@@ -23,6 +23,7 @@ import { SetterToolbox } from '../tools/setter-tools.js';
 import { judgeReply, validateReply, type ValidationContext } from '../validation/output-validator.js';
 import { createSetterAgent, disclosureIntro, firstMessageGreeting, RuleBasedSetterAgent, type AgentMode, type SetterAgent } from './agents.js';
 import { decideDirective, oneQuestion, type Directive, type SetterState } from './strategy.js';
+import { humanSlotLabel } from '../../lib/time.js';
 import { applyPipelineEvent, markOptedOut, mergeQualification } from '../../crm/leads.service.js';
 import { updateConversationState } from '../../crm/conversations.service.js';
 import { triggerHandoff } from '../../crm/handoff.service.js';
@@ -30,7 +31,7 @@ import { sendMessage, type MessagePurpose } from '../../crm/messaging.service.js
 import { createAlert } from '../../crm/alerts.service.js';
 import { checkUsageLimit } from '../../plans/plans.service.js';
 import { scheduleNoReplyFollowUp } from '../../automation/followups.js';
-import { firstName } from '../../lib/text.js';
+import { firstName, truncate } from '../../lib/text.js';
 
 export interface SetterRunResult {
   status: 'sent' | 'skipped' | 'handoff' | 'blocked' | 'failed';
@@ -82,12 +83,15 @@ export function buildValidationContext(biz: BusinessContext, toolbox: SetterTool
 
 function factsSummary(biz: BusinessContext, leadCtx: LeadContext, toolbox: SetterToolbox | null): string {
   const services = biz.services.map((s) => `${s.name}: ${(s.priceCents / 100).toFixed(2)} ${s.currency} (${s.billingPeriod}). ${s.description}`).join('\n');
-  const times = toolbox?.allowedTimes().map((d) => d.toISOString()).join(', ') || '(ninguno)';
+  const tz = biz.business.timezone;
+  const now = new Date();
+  const times = toolbox?.allowedTimes().map((d) => humanSlotLabel(d, tz, now)).join(', ') || '(ninguno)';
   return [
     `Entrenador: ${biz.trainer.displayName}. Especialidad: ${biz.trainer.specialty}. Método: ${biz.trainer.methodName} ${biz.trainer.methodDescription}`,
     `Credenciales reales: ${biz.trainer.credentials || '(ninguna)'}`,
     `Servicios: ${services || '(sin precio configurado)'}`,
-    `Horarios reales ofrecidos/reservados (UTC): ${times}`,
+    `Ahora: ${humanSlotLabel(now, tz, now)} (zona horaria ${tz})`,
+    `Horarios reales ofrecidos/reservados (hora local, ${tz}): ${times}`,
     `Memoria del lead: ${leadCtx.memories.map((m) => m.content).join(' | ') || '(nada)'}`,
     `Cualificación conocida: ${Object.entries(leadCtx.lead.qualification).map(([k, v]) => `${k}=${v.value}`).join(' | ') || '(nada)'}`,
   ].join('\n');
@@ -217,6 +221,24 @@ export function qualityIssueSummary(issues: string[]): string {
   return list.length ? `KAI no ha encontrado una respuesta segura: ${list.join(' y ')}.` : 'KAI no ha encontrado una respuesta segura.';
 }
 
+/**
+ * ¿Ha hecho la IA lo que el mensaje anuncia? Para reservar o cancelar, si no hay constancia de la herramienta en este
+ * turno, se ejecuta ahora. Devuelve true si ha tenido que hacerlo (hay que redactar de nuevo con el resultado).
+ */
+export async function ensureDirectiveAction(directive: Directive, toolbox: SetterToolbox, leadCtx: LeadContext): Promise<boolean> {
+  // Si la IA lo intentó y falló (p. ej. el hueco se ocupó), ya lo habrá explicado: no se repite.
+  const attempted = (names: string[]) => toolbox.records.some((r) => names.includes(r.name));
+  if (directive.kind === 'book_slot' && directive.slotId && !attempted(['book_call', 'reschedule_call']) && !toolbox.bookingUrl) {
+    await toolbox.run(leadCtx.upcomingAppointment ? 'reschedule_call' : 'book_call', { slot_id: directive.slotId });
+    return true;
+  }
+  if (directive.kind === 'cancel_booking' && leadCtx.upcomingAppointment && !attempted(['cancel_call']) && !toolbox.cancelled) {
+    await toolbox.run('cancel_call', { reason: 'El lead pidió cancelar la llamada por mensaje.' });
+    return true;
+  }
+  return false;
+}
+
 /** Ejecuta un turno de respuesta de KAI en una conversación. */
 export async function runSetterReply(businessId: string, conversationId: string, opts: { force?: boolean } = {}): Promise<SetterRunResult> {
   const biz = await loadBusinessContext(businessId);
@@ -231,7 +253,21 @@ export async function runSetterReply(businessId: string, conversationId: string,
   if (!conv.aiEnabled) return { status: 'skipped', reason: 'ai_disabled' };
   if (conv.handoffActive) return { status: 'skipped', reason: 'handoff_active' };
   if (lead.optedOut) return { status: 'skipped', reason: 'opted_out' };
-  if (lead.status === 'client') return { status: 'skipped', reason: 'already_client' };
+  if (lead.status === 'client') {
+    // KAI no habla con clientes: el entrenador tiene que enterarse de que le han escrito.
+    const last = convCtx.pendingInbound.at(-1);
+    if (last)
+      await createAlert({
+        businessId,
+        type: 'client_message',
+        severity: 'info',
+        title: 'Tu cliente te ha escrito',
+        body: `${lead.name || 'Un cliente'}: «${truncate(last.content.replace(/\s+/g, ' '), 120)}»`,
+        leadId: lead.id,
+        conversationId,
+      });
+    return { status: 'skipped', reason: 'already_client' };
+  }
   if (convCtx.pendingInbound.length === 0 && !opts.force) return { status: 'skipped', reason: 'nothing_to_answer' };
   if (lead.tags.includes(OVER_LIMIT_TAG)) {
     await triggerHandoff(businessId, conversationId, 'limit_reached', 'El lead entró con el límite de leads del plan superado.');
@@ -314,7 +350,8 @@ export async function runSetterReply(businessId: string, conversationId: string,
   for (const [hit, reason] of handoffChecks) {
     if (!hit) continue;
     let msg = rules.handoffMessage?.trim() || defaultHandoffMessage(reason, trainer);
-    if (msg && analysis?.flags.asksIfBot) msg = `Te soy sincero: soy ${biz.settings.assistantName || 'KAI'}, el asistente automatizado del equipo de ${trainer}. ${msg}`;
+    // Pregunta si es un bot: primero la verdad, sin el “¡Claro!” (sonaría a que confirma que es una persona).
+    if (msg && analysis?.flags.asksIfBot) msg = `Te soy sincero: soy ${biz.settings.assistantName || 'KAI'}, el asistente automatizado del equipo de ${trainer}. ${msg.replace(/^¡Claro!\s*/, '')}`;
     else if (msg) msg = withIntroIfFirst(biz, convCtx, lead.name, msg);
     let messageId: string | undefined;
     if (msg && reason !== 'angry') messageId = (await sendKai(biz, conversationId, msg, 'handoff', { kind: 'handoff', reason })).message.id;
@@ -349,6 +386,11 @@ export async function runSetterReply(businessId: string, conversationId: string,
   const toolbox = new SetterToolbox(biz, leadCtx, conv);
   const agent = createSetterAgent(provider);
   let gen = await generateValidatedMessage({ agent, biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: true });
+  // La reserva o la cancelación no se dan por hechas porque el texto lo diga: si la IA no ejecutó la herramienta,
+  // se ejecuta aquí (de forma determinista) y se vuelve a redactar con el resultado real.
+  if (gen.text && (await ensureDirectiveAction(directive, toolbox, leadCtx))) {
+    gen = await generateValidatedMessage({ agent, biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: true });
+  }
   if (!gen.text && provider) {
     // Último recurso: el motor de reglas (determinista y validado) antes de escalar.
     gen = await generateValidatedMessage({ agent: new RuleBasedSetterAgent(), biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: false });
@@ -426,8 +468,20 @@ export async function runFirstContact(businessId: string, conversationId: string
   const biz = await loadBusinessContext(businessId);
   const convCtx = await loadConversationContext(businessId, conversationId);
   const leadCtx = await loadLeadContext(businessId, convCtx.conversation.leadId);
-  if (!biz.settings.autopilotEnabled || !convCtx.conversation.aiEnabled || leadCtx.lead.optedOut) return { status: 'skipped', reason: 'disabled' };
   if (convCtx.history.length > 0) return { status: 'skipped', reason: 'conversation_started' };
+  if (!biz.settings.autopilotEnabled || !convCtx.conversation.aiEnabled || leadCtx.lead.optedOut) {
+    // Piloto automático apagado: nadie va a escribir a este lead si el entrenador no se entera.
+    if (!biz.settings.autopilotEnabled && !leadCtx.lead.optedOut && biz.business.status === 'active')
+      await createAlert({
+        businessId,
+        type: 'new_lead_manual',
+        title: 'Nuevo lead: contacto manual necesario',
+        body: `${leadCtx.lead.name || 'Un lead'} (${leadCtx.lead.source}) no se ha contactado: el piloto automático de KAI está apagado.`,
+        leadId: leadCtx.lead.id,
+        conversationId,
+      });
+    return { status: 'skipped', reason: 'disabled' };
+  }
   // Cuenta desactivada o límites del plan: KAI no escribe primero (el lead queda guardado para contacto manual).
   const block = await proactiveBlock(biz, leadCtx.lead);
   if (block) {

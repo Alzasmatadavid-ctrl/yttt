@@ -61,7 +61,7 @@ async function internalBusy(
   const rows = await getDb()
     .select({ start: appointments.startsAt, end: appointments.endsAt })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, appointments.businessId)))
     .where(and(...conds));
   return rows.map((r) => ({ start: r.start, end: r.end }));
 }
@@ -174,7 +174,7 @@ async function insertAppointmentAtomically(
     const [clash] = await tx
       .select({ id: appointments.id })
       .from(appointments)
-      .innerJoin(leads, eq(leads.id, appointments.leadId))
+      .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, appointments.businessId)))
       .where(and(...conds))
       .limit(1);
     if (clash) throw conflict(opts.conflictMessage);
@@ -343,7 +343,7 @@ export async function listAppointments(businessId: string, range: { from: Date; 
       lead: { id: leads.id, name: leads.name, status: leads.status, score: leads.score, temperature: leads.temperature, goalSummary: leads.goalSummary, source: leads.source, isTest: leads.isTest },
     })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, appointments.businessId)))
     .where(and(eq(appointments.businessId, businessId), gte(appointments.startsAt, range.from), lt(appointments.startsAt, range.to)))
     .orderBy(asc(appointments.startsAt));
 }

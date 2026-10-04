@@ -174,7 +174,7 @@ export async function getInsights(businessId: string, range: { from: Date; to: D
       revived: sql<number>`count(*) filter (where exists (select 1 from ${messages} m where m.conversation_id = ${followUps.conversationId} and m.direction = 'inbound' and m.created_at > ${followUps.sentAt}))::int`,
     })
     .from(followUps)
-    .innerJoin(leads, eq(leads.id, followUps.leadId))
+    .innerJoin(leads, and(eq(leads.id, followUps.leadId), eq(leads.businessId, followUps.businessId)))
     .where(
       and(eq(followUps.businessId, businessId), eq(leads.isTest, false), eq(followUps.status, 'sent'), gte(followUps.sentAt, range.from), lt(followUps.sentAt, range.to)),
     );

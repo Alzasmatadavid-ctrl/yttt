@@ -193,9 +193,9 @@ const RX = {
     ].join('|'),
   ),
   humanRequest:
-    /\b(hablar|habla|hablo) (directamente )?con (una persona|un humano|una persona real|alguien (real|de verdad|del equipo|de carne y hueso)|el entrenador|la entrenadora|tu jefe|tu jefa|un responsable)\b|\bpersona real\b|\b(pasame|pasadme|ponme) con (una persona|alguien|el entrenador|la entrenadora|tu jefe|tu jefa)\b|\bquiero que me (llame|atienda|escriba|conteste|responda) (el entrenador|la entrenadora|una persona|alguien|un humano)\b|\bme puede (atender|llamar|escribir) (alguien|una persona)\b/,
+    /\b(hablar|habla) (directamente )?con (una persona|un humano|una persona real|alguien (real|de verdad|del equipo|de carne y hueso)|el entrenador|la entrenadora|tu jefe|tu jefa|un responsable)\b|\b(pasame|pasadme|ponme) con (una persona|alguien|el entrenador|la entrenadora|tu jefe|tu jefa)\b|\bquiero que me (llame|atienda|escriba|conteste|responda) (el entrenador|la entrenadora|una persona|alguien|un humano)\b|\bme puede (atender|llamar|escribir) (alguien|una persona)\b/,
   asksIfBot:
-    /\beres (un |una )?(?:(?:bot|robot|ia|inteligencia artificial|chatbot|automatic[oa])\b|(?:maquina|programa|asistente virtual)\s*\?)|\b(eres|sois) (una persona|un humano|humano|humana|real)( real)?\s*\?|\bhablo con (un |una )?(bot|robot|maquina|ia|persona real|humano)\b|\besto es automatico\b|\b(me )?(responde|contesta|escribe) (un |una )?(bot|robot|maquina|ia)\b/,
+    /\beres (un |una )?(?:(?:bot|robot|ia|inteligencia artificial|chatbot|automatic[oa])\b|(?:maquina|programa|asistente virtual)\s*\?)|\b(eres|sois) (una persona|un humano|humano|humana|real)( real)?\s*\?|\b(estoy )?habl(o|ando) con (un |una )?(bot|robot|maquina|ia|inteligencia artificial|chatbot|persona( real)?|humano|humana|programa)\b|\bes (un )?(bot|robot|chatbot)\b|\besto es (un )?(bot|chatbot|automatico)\b|\b(me )?(responde|contesta|escribe) (un |una )?(bot|robot|maquina|ia|persona( real)?|humano)\b|\bhay (una persona|alguien) (real )?(ahi|detras)\b/,
   medical:
     /diabet|insulin|hipertens|tension alta|colesterol|tiroid|hernia|lesion|lesionad|operacion(?! (bikini|biquini|verano|playa))|operad[oa]|me (operaron|han operado|van a operar|operan)\b|embaraz|lactancia|medicacion|medicamento|pastillas para|trastorno alimentari|anorexia|bulimia|dolor (en el|de) pecho|cardiac|(problemas?|enfermedad|soplo|operacion|insuficiencia|fallo) (de|del|en el) corazon|arritmia|infarto|marcapasos|asma|epilep|cancer|quimio|analitica|analisis de sangre|depresion|ansiolitic|antidepresiv/,
   // Enfado: insultos o quejas claras dirigidas al negocio (no “me siento pesada” ni “joder, qué difícil”).
@@ -214,13 +214,13 @@ const RX = {
   outOfScope: /factura|devolucion|reembolso|colabora(cion|r)|patrocin|trabajar con vosotros|empleo|curriculum|publicidad en tu/,
   technical: /no (me )?funciona el (enlace|link)|no puedo (entrar|abrir|acceder)|no carga|link roto|me da error/,
   reschedule:
-    /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar|cambiamos|movemos) (la |el |mi )?(llamada|cita|hora|dia|videollamada)|\b(pasar|pasamos|pasame) (la |mi )?(llamada|cita|videollamada)\b|\bno (voy a )?(puedo|podre|poder) (ir|asistir|conectarme|estar|llegar|a esa hora|ese dia|esa hora)|\bal final no (puedo|podre|voy a poder)\b|\bno voy a (poder|llegar)\b|\bno me va a dar tiempo\b|\bme (ha surgido|surgio|ha salido) (algo|un imprevisto|un problema)\b|\bimprevisto\b|\botro (dia|horario|hueco) para la (llamada|cita)\b/,
+    /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar|cambiamos|movemos) (la |el |mi )?(llamada|cita|hora|dia|videollamada)|\b(pasar|pasamos|pasame) (la |mi )?(llamada|cita|videollamada)\b|\bno (voy a )?(puedo|podre|poder) (ir|asistir|conectarme|estar|llegar|a esa hora|ese dia|esa hora)|\bal final no (puedo|podre|voy a poder)\b|\bno voy a (poder|llegar)\b|\bno me va a dar tiempo\b|\bme (ha surgido|surgio|ha salido) (algo|un imprevisto|un problema)\b|\bimprevisto\b|\botro (dia|horario|hueco) para la (llamada|cita)\b|\bno me (viene|va|cuadra|encaja|pilla) bien\b|^\s*(?:(?:pues|uf|vaya|ay|lo siento|perdona)[,.!]?\s+)?(?:no[,.!]?\s+)*no puedo\s*[.!,]*\s*(lo siento|perdona|sorry)?[.!]*\s*$|\b(mejor|prefiero|preferiria|podemos|podriamos|puede ser|seria|hay) (en )?(otro|otra) (dia|hora|horario|momento)\b|\b(otro|otra) (dia|hora|horario|momento) (mejor|si puede ser|porfa|por favor)\b/,
   cancel: /\b(cancelar|cancela|cancelad|cancelame|anular|anula|anulad|anulame) (la |el |mi )?(llamada|cita|videollamada|reunion)\b|\bya no (quiero|necesito) (la )?(llamada|cita|videollamada)\b/,
   question: /\?|^(como|cuando|cuanto|que|donde|por que|quien|cual)\b/,
 };
 
 const QUAL_PATTERNS: Record<string, RegExp> = {
-  goal: /(perder|bajar|quitar(me)?|eliminar)\s+(\d+\s*(kg|kilos)|peso|grasa|barriga|tripa|michelines)|ganar (musculo|masa|fuerza)|definir|tonificar|ponerme en forma|estar en forma|recomposicion|mejorar (mi )?(fisico|salud|forma)|verme mejor/,
+  goal: /(perder|bajar|quitar(me)?|eliminar)\s+(?:(?:unos|unas|algo de|un poco de|al menos|por lo menos|mas de|como|entre|esos|estos|los|mis|la|el|mi)\s+)?(\d+(?:[.,]\d+)?(?:\s*(?:-|a|o)\s*\d+)?\s*(kg|kilos)|peso|grasa|barriga|tripa|michelines)|adelgazar|ganar (musculo|masa|fuerza)|definir|tonificar|ponerme en forma|estar en forma|recomposicion|mejorar (mi )?(fisico|salud|forma)|verme mejor/,
   problem:
     /no tengo tiempo|falta de tiempo|constancia|no soy constante|me cuesta|no se (que|como)|ansiedad|picoteo|lo dejo|abandono|me aburro|no veo resultados|desorganiz|trabajo mucho|horarios|como fatal|ceno mal/,
   motivation: /boda|verano|vacaciones|salud|mis hijos|mi hija|mi hijo|verme bien|sentirme bien|autoestima|el medico me|confianza|seguridad|espejo|ropa|playa|cumple/,
@@ -323,7 +323,15 @@ function ordinalChoice(n: string): number | null {
 }
 
 /** Intenta identificar qué horario de los ofrecidos ha elegido el lead. */
-export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: string, now: Date = new Date(), lastOfferIds: string[] = []): string | null {
+export function matchOfferedSlot(
+  n: string,
+  allOffered: OfferedSlot[],
+  tz: string,
+  now: Date = new Date(),
+  lastOfferIds: string[] = [],
+  /** El último mensaje de KAI fue la oferta de horarios: solo entonces un número suelto (“18”) puede ser una elección. */
+  opts: { offerIsLastMessage?: boolean } = {},
+): string | null {
   if (!allOffered.length) return null;
   // Elegir un horario reserva la cita: ante un rechazo (“el jueves no puedo”, “otro día”), una duda u obstáculo
   // (“a las 18:00 no sé si llego”, “mañana tengo dentista”) o una pregunta sobre el horario (“¿las 18:00 es hora
@@ -337,17 +345,24 @@ export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: strin
   if (ordinal !== null) return (ordinal < 0 ? offered[offered.length - 1] : offered[ordinal])?.id ?? null;
   const times = [...n.matchAll(/\b(?:a las |las |la de las )?([01]?\d|2[0-3])(?:[:.h]([0-5]\d))?\s*(?:h|horas)?\b(?:\s*y media)?/g)];
   const onlyNumber = /^\s*\d{1,2}([:.]\d{2})?\s*$/.test(n);
-  const mentionsTime = /\d/.test(n) && (/(a las|las|:|\bh\b|\dh\b|horas|y media)/.test(n) || onlyNumber);
+  const mentionsTime = /\d/.test(n) && (/(a las|las|:|\bh\b|\dh\b|horas|y media|\d (de|por) la (manana|tarde|noche))/.test(n) || onlyNumber);
   if (mentionsTime) {
     for (const m of times) {
       // Solo cuentan los números con forma de hora (“a las 10”, “18:00”, “10h”), no “tengo 18 años” ni “10 horas a la semana”.
-      if (!onlyNumber && !/las|[:.]\d|\dh\b|y media/.test(m[0])) continue;
-      const hour = Number(m[1]);
+      const partOfDayAfter = /^\s*(de|por) la (manana|tarde|noche)\b/.test(n.slice(m.index! + m[0].length));
+      if (!onlyNumber && !partOfDayAfter && !/las|[:.]\d|\dh\b|y media/.test(m[0])) continue;
+      // “5” como respuesta a otra pregunta (¿cuántos días entrenas?) no es una elección de horario.
+      if (onlyNumber && !opts.offerIsLastMessage) return null;
+      let hour = Number(m[1]);
       const minute = /y media/.test(m[0]) ? 30 : m[2] ? Number(m[2]) : null;
+      const afternoon = /\b(de|por) la (tarde|noche)\b/.test(n);
+      if (afternoon && hour < 12) hour += 12;
+      // “a las 6” puede ser las 6:00 o las 18:00; “6” o “6:00” a secas, solo la hora exacta.
+      const loose = !afternoon && /\blas\b/.test(m[0]) && hour <= 12;
       const matches = (pool: OfferedSlot[]) =>
         pool.filter((s) => {
           const local = DateTime.fromISO(s.start).setZone(tz);
-          const hourOk = local.hour === hour || local.hour % 12 === hour % 12;
+          const hourOk = local.hour === hour || (loose && local.hour % 12 === hour % 12);
           return hourOk && (minute === null || local.minute === minute);
         });
       const candidates = matches(offered);
@@ -386,8 +401,24 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   const wordCount = n.split(' ').filter(Boolean).length;
   const lastAsked = input.state.lastAskedKey;
 
-  // 1) La respuesta directa a la última pregunta de KAI es la fuente más fiable.
-  if (lastAsked && enabledKeys.has(lastAsked) && !input.lead.qualification[lastAsked]?.value && wordCount >= 2 && !RX.price.test(n) && !RX.optOut.test(n)) {
+  // 1) La respuesta directa a la última pregunta de KAI es la fuente más fiable… si de verdad la responde:
+  // un mensaje que solo pregunta (“¿estoy hablando con un bot?”) no es una respuesta, y si habla claramente
+  // de otra variable (“trabajo muchas horas y como fatal” cuando se le preguntó el objetivo) se guarda en esa.
+  const sentences = raw.split(/(?<=[.!?\n])\s+/).map((t) => t.trim()).filter(Boolean);
+  const onlyQuestion = sentences.length > 0 && sentences.every((t) => t.endsWith('?'));
+  const ownPattern = lastAsked ? QUAL_PATTERNS[lastAsked] : undefined;
+  const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== lastAsked && enabledKeys.has(k) && rx.test(n));
+  const answersLastAsked = !ownPattern || ownPattern.test(n) || !aboutOtherKey;
+  if (
+    lastAsked &&
+    enabledKeys.has(lastAsked) &&
+    !input.lead.qualification[lastAsked]?.value &&
+    wordCount >= 2 &&
+    !onlyQuestion &&
+    answersLastAsked &&
+    !RX.price.test(n) &&
+    !RX.optOut.test(n)
+  ) {
     qualification[lastAsked] = { value: raw.trim().slice(0, 300), confidence: 0.75, updatedAt: nowIso };
   }
   // 2) Información que el lead da por iniciativa propia.
@@ -441,6 +472,23 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
 
   const offered = input.state.offeredSlots ?? [];
   const lastOutbound = [...input.history].reverse().find((m) => m.direction === 'outbound');
+  const lastOfferIds = input.state.lastOfferIds ?? [];
+  const offerIsLastMessage = Boolean(
+    lastOutbound &&
+      lastOfferIds.some((id) => {
+        const slot = offered.find((o) => o.id === id);
+        if (!slot) return false;
+        const local = DateTime.fromISO(slot.start).setZone(tz);
+        return lastOutbound.content.includes(local.toFormat('HH:mm')) || lastOutbound.content.includes(local.toFormat('H:mm'));
+      }),
+  );
+  // “No” a secas como respuesta al recordatorio o a la confirmación de la llamada: no puede ir.
+  const lastKind = typeof lastOutbound?.metadata?.kind === 'string' ? lastOutbound.metadata.kind : '';
+  const noToReminder =
+    ['reminder_24h', 'reminder_1h', 'confirmation'].includes(lastKind) &&
+    /^\s*no\b/.test(n) &&
+    wordCount <= 8 &&
+    !/\bno (hay problema|pasa nada|te preocupes|problem)|todo (bien|perfecto|ok)|perfecto|genial|alli estare|ahi estare|cuenta conmigo|nos vemos/.test(n);
   // Pedir cancelar la llamada (“ya no quiero la cita”) también es no querer la llamada, nunca pedirla.
   const declinesCall = RX.declineCall.test(n) || RX.cancel.test(n);
   // Si el lead ya rechazó la llamada, un “vale” o un “me interesa” no la reabren: solo una petición explícita.
@@ -474,7 +522,8 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     signals,
     memories,
     flags: {
-      humanRequest: RX.humanRequest.test(n) || asksForTrainer(n, input.biz.trainer.displayName),
+      // “¿Estoy hablando con una persona real?” pregunta si es un bot; “quiero hablar con una persona real” pide a alguien.
+      humanRequest: RX.humanRequest.test(n) || asksForTrainer(n, input.biz.trainer.displayName) || (/\bpersona real\b/.test(n) && !RX.asksIfBot.test(n)),
       asksIfBot: RX.asksIfBot.test(n),
       medical: RX.medical.test(n),
       angry,
@@ -485,7 +534,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
       complexNegotiation: RX.negotiation.test(n),
       outOfScope: RX.outOfScope.test(n),
       technicalIssue: RX.technical.test(n),
-      wantsReschedule: RX.reschedule.test(n),
+      wantsReschedule: RX.reschedule.test(n) || noToReminder,
       wantsCancel: RX.cancel.test(n),
       asksQuestion: RX.question.test(n),
     },
@@ -494,7 +543,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     goalSummary: qualification.goal?.value?.slice(0, 160) ?? null,
     preferredDate: resolvePreferredDate(n, input.now, tz),
     preferredPartOfDay: resolvePartOfDay(n),
-    selectedSlotId: matchOfferedSlot(n, offered, tz, input.now, input.state.lastOfferIds ?? []),
+    selectedSlotId: matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage }),
     summary: 'Análisis heurístico (modo simulación).',
     engine: 'heuristic',
   };

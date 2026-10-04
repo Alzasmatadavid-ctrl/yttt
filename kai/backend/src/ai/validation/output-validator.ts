@@ -14,7 +14,7 @@
  */
 import { DateTime } from 'luxon';
 import { z } from 'zod';
-import type { AiTone } from '../../lib/domain.js';
+import { questionCount, type AiTone } from '../../lib/domain.js';
 import { countEmojis, fold, normalize } from '../../lib/text.js';
 import { humanSlotLabel } from '../../lib/time.js';
 import { maxCharsFor, maxEmojisFor } from '../prompts/tone.js';
@@ -334,8 +334,8 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   const maxChars = maxCharsFor(ctx.tone);
   if (trimmed.length > maxChars) issues.push(`Es demasiado largo (${trimmed.length} caracteres; máximo ${maxChars}). Acórtalo.`);
 
-  const questionMarks = (trimmed.match(/\?/g) ?? []).length;
-  if (questionMarks > (ctx.maxQuestions ?? 1)) issues.push(`Hace ${questionMarks} preguntas. Haz solo UNA pregunta principal.`);
+  const questions = questionCount(trimmed);
+  if (questions > (ctx.maxQuestions ?? 1)) issues.push(`Hace ${questions} preguntas. Haz solo UNA pregunta principal.`);
 
   if (ctx.previousMessages?.some((p) => normalize(p) === n)) issues.push('Repite exactamente un mensaje anterior. Reformúlalo de forma distinta y natural.');
   if (RX_MARKDOWN.test(trimmed)) issues.push('Usa formato de documento (listas, negritas o títulos). Escribe como en un chat.');
@@ -369,7 +369,13 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   const dayRefs = findDayRefs(f);
   for (const t of findTimes(f, trimmed)) {
     if (overlapsSpan(t, prices) || overlapsSpan(t, urlSpans)) continue;
-    const sameTime = allowed.filter((a) => a.minute === t.minute && (t.exact ? a.hour === t.hour : a.hour === t.hour || a.hour % 12 === t.hour % 12));
+    let sameTime = allowed.filter((a) => a.minute === t.minute && (t.exact ? a.hour === t.hour : a.hour === t.hour || a.hour % 12 === t.hour % 12));
+    // Un horario que ya ha pasado no se puede ofrecer (aunque se ofreciera ayer).
+    if (ctx.now && sameTime.length && sameTime.every((a) => a.toMillis() <= ctx.now!.getTime())) {
+      issues.push(`Menciona el horario “${t.text}”, que ya ha pasado. Consulta get_available_slots y ofrece horarios futuros.`);
+      break;
+    }
+    if (ctx.now) sameTime = sameTime.filter((a) => a.toMillis() > ctx.now!.getTime());
     if (sameTime.length === 0) {
       issues.push(`Menciona el horario “${t.text}”, que no ha salido de la agenda real. Usa get_available_slots y sus etiquetas exactas.`);
       break;

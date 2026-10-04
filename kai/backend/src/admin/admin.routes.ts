@@ -29,6 +29,7 @@ import { audit } from '../audit/audit.service.js';
 import { usagePeriod } from '../lib/time.js';
 import { destroyUserSessions } from '../auth/sessions.js';
 import { stopBusinessAutomations } from '../automation/followups.js';
+import { resumeAppointmentJobs } from '../automation/reminders.js';
 
 const LimitsSchema = z.object({
   maxLeadsPerMonth: z.number().int().min(0).nullable(),
@@ -166,6 +167,8 @@ export async function adminRoutes(app: FastifyInstance) {
     // Cuenta desactivada: se cancelan ya sus trabajos y seguimientos pendientes (sin esperar a que venzan),
     // para que no salga una avalancha de mensajes antiguos si se reactiva.
     if (body.status === 'suspended') await stopBusinessAutomations(id, 'Cuenta desactivada');
+    // Reactivada: las llamadas ya reservadas recuperan sus recordatorios y el aviso de resultado.
+    if (body.status === 'active') await resumeAppointmentJobs(id);
     await audit({ businessId: id, actorType: 'admin', actorUserId: admin.id, action: 'admin.business_updated', entityType: 'business', entityId: id, metadata: body });
     return { ok: true };
   });

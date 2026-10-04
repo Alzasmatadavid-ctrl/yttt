@@ -163,7 +163,7 @@ export async function listFollowUps(businessId: string, leadId?: string) {
   return getDb()
     .select({ followUp: followUps, leadName: leads.name })
     .from(followUps)
-    .innerJoin(leads, eq(leads.id, followUps.leadId))
+    .innerJoin(leads, and(eq(leads.id, followUps.leadId), eq(leads.businessId, followUps.businessId)))
     .where(and(...conds))
     .orderBy(desc(followUps.scheduledFor))
     .limit(100);

@@ -320,7 +320,7 @@ function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: s
         <Sparkles style={{ color: 'var(--accent-text)' }} />
         <div>
           <div className="subtle xs">Próxima acción</div>
-          <strong className="small">{nextActionFor(lead, data.conversation, upcoming, tz)}</strong>
+          <strong className="small">{nextActionFor(lead, data.conversation, upcoming, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}</strong>
         </div>
       </div>
       <div className="field">
@@ -479,7 +479,7 @@ export default function Inbox() {
             </div>
             <div className="subtle xs ellipsis mt-4">
               {it.lead.goalSummary ? `${it.lead.goalSummary} · ` : ''}
-              {nextActionFor(it.lead, it.conversation, null, tz)}
+              {nextActionFor(it.lead, it.conversation, null, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}
             </div>
           </div>
         </button>

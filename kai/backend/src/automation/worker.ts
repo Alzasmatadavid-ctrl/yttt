@@ -56,7 +56,7 @@ async function appointmentContext(businessId: string, appointmentId: string) {
   const [row] = await db
     .select({ appointment: appointments, lead: leads, business: businesses })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, appointments.businessId)))
     .innerJoin(businesses, eq(businesses.id, appointments.businessId))
     .where(and(eq(appointments.businessId, businessId), eq(appointments.id, appointmentId)))
     .limit(1);

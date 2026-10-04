@@ -28,6 +28,7 @@ export type DirectiveKind =
   | 'book_slot'
   | 'reschedule'
   | 'cancel_booking'
+  | 'confirm_cancel'
   | 'post_booking'
   | 'disqualify_kindly'
   | 'continue_without_call'
@@ -48,6 +49,8 @@ export interface Directive {
   answerQuestionFirst?: boolean;
   /** continue_without_call: el lead acaba de rechazar la llamada (se le confirma que no pasa nada) o ya lo hizo antes. */
   justDeclined?: boolean;
+  /** share_price: dar el precio sin proponer la llamada (el lead no encaja o ya la rechazó). */
+  withoutCall?: boolean;
 }
 
 export interface StrategyInput {
@@ -57,6 +60,8 @@ export interface StrategyInput {
   analysis: LeadAnalysis | null;
   kaiHasSpoken: boolean;
   isFirstContact?: boolean;
+  /** Momento de referencia (por defecto, ahora). */
+  now?: Date;
 }
 
 /**
@@ -83,11 +88,21 @@ export function nextQualificationRule(rules: RuleRow[], lead: LeadContext['lead'
   return null;
 }
 
-/** Horarios de la última oferta, si es reciente (menos de 24 h). */
-function recentOffer(state: ConversationState) {
+/** ¿Se puede todavía reservar este horario? (no ha pasado y respeta la antelación mínima). */
+export function slotStillBookable(start: string | Date, now: Date, minNoticeMinutes = 0): boolean {
+  return new Date(start).getTime() > now.getTime() + minNoticeMinutes * 60_000;
+}
+
+/**
+ * Horarios de la última oferta, si es reciente (menos de 24 h) y solo los que aún se pueden reservar:
+ * un horario de ayer o que ya no cumple la antelación mínima no se vuelve a ofrecer.
+ */
+export function recentOffer(state: ConversationState, now: Date = new Date(), minNoticeMinutes = 0) {
   const ids = state.lastOfferIds ?? [];
-  if (!ids.length || !state.offeredAt || Date.now() - new Date(state.offeredAt).getTime() > 24 * 3600_000) return [];
-  return ids.map((id) => (state.offeredSlots ?? []).find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => Boolean(s));
+  if (!ids.length || !state.offeredAt || now.getTime() - new Date(state.offeredAt).getTime() > 24 * 3600_000) return [];
+  return ids
+    .map((id) => (state.offeredSlots ?? []).find((s) => s.id === id))
+    .filter((s): s is NonNullable<typeof s> => Boolean(s) && slotStillBookable(s!.start, now, minNoticeMinutes));
 }
 
 function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean): Directive {
@@ -104,7 +119,10 @@ export function decideDirective(input: StrategyInput): Directive {
   const lead = leadCtx.lead;
   const flags = analysis?.flags;
   const answerQuestionFirst = Boolean(flags?.asksQuestion);
-  const offered = state.offeredSlots ?? [];
+  const now = input.now ?? new Date();
+  const minNotice = biz.minNoticeMinutes ?? 0;
+  // Solo cuentan los horarios que todavía se pueden reservar.
+  const offered = (state.offeredSlots ?? []).filter((s) => slotStillBookable(s.start, now, minNotice));
   const settings = biz.settings;
   const trainer = biz.trainer.displayName || 'el entrenador';
 
@@ -130,8 +148,12 @@ export function decideDirective(input: StrategyInput): Directive {
     };
   }
 
+  const offer = recentOffer(state, now, minNotice);
+  const newPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
+
   // 2) Ya tiene una llamada agendada.
   if (leadCtx.upcomingAppointment) {
+    const when = humanSlotLabel(leadCtx.upcomingAppointment.startsAt, biz.business.timezone, now);
     if (flags?.wantsCancel && !flags.wantsReschedule) {
       return {
         kind: 'cancel_booking',
@@ -139,6 +161,29 @@ export function decideDirective(input: StrategyInput): Directive {
           'El lead pide cancelar su llamada. Usa cancel_call y confírmale con amabilidad que queda cancelada. Sin insistir ni proponer otra fecha (salvo que la pida), dile que si más adelante quiere retomarlo puede escribirte por aquí.',
         answerQuestionFirst,
       };
+    }
+    // Dice que no quiere la llamada (sin pedir cancelarla ni moverla): se le pregunta antes de tocar nada.
+    if (flags?.declinesCall && !flags.wantsReschedule && !flags.wantsCancel) {
+      return {
+        kind: 'confirm_cancel',
+        instruction: `El lead tiene la ${settings.callLabel} agendada (${when}) y dice que no quiere hacerla. NO la canceles todavía ni uses herramientas: respóndele con naturalidad y pregúntale, en UNA sola pregunta, si quiere que la canceles o prefiere moverla a otro día. Sin insistir ni presionar.`,
+        answerQuestionFirst,
+      };
+    }
+    // Está eligiendo otra fecha para mover la llamada (ya se le ofrecieron horarios): nueva preferencia → consultar
+    // la agenda otra vez; si solo duda entre los ofrecidos → preguntarle cuál le viene mejor.
+    if (offer.length && !flags?.asksPrice) {
+      if (newPreference || flags?.wantsReschedule) {
+        return {
+          kind: 'reschedule',
+          needsSlots: true,
+          slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
+          instruction:
+            'El lead está buscando otro horario para mover su llamada. Consulta get_available_slots con su preferencia y ofrécele 2 alternativas reales. Si elige una, usa reschedule_call.',
+          answerQuestionFirst,
+        };
+      }
+      return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
     }
     if (flags?.wantsReschedule || flags?.wantsCancel) {
       return {
@@ -160,14 +205,23 @@ export function decideDirective(input: StrategyInput): Directive {
     }
     return {
       kind: 'post_booking',
-      instruction:
-        'El lead ya tiene la llamada agendada. Responde a lo que diga de forma breve y útil, sin volver a cualificar ni vender. Si es oportuno, recuérdale con naturalidad el día y la hora de la llamada.',
+      instruction: `El lead ya tiene la llamada agendada (${when}). Responde a lo que diga de forma breve y útil, sin volver a cualificar ni vender, y sin dar por hecho que te ha dicho que sí a algo. Si pone pegas a la llamada o a la hora, pregúntale si prefiere moverla. Si es oportuno, recuérdale con naturalidad el día y la hora.`,
       answerQuestionFirst,
     };
   }
 
   // 3) No encaja.
   if (lead.signals.fit === 'no') {
+    // Si insiste en saber el precio, se le da (el precio nunca se oculta), sin proponer la llamada.
+    if (flags?.asksPrice && ((state.priceAskedCount ?? 0) >= 2 || state.priceShared)) {
+      return {
+        kind: 'share_price',
+        withoutCall: true,
+        instruction:
+          'El lead insiste en saber el precio. Dáselo de forma clara usando EXCLUSIVAMENTE el precio real configurado (servicio, importe y periodicidad), con honestidad: por lo que te ha contado, puede que ahora no sea lo más adecuado para su caso. No propongas la llamada ni presiones. Nunca inventes descuentos ni condiciones.',
+        answerQuestionFirst,
+      };
+    }
     return {
       kind: 'disqualify_kindly',
       instruction:
@@ -215,8 +269,6 @@ export function decideDirective(input: StrategyInput): Directive {
   }
 
   // 6) Quiere la llamada / propone día → consultar agenda real (o aclarar la oferta reciente).
-  const offer = recentOffer(state);
-  const newPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
   if (flags?.wantsCall && !flags.declinesCall) {
     if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
     return {

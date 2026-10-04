@@ -33,6 +33,8 @@ import { leadStatusLabel } from '@shared';
 
 interface DashboardData {
   timezone: string;
+  /** false = piloto automático en pausa: KAI no contesta a nadie. */
+  autopilotEnabled?: boolean;
   leads: { newToday: number; contacted: number; active: number; hot: number; qualified: number };
   conversion: { response: number; qualification: number; booking: number; attendance: number; conversion: number };
   funnel30d: { leads: number; contacted: number; responded: number; qualified: number; booked: number; attended: number; clients: number; avgFirstResponseSeconds: number; messages: { kai: number } };
@@ -104,7 +106,11 @@ export default function Dashboard() {
       <PageHeader
         title={`${greeting}${firstName ? `, ${firstName}` : ''}`}
         description={`${dayLabel(new Date(), data.timezone)} · ${
-          attentionCount === 0 ? 'Todo bajo control: KAI se encarga del resto' : attentionCount === 1 ? '1 cosa necesita tu atención' : `${attentionCount} cosas necesitan tu atención`
+          attentionCount === 0
+            ? data.autopilotEnabled === false
+              ? 'KAI está en pausa: no responde automáticamente'
+              : 'Todo bajo control: KAI se encarga del resto'
+            : attentionCount === 1 ? '1 cosa necesita tu atención' : `${attentionCount} cosas necesitan tu atención`
         }`}
         actions={
           <>

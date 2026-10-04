@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { plans, users } from './schema.js';
 import { DEFAULT_PLANS } from '../config/defaults.js';
-import { env } from '../config/env.js';
+import { adminPasswordProblem, env } from '../config/env.js';
 import { hashPassword } from '../lib/crypto.js';
 import { logger } from '../lib/logger.js';
 
@@ -25,7 +25,7 @@ export async function bootstrapData() {
   await ensureAdminAccount();
 }
 
-export async function ensureAdminAccount(): Promise<'none' | 'exists' | 'created' | 'promoted' | 'not_promoted' | 'missing_password'> {
+export async function ensureAdminAccount(): Promise<'none' | 'exists' | 'created' | 'promoted' | 'not_promoted' | 'missing_password' | 'weak_password'> {
   if (!env.ADMIN_EMAIL) return 'none';
   const db = getDb();
   const email = env.ADMIN_EMAIL.trim().toLowerCase();
@@ -46,6 +46,11 @@ export async function ensureAdminAccount(): Promise<'none' | 'exists' | 'created
   if (!env.ADMIN_PASSWORD) {
     logger.warn('bootstrap.admin_missing_password', { email, hint: 'Define ADMIN_PASSWORD para crear la cuenta de administración.' });
     return 'missing_password';
+  }
+  const weak = adminPasswordProblem(env.ADMIN_PASSWORD);
+  if (weak) {
+    logger.warn('bootstrap.admin_weak_password', { email, hint: weak });
+    return 'weak_password';
   }
   await db.insert(users).values({ email, name: 'Administrador', passwordHash: await hashPassword(env.ADMIN_PASSWORD), platformRole: 'admin' }).onConflictDoNothing();
   logger.info('bootstrap.admin_created', { email });

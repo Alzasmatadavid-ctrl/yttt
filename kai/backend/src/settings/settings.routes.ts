@@ -22,7 +22,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { perBusinessRateLimit, requireTenant } from '../auth/guards.js';
 import { env } from '../config/env.js';
 import { audit } from '../audit/audit.service.js';
-import { hasSeveralQuestions, ONE_QUESTION_MESSAGE, STANDARD_QUALIFICATION_KEYS, type AutomationType } from '../lib/domain.js';
+import { hasSeveralQuestions, MAX_VOCAB_WORD_LENGTH, ONE_QUESTION_MESSAGE, STANDARD_QUALIFICATION_KEYS, type AutomationType } from '../lib/domain.js';
 import { temperatureFor, validateBands } from '../crm/scoring.js';
 import { recomputeLeadScore } from '../crm/leads.service.js';
 import { getLimits, getUsage, countSeats, countChannels } from '../plans/plans.service.js';
@@ -48,8 +48,8 @@ export const AiSettingsSchema = z.object({
   persona: z.enum(['team_member', 'trainer']),
   disclosureMode: z.enum(['first_message', 'on_request']),
   tone: ToneSchema,
-  wordsToUse: z.array(z.string().trim().min(1).max(40)).max(50),
-  wordsToAvoid: z.array(z.string().trim().min(1).max(40)).max(100),
+  wordsToUse: z.array(z.string().trim().min(1).max(MAX_VOCAB_WORD_LENGTH)).max(50),
+  wordsToAvoid: z.array(z.string().trim().min(1).max(MAX_VOCAB_WORD_LENGTH)).max(100),
   examplesWhatsapp: z.string().max(6000),
   examplesInstagram: z.string().max(6000),
   examplesOther: z.string().max(6000),

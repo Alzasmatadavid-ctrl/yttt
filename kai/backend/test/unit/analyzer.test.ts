@@ -302,7 +302,8 @@ describe('matchOfferedSlot', () => {
   const D = offeredAt('2026-10-08T18:00', MADRID, 'el jueves 8 a las 18:00');
   const all = [A, B, C, D];
   const latest = [C.id, D.id];
-  const m = (text: string, lastOfferIds = latest, offered = all, tz = MADRID) => matchOfferedSlot(normalize(text), offered, tz, NOW, lastOfferIds);
+  const m = (text: string, lastOfferIds = latest, offered = all, tz = MADRID, offerIsLastMessage = true) =>
+    matchOfferedSlot(normalize(text), offered, tz, NOW, lastOfferIds, { offerIsLastMessage });
 
   it('sin horarios ofrecidos no elige nada', () => {
     expect(m('la primera', latest, [])).toBeNull();
@@ -332,6 +333,19 @@ describe('matchOfferedSlot', () => {
     ['a las 10:00h', C],
   ])('elige por hora: “%s”', (text, expected) => {
     expect(m(text)).toBe(expected.id);
+  });
+
+  it('un número suelto solo elige horario si el último mensaje de KAI fue la oferta', () => {
+    // “5” respondiendo a “¿cuántos días entrenas?” no puede reservar una llamada.
+    expect(m('10', latest, all, MADRID, false)).toBeNull();
+    expect(m('18:00', latest, all, MADRID, false)).toBeNull();
+    // Con hora completa (“a las 10”) sí vale, aunque haya habido mensajes en medio.
+    expect(m('a las 10', latest, all, MADRID, false)).toBe(C.id);
+  });
+
+  it('“6” a secas no es “las 18:00”: sin «a las» ni «de la tarde» solo cuenta la hora exacta', () => {
+    expect(m('6')).toBeNull();
+    expect(m('a las 6 de la tarde')).toBe(D.id);
   });
 
   it('si la hora no está en la última oferta, la busca en ofertas anteriores', () => {

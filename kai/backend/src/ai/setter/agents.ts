@@ -4,15 +4,15 @@
  *  - RuleBasedSetterAgent: motor de reglas (modo simulación, sin API key). Útil para probar
  *    todo el sistema de punta a punta y como referencia de comportamiento.
  */
-import { firstName, pick, hashString } from '../../lib/text.js';
-import { BILLING_PERIOD_LABELS, formatMoney, type ConversationState } from '../../lib/domain.js';
+import { firstName, hashString, normalize, pick } from '../../lib/text.js';
+import { BILLING_PERIOD_LABELS, formatMoney, questionCount, type ConversationState } from '../../lib/domain.js';
 import { humanSlotLabel } from '../../lib/time.js';
 import type { ChatBlock, ChatMessage, LLMProvider, ToolResultBlock } from '../providers/types.js';
 import { textOf } from '../providers/types.js';
 import type { BusinessContext, ConversationContext, LeadContext } from '../context/context.js';
 import { buildSetterStablePrompt, buildSetterTurnContext } from '../prompts/setter.prompt.js';
 import type { SetterToolbox } from '../tools/setter-tools.js';
-import type { Directive, SetterState } from './strategy.js';
+import { slotStillBookable, type Directive, type SetterState } from './strategy.js';
 import { env } from '../../config/env.js';
 
 export type AgentMode = 'reply' | 'follow_up' | 'first_contact';
@@ -51,12 +51,9 @@ export function historyToMessages(convCtx: ConversationContext, mode: AgentMode,
   const msgs: ChatMessage[] = [];
   for (const m of convCtx.history) {
     const role = m.direction === 'inbound' ? 'user' : 'assistant';
-    const text =
-      m.contentType === 'template' && typeof m.metadata.intendedText === 'string'
-        ? m.metadata.intendedText
-        : m.senderType === 'human'
-          ? m.content
-          : m.content;
+    // Plantilla de WhatsApp: lo que el lead vio es la plantilla (no el texto que KAI habría escrito), así que
+    // todavía no ha leído la presentación de KAI como asistente virtual.
+    const text = m.contentType === 'template' ? `${m.content} (plantilla de WhatsApp: el lead aún no ha visto tu presentación)` : m.content;
     const last = msgs[msgs.length - 1];
     if (last && last.role === role && typeof last.content === 'string') last.content = `${last.content}\n${text}`;
     else msgs.push({ role, content: text });
@@ -232,6 +229,13 @@ export class RuleBasedSetterAgent implements SetterAgent {
     // Felicitar o reconocer un acontecimiento solo la primera vez: repetirlo en cada mensaje suena a robot.
     const previousOut = input.convCtx.history.filter((m) => m.direction === 'outbound').map((m) => m.content.toLowerCase());
     const alreadySaid = (phrase: string) => previousOut.some((t) => t.includes(phrase));
+    // Variantes: se evita repetir literalmente un mensaje anterior (el control de calidad lo rechazaría).
+    const said = new Set(previousOut.map((t) => normalize(t)));
+    const fresh = (variants: string[]) => {
+      const unused = variants.filter((v) => !said.has(normalize(v.replace(/\s+/g, ' ').trim())));
+      return pick(unused.length ? unused : variants, seed);
+    };
+    const event = eventPhrase(leadCtx.memories.find((m) => m.kind === 'event')?.content);
     const eventAck =
       /\b(me caso|boda|casarme)\b/.test(pendingText) && !alreadySaid('enhorabuena por la boda')
         ? `¡Enhorabuena por la boda!${emoji('🎉')}`
@@ -249,22 +253,30 @@ export class RuleBasedSetterAgent implements SetterAgent {
 
     if (input.mode === 'follow_up' && input.followUp) {
       const goal = lead.goalSummary || lead.qualification.goal?.value;
-      const event = leadCtx.memories.find((m) => m.kind === 'event')?.content;
+      const goalRef = goal ? lowerFirst(trimGoal(goal)) : null;
       const lastQuestion = directive.question;
       // Si el lead nunca ha contestado (formulario, anuncio), no hay “lo que me contaste”: se retoma el primer mensaje.
       const leadHasWritten = input.convCtx.history.some((m) => m.direction === 'inbound');
       const hello = name ? `Hola ${name}, ` : 'Hola, ';
-      const firstStep = leadHasWritten
-        ? `${hello}me quedé pensando en lo que me contaste${goal ? ` de ${lowerFirst(trimGoal(goal))}` : ''}. ${lastQuestion ?? '¿Seguimos con ello?'}`
-        : goal
-          ? `${hello}te escribo de nuevo por lo de ${lowerFirst(trimGoal(goal))}, que nos indicaste al dejar tus datos. ${lastQuestion ?? '¿Sigues con ganas de ponerte con ello?'}`
-          : `${hello}te escribo de nuevo por si se te pasó mi mensaje. ${lastQuestion ?? '¿Qué te gustaría conseguir?'}`;
-      const steps: string[] = [
-        firstStep,
-        `${name ? `${name}, ` : ''}${event ? `teniendo en cuenta lo que me comentaste (${lowerFirst(event)}), ` : ''}sigo por aquí por si quieres retomarlo${goal ? ` y ver cómo plantear lo de ${lowerFirst(trimGoal(goal))}` : ''}. ${callDeclined ? '¿Te apetece que lo sigamos viendo por aquí?' : '¿Te viene bien que lo hablemos esta semana?'}`,
-        `${name ? `${name}, ` : ''}no quiero ser pesado${emoji('🙂')} Si en algún momento quieres retomar${goal ? ` lo de ${lowerFirst(trimGoal(goal))}` : ' la conversación'}, aquí estaré. ¡Mucho ánimo!`,
-      ];
-      return { text: steps[Math.min(input.followUp.step, steps.length) - 1], meta: { agent: this.name } };
+      const { step, totalSteps } = input.followUp;
+      let fu: string;
+      if (totalSteps >= 2 && step >= totalSteps) {
+        // La despedida, solo en el último seguimiento.
+        fu = `${name ? `${name}, ` : ''}no quiero ser pesado${emoji('🙂')} Si en algún momento quieres retomar${goalRef ? ` lo de ${goalRef}` : ' la conversación'}, aquí estaré. ¡Mucho ánimo!`;
+      } else if (step <= 1) {
+        fu = leadHasWritten
+          ? `${hello}me quedé pensando en lo que me contaste${goalRef ? ` de ${goalRef}` : ''}. ${lastQuestion ?? '¿Seguimos con ello?'}`
+          : goalRef
+            ? `${hello}te escribo de nuevo por lo de ${goalRef}, que nos indicaste al dejar tus datos. ${lastQuestion ?? '¿Sigues con ganas de ponerte con ello?'}`
+            : `${hello}te escribo de nuevo por si se te pasó mi mensaje. ${lastQuestion ?? '¿Qué te gustaría conseguir?'}`;
+      } else {
+        fu = fresh([
+          `${name ? `${name}, ` : ''}${event ? `teniendo en cuenta ${event}, ` : ''}sigo por aquí por si quieres retomarlo${goalRef ? ` y ver cómo plantear lo de ${goalRef}` : ''}. ${callDeclined ? '¿Te apetece que lo sigamos viendo por aquí?' : '¿Te viene bien que lo hablemos esta semana?'}`,
+          `${hello}paso por aquí por si te ha surgido alguna duda${goalRef ? ` sobre lo de ${goalRef}` : ''}. ¿Te echo una mano con algo?`,
+          `${hello}¿cómo lo llevas${goalRef ? ` con lo de ${goalRef}` : ''}? Si te apetece, lo retomamos cuando quieras.`,
+        ]);
+      }
+      return { text: fu.replace(/\s+/g, ' ').trim(), meta: { agent: this.name } };
     }
 
     const q = directive.question ? cap(directive.question) : '';
@@ -283,16 +295,32 @@ export class RuleBasedSetterAgent implements SetterAgent {
       case 'ask_qualification':
         text = `${ack} ${q}`;
         break;
-      case 'handle_objection':
-        text = directive.objection?.exampleResponse || 'Te entiendo perfectamente. ¿Qué es lo que más te frena ahora mismo?';
+      case 'handle_objection': {
+        // El ejemplo del entrenador, salvo que ya se usara (o que tenga más de una pregunta).
+        const example = directive.objection?.exampleResponse?.trim();
+        text =
+          example && questionCount(example) <= 1 && !said.has(normalize(example))
+            ? example
+            : fresh([
+                'Te entiendo perfectamente. ¿Qué es lo que más te frena ahora mismo?',
+                'Tiene todo el sentido que te lo plantees. ¿Qué necesitarías para verlo más claro?',
+                'Es normal tener dudas con esto. ¿Qué te gustaría saber antes de decidir nada?',
+              ]);
         break;
+      }
       case 'price_contextualize':
         text = `Claro. Antes de decirte qué opción tendría sentido para ti, quiero entender un poco tu situación para no recomendarte algo que no encaje. ${q || '¿Qué te gustaría conseguir exactamente?'}`;
         break;
       case 'share_price': {
         const svc = biz.services[0];
         const booked = Boolean(leadCtx.upcomingAppointment);
-        if (!svc || svc.priceCents <= 0) {
+        if (directive.withoutCall) {
+          // No encaja: se le da el precio con honestidad, sin proponer la llamada.
+          const price = svc && svc.priceCents > 0 ? `${formatMoney(svc.priceCents, svc.currency)} ${BILLING_PERIOD_LABELS[svc.billingPeriod] ?? ''}`.trim() : null;
+          text = price
+            ? `Claro, te lo digo: ${svc!.name} cuesta ${price}. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero que tengas la información.`
+            : `El precio lo concreta ${trainer} según el caso de cada persona. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero ser sincero contigo.`;
+        } else if (!svc || svc.priceCents <= 0) {
           text = booked
             ? `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Lo veréis en detalle en la ${s.callLabel}.`
             : callDeclined
@@ -303,15 +331,19 @@ export class RuleBasedSetterAgent implements SetterAgent {
           const includes = items.length ? ` Incluye ${items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}` : items[0]}.` : '';
           const price = `${formatMoney(svc.priceCents, svc.currency)} ${BILLING_PERIOD_LABELS[svc.billingPeriod] ?? ''}`.trim();
           if (booked) text = `Claro. ${svc.name} cuesta ${price}.${includes} En la ${s.callLabel} lo veréis en detalle con ${trainer}.`;
-          else if (state.priceShared) text = `Como te comentaba, ${svc.name} son ${price}. ¿Qué duda te queda para ver si encaja contigo?`;
+          else if (state.priceShared)
+            text = fresh([
+              `Como te comentaba, ${svc.name} son ${price}. ¿Qué duda te queda para ver si encaja contigo?`,
+              `Te lo confirmo: ${svc.name} son ${price}. ¿Hay algo de lo que incluye que quieras que te aclare?`,
+            ]);
           else if (callDeclined) text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Qué te parece?`;
           else text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`;
         }
         break;
       }
       case 'propose_call': {
-        const event = leadCtx.memories.find((m) => m.kind === 'event')?.content;
-        const lead_in = event ? `Teniendo en cuenta lo que me comentaste (${lowerFirst(event)}), ` : 'Por lo que me cuentas, ';
+        // La memoria guarda la frase del lead: se menciona el acontecimiento, no se cita literalmente.
+        const lead_in = event ? `Teniendo en cuenta ${event}, ` : 'Por lo que me cuentas, ';
         text = `${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para valorar tu caso. ¿Te encaja?`;
         break;
       }
@@ -345,7 +377,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
         // Etiquetas recalculadas ahora (la oferta pudo hacerse ayer: su “mañana” hoy es “hoy”).
         const labels = ids
           .map((id) => (state.offeredSlots ?? []).find((x) => x.id === id))
-          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+          .filter((x): x is NonNullable<typeof x> => Boolean(x) && slotStillBookable(x!.start, input.now, biz.minNoticeMinutes ?? 0))
           .map((x) => humanSlotLabel(x.start, biz.business.timezone, input.now));
         if (!labels.length) {
           text = '¿Qué día y franja te vendría mejor para la llamada?';
@@ -357,13 +389,15 @@ export class RuleBasedSetterAgent implements SetterAgent {
           `Perfecto. ¿Cuál de las opciones te encaja más: ${options}?`,
           `Genial. Dime cuál prefieres, ${options}, o si te viene mejor otro día.`,
         ];
-        text = pick(variants, seed);
+        text = fresh(variants);
         break;
       }
       case 'book_slot': {
         if (!input.toolbox || !directive.slotId) throw new Error('Sin acceso a la agenda.');
         const tool = leadCtx.upcomingAppointment ? 'reschedule_call' : 'book_call';
-        const r = await input.toolbox.run(tool, { slot_id: directive.slotId });
+        // Si la reserva ya se hizo en este turno (p. ej. al reintentar la redacción), no se repite.
+        const done = input.toolbox.records.find((x) => x.ok && (x.name === 'book_call' || x.name === 'reschedule_call'));
+        const r = done ? { content: JSON.stringify(done.result), isError: false } : await input.toolbox.run(tool, { slot_id: directive.slotId });
         const data = JSON.parse(r.content) as { error?: string; label?: string; booking_url?: string; meeting_url?: string | null; mode?: string };
         if (r.isError) {
           const again = await input.toolbox.run('get_available_slots', { date: null, part_of_day: 'any' });
@@ -379,15 +413,28 @@ export class RuleBasedSetterAgent implements SetterAgent {
         break;
       }
       case 'post_booking': {
+        // Neutro: no da por hecho que el lead ha dicho que sí a nada.
         const appt = leadCtx.upcomingAppointment;
-        text = appt
-          ? `Perfecto${emoji('👍')} Lo tenemos para la llamada. Si te surge algo y necesitas moverla, dímelo sin problema.`
-          : 'Perfecto, cualquier cosa me dices.';
+        const when = appt ? humanSlotLabel(appt.startsAt, biz.business.timezone, input.now) : null;
+        text = when
+          ? fresh([
+              `Entendido. Si te surge algo y necesitas mover la ${s.callLabel} (${when}), dímelo sin problema.`,
+              `Aquí estoy para lo que necesites. La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
+              `Gracias por escribir. Cualquier duda antes de la ${s.callLabel} (${when}), me la preguntas por aquí.`,
+            ])
+          : fresh(['Vale, cualquier cosa me dices.', 'Entendido. Aquí me tienes para lo que necesites.']);
+        break;
+      }
+      case 'confirm_cancel': {
+        const appt = leadCtx.upcomingAppointment;
+        const when = appt ? ` de ${humanSlotLabel(appt.startsAt, biz.business.timezone, input.now)}` : '';
+        text = `Sin problema. ¿Quieres que cancele la ${s.callLabel}${when} o prefieres que la movamos a otro día?`;
         break;
       }
       case 'cancel_booking': {
         if (!input.toolbox) throw new Error('Sin acceso a la agenda.');
-        const r = await input.toolbox.run('cancel_call', { reason: 'El lead pidió cancelar la llamada por mensaje.' });
+        const done = input.toolbox.records.find((x) => x.ok && x.name === 'cancel_call');
+        const r = done ? { content: JSON.stringify(done.result), isError: false } : await input.toolbox.run('cancel_call', { reason: 'El lead pidió cancelar la llamada por mensaje.' });
         const data = JSON.parse(r.content) as { cancelled?: boolean; note?: string };
         if (data.cancelled) {
           text = `Hecho, he cancelado la ${s.callLabel}. Si más adelante quieres retomarlo, escríbeme por aquí sin problema.`;
@@ -400,20 +447,21 @@ export class RuleBasedSetterAgent implements SetterAgent {
         break;
       }
       case 'disqualify_kindly':
-        text = 'Gracias por contármelo con tanta sinceridad. Por lo que me cuentas, ahora mismo creo que esto no sería lo más adecuado para ti, y prefiero ser honesto contigo. Te deseo mucho ánimo.';
+        text = fresh([
+          'Gracias por contármelo con tanta sinceridad. Por lo que me cuentas, ahora mismo creo que esto no sería lo más adecuado para ti, y prefiero ser honesto contigo. Te deseo mucho ánimo.',
+          'Gracias a ti. Si en algún momento cambia tu situación, aquí estaré para ayudarte.',
+          'Entendido. Te deseo lo mejor, y si más adelante encaja, aquí me tienes.',
+        ]);
         break;
       case 'continue_without_call':
         if (directive.justDeclined) {
           text = q ? `Sin problema, lo vamos hablando por aquí. ${q}` : 'Sin problema, lo vamos hablando por aquí. Cualquier duda, me dices.';
         } else {
-          text = pick(
-            [
-              'Perfecto. Si te surge cualquier duda sobre cómo trabajamos, pregúntame por aquí.',
-              'Genial. Cualquier cosa que quieras saber, me la preguntas por aquí sin problema.',
-              'Vale. Aquí me tienes para lo que necesites.',
-            ],
-            seed,
-          );
+          text = fresh([
+            'Perfecto. Si te surge cualquier duda sobre cómo trabajamos, pregúntame por aquí.',
+            'Genial. Cualquier cosa que quieras saber, me la preguntas por aquí sin problema.',
+            'Vale. Aquí me tienes para lo que necesites.',
+          ]);
         }
         break;
       default:
@@ -428,6 +476,24 @@ export class RuleBasedSetterAgent implements SetterAgent {
     }
     return { text: text.replace(/\s+/g, ' ').trim(), meta: { agent: this.name } };
   }
+}
+
+const EVENT_PHRASES: [RegExp, string][] = [
+  [/\bboda\b|\bme caso\b|\bcasarme\b/, 'tu boda'],
+  [/comunion/, 'la comunión'],
+  [/bautizo/, 'el bautizo'],
+  [/graduacion/, 'tu graduación'],
+  [/crucero/, 'el crucero'],
+  [/vacaciones/, 'tus vacaciones'],
+  [/viaje/, 'tu viaje'],
+  [/despedida/, 'la despedida'],
+];
+
+/** “Me caso en junio, ¿sabes?” → “tu boda”: se menciona el acontecimiento sin citar al lead (ni sus preguntas). */
+export function eventPhrase(memory: string | null | undefined): string | null {
+  if (!memory) return null;
+  const n = normalize(memory);
+  return EVENT_PHRASES.find(([rx]) => rx.test(n))?.[1] ?? null;
 }
 
 function lowerFirst(s: string) {

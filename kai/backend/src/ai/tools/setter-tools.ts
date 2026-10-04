@@ -108,9 +108,10 @@ export class SetterToolbox {
     return SETTER_TOOL_DEFINITIONS;
   }
 
-  /** Horarios válidos para mencionar en el mensaje (ofrecidos + cita reservada). */
+  /** Horarios válidos para mencionar en el mensaje (ofrecidos que aún no han pasado + cita reservada). */
   allowedTimes(): Date[] {
-    const times = [...this.offeredAll, ...this.offeredThisTurn].map((s) => new Date(s.start));
+    const now = Date.now();
+    const times = [...this.offeredAll, ...this.offeredThisTurn].map((s) => new Date(s.start)).filter((d) => d.getTime() > now);
     if (this.booked) times.push(this.booked.startsAt);
     if (this.leadCtx.upcomingAppointment) times.push(this.leadCtx.upcomingAppointment.startsAt);
     return times;

@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { automations, businesses } from '../database/schema.js';
+import { appointments, automations, businesses } from '../database/schema.js';
 import type { AutomationConfig, AutomationType } from '../lib/domain.js';
 import { addHours, addMinutes, isWithinQuietHours, shiftOutOfQuietHours } from '../lib/time.js';
 import { cancelJobsByDedupePrefix, scheduleJob } from './jobs.js';
@@ -75,4 +75,19 @@ export async function scheduleAppointmentJobs(
 
 export async function cancelAppointmentJobs(appointmentId: string) {
   await cancelJobsByDedupePrefix(`appt:${appointmentId}:`);
+}
+
+/**
+ * Al reactivar una cuenta suspendida: vuelve a programar los recordatorios y el aviso post-llamada de las
+ * citas que siguen en pie (al suspender se cancelaron). No se reenvía la confirmación, y lo que ya se
+ * envió no se repite (cada trabajo lo comprueba antes de enviar).
+ */
+export async function resumeAppointmentJobs(businessId: string): Promise<number> {
+  const since = new Date(Date.now() - 24 * 3600_000);
+  const rows = await getDb()
+    .select({ id: appointments.id, startsAt: appointments.startsAt, endsAt: appointments.endsAt, leadId: appointments.leadId })
+    .from(appointments)
+    .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'scheduled'), gt(appointments.endsAt, since)));
+  for (const appt of rows) await scheduleAppointmentJobs(businessId, appt, { sendConfirmation: false });
+  return rows.length;
 }

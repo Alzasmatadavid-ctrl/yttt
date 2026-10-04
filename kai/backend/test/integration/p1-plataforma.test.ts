@@ -20,7 +20,7 @@ import {
   webhookEvents,
 } from '../../src/database/schema.js';
 import { buildApp } from '../../src/app.js';
-import { env, PRIVATE_PROXIES } from '../../src/config/env.js';
+import { env, PRIVATE_PROXIES, startupWarnings } from '../../src/config/env.js';
 import { ensureAdminAccount } from '../../src/database/bootstrap.js';
 import { consoleEmail, sendEmail } from '../../src/integrations/email/email.service.js';
 import { settleBackgroundTasks } from '../../src/lib/background.js';
@@ -133,6 +133,14 @@ describe('cuenta de administración (ADMIN_EMAIL)', () => {
     const admin = new ApiClient(app);
     expect((await admin.post('/api/auth/login', { email: adminEmail, password: 'ClaveAdmin2026' })).statusCode).toBe(200);
     expect(json(await admin.get('/api/auth/me')).user.platformRole).toBe('admin');
+  });
+
+  it('con una ADMIN_PASSWORD débil no se crea la cuenta y se avisa', async () => {
+    env.ADMIN_EMAIL = uniqueEmail('debil');
+    env.ADMIN_PASSWORD = 'admin123';
+    expect(await ensureAdminAccount()).toBe('weak_password');
+    expect(await getDb().select().from(users).where(eq(users.email, env.ADMIN_EMAIL!.toLowerCase()))).toHaveLength(0);
+    expect(startupWarnings().some((w) => w.includes('ADMIN_PASSWORD'))).toBe(true);
   });
 
   it('sin ADMIN_PASSWORD no se crea nada', async () => {

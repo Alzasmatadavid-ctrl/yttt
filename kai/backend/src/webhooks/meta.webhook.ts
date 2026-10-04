@@ -10,6 +10,7 @@
 import { and, eq, gte, or, sql } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { businesses, conversations, messages, webhookEvents } from '../database/schema.js';
+import { env } from '../config/env.js';
 import { errorMessage } from '../lib/errors.js';
 import { logError } from '../audit/audit.service.js';
 import { connectionCredentials, findConnectionByExternalId, getActiveConnection, touchConnection, type ChannelConnection } from '../integrations/connections.service.js';
@@ -46,7 +47,7 @@ interface IgMessaging {
   sender: { id: string };
   recipient: { id: string };
   timestamp: number;
-  message?: { mid: string; text?: string; is_echo?: boolean; attachments?: unknown[]; is_deleted?: boolean };
+  message?: { mid: string; text?: string; is_echo?: boolean; app_id?: string | number; attachments?: unknown[]; is_deleted?: boolean };
 }
 interface MetaPayload {
   object: string;
@@ -180,15 +181,30 @@ async function handleInstagram(accountId: string, events: IgMessaging[]): Promis
  * Mensaje enviado desde la propia cuenta (eco). Si no lo envió KAI, es el entrenador escribiendo
  * desde la app de Instagram: se registra y KAI se pausa en esa conversación para no pisarle.
  */
+const ECHO_WAIT_STEPS = 4;
+const ECHO_WAIT_MS = 500;
+
 async function handleInstagramEcho(connection: ChannelConnection, ev: IgMessaging) {
   const msg = ev.message!;
   const db = getDb();
-  const [ours] = await db
-    .select({ id: messages.id })
-    .from(messages)
-    .where(and(eq(messages.businessId, connection.businessId), eq(messages.externalId, msg.mid)))
-    .limit(1);
-  if (ours) return;
+  // Enviado desde la app de KAI (Meta indica qué app lo envió): no es el entrenador.
+  if (msg.app_id != null && env.META_APP_ID && String(msg.app_id) === env.META_APP_ID) return;
+  const isOurs = async () =>
+    (
+      await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.businessId, connection.businessId), eq(messages.externalId, msg.mid)))
+        .limit(1)
+    ).length > 0;
+  if (await isOurs()) return;
+  // El eco puede llegar antes de que KAI termine de guardar su propio envío: se espera un momento.
+  if (Date.now() - ev.timestamp < 60_000) {
+    for (let i = 0; i < ECHO_WAIT_STEPS; i++) {
+      await new Promise((r) => setTimeout(r, ECHO_WAIT_MS));
+      if (await isOurs()) return;
+    }
+  }
   const lead = await findExistingLead(connection.businessId, { instagramUserId: ev.recipient.id });
   if (!lead) return;
   const [conv] = await db

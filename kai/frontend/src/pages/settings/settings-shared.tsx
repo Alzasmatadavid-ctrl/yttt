@@ -35,7 +35,8 @@ export interface TeamResponse {
 /** POST /api/team/invite */
 export interface InviteResponse {
   invitation: { id: string; email: string; role: BusinessRole; expiresAt: string };
-  link: string;
+  /** Solo llega si la invitación no se pudo enviar por email. */
+  link: string | null;
   emailed: boolean;
 }
 
