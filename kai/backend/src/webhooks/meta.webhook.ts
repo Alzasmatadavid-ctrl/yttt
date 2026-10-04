@@ -300,8 +300,8 @@ async function handleLeadgen(value: LeadgenValue): Promise<number> {
       severity: 'critical',
       title: 'No se ha podido recibir un lead de Meta Lead Ads',
       body:
-        `Meta avisó de un lead nuevo (ID ${value.leadgen_id}), pero no hemos podido descargar sus datos: ${friendlyMetaError(err, 'Meta Lead Ads')} ` +
-        'KAI lo reintentará automáticamente. Si no aparece en unas horas, revisa la conexión de Lead Ads en Integraciones o descárgalo desde Meta Business Suite.',
+        `Meta avisó de un lead nuevo (ID ${value.leadgen_id}), pero no hemos podido descargar sus datos. Motivo: ${friendlyMetaError(err, 'Meta Lead Ads')} ` +
+        'KAI volverá a intentarlo solo. Si el lead no aparece en unas horas, revisa la conexión de Lead Ads en Integraciones o descárgalo desde Meta Business Suite.',
       dedupeByTitle: true,
     });
     throw err;

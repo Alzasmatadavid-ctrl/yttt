@@ -7,3 +7,6 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# Archivos de trabajo temporales
+.scratch/

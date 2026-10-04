@@ -364,13 +364,14 @@ describe('varios mensajes a la vez de un contacto nuevo', () => {
     expect((await getUsage(T.businessId)).leads).toBe(1);
   });
 
-  it('el mismo mensaje entregado dos veces a la vez se guarda una sola vez', async () => {
+  it('el mismo mensaje entregado varias veces a la vez se guarda una sola vez (sin errores)', async () => {
     const T = await registerTrainer(app);
     const input = { businessId: T.businessId, channel: 'whatsapp' as const, externalMessageId: 'wamid.doble', text: 'hola', profile: { whatsappId: '34622000111' } };
-    await receiveInboundMessage(input);
-    const results = await Promise.all([receiveInboundMessage(input), receiveInboundMessage(input)]);
-    expect(results.every((r) => r.duplicate)).toBe(true);
+    const results = await Promise.all([receiveInboundMessage(input), receiveInboundMessage(input), receiveInboundMessage(input)]);
+    expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
     expect(await getDb().select().from(messages).where(eq(messages.externalId, 'wamid.doble'))).toHaveLength(1);
+    // Una entrega posterior también se reconoce como repetida.
+    expect((await receiveInboundMessage(input)).duplicate).toBe(true);
   });
 });
 

@@ -441,7 +441,8 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
 
   const offered = input.state.offeredSlots ?? [];
   const lastOutbound = [...input.history].reverse().find((m) => m.direction === 'outbound');
-  const declinesCall = RX.declineCall.test(n);
+  // Pedir cancelar la llamada (“ya no quiero la cita”) también es no querer la llamada, nunca pedirla.
+  const declinesCall = RX.declineCall.test(n) || RX.cancel.test(n);
   // Si el lead ya rechazó la llamada, un “vale” o un “me interesa” no la reabren: solo una petición explícita.
   const callDeclined = Boolean((input.state as SetterState).callDeclinedAt);
   const callWasProposed = !callDeclined && (Boolean(input.state.callProposedAt) || /llamada/.test(normalize(lastOutbound?.content ?? '')));

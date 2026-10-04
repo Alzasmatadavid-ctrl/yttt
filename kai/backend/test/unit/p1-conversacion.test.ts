@@ -272,6 +272,13 @@ describe('con la llamada agendada', () => {
   it('“¿Cuánto cuesta el programa?” → da el precio real', () => {
     expect(decide('¿Cuánto cuesta el programa?').kind).toBe('share_price');
   });
+  it('sin cita, “quiero cancelar la llamada” no se toma como querer la llamada', () => {
+    const state: SetterState = { callProposedAt: NOW.toISOString() };
+    const a = analyzeHeuristically(makeAnalysisInput('Quiero cancelar la llamada', { state }));
+    expect(a.flags.wantsCall).toBe(false);
+    const d = decideDirective({ biz: makeBusinessContext(), leadCtx: makeLeadContext(), state, analysis: a, kaiHasSpoken: true });
+    expect(d.kind).toBe('continue_without_call');
+  });
 });
 
 // ───────────── Motor de reglas ─────────────

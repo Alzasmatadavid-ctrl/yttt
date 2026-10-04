@@ -8,6 +8,7 @@ import path from 'node:path';
 import { env, isProduction, isTest, trustProxySetting, type TrustProxy } from './config/env.js';
 import { AppError } from './lib/errors.js';
 import { redactUrl } from './lib/http.js';
+import { logger } from './lib/logger.js';
 import { safeEqual } from './lib/crypto.js';
 import { logError } from './audit/audit.service.js';
 import { identify } from './auth/guards.js';
@@ -24,6 +25,20 @@ import { businessRoutes } from './business/business.routes.js';
 import { adminRoutes } from './admin/admin.routes.js';
 import { runDueJobs } from './automation/worker.js';
 import { aiModeInfo } from './ai/providers/index.js';
+
+/**
+ * Aviso (una vez por dirección) si en producción llegan peticiones reenviadas por un proxy en el que
+ * no se confía: todas compartirían la IP del proxy y sus límites de peticiones. Se arregla con TRUST_PROXY.
+ */
+const warnedProxies = new Set<string>();
+function warnUntrustedProxy(address: string | undefined) {
+  if (!address || warnedProxies.has(address) || warnedProxies.size >= 50) return;
+  warnedProxies.add(address);
+  logger.warn('proxy.untrusted', {
+    address,
+    hint: 'Llegan peticiones con X-Forwarded-For desde una dirección que no es un proxy de confianza. Si KAI está detrás de un proxy, añade su IP o rango a TRUST_PROXY.',
+  });
+}
 
 /** Rutas que reciben peticiones de terceros (no del navegador del entrenador): sin comprobación CSRF. */
 const CSRF_EXEMPT = [/^\/api\/webhooks\//, /^\/api\/public\//, /^\/api\/internal\//];
@@ -95,6 +110,7 @@ export async function buildApp(opts: { logger?: boolean; trustProxy?: TrustProxy
   app.decorateRequest('tenant', null);
 
   app.addHook('onRequest', async (request, reply) => {
+    if (isProduction() && request.headers['x-forwarded-for'] && request.ip === request.socket.remoteAddress) warnUntrustedProxy(request.socket.remoteAddress);
     if (!request.url.startsWith('/api/')) return;
     // Protección CSRF: el frontend envía siempre esta cabecera; un formulario de otra web no puede.
     const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
