@@ -62,15 +62,26 @@ function toDraft(ai: AiSettings): PersonalityDraft {
 
 type Errors = Partial<Record<keyof PersonalityDraft, string>>;
 
+/**
+ * Error de una palabra o expresión demasiado larga. Dice cuál es (puede haberla añadido KAI Copilot),
+ * para que el entrenador sepa qué etiqueta quitar en vez de buscarla a ciegas.
+ */
+function longWordError(word: string): string {
+  const shown = word.length > 60 ? `${word.slice(0, 57)}…` : word;
+  return `«${shown}» tiene más de ${LIMITS.word} caracteres. Quítala con la × y, si quieres, añádela más corta.`;
+}
+
 function validate(d: PersonalityDraft): Errors {
   const e: Errors = {};
   const name = d.assistantName.trim();
   if (!name) e.assistantName = 'Escribe un nombre para el asistente.';
   else if (name.length > LIMITS.name) e.assistantName = `Máximo ${LIMITS.name} caracteres.`;
+  const longUse = d.wordsToUse.find((w) => w.length > LIMITS.word);
+  const longAvoid = d.wordsToAvoid.find((w) => w.length > LIMITS.word);
   if (d.wordsToUse.length > LIMITS.wordsToUse) e.wordsToUse = `Máximo ${LIMITS.wordsToUse} palabras o expresiones.`;
-  else if (d.wordsToUse.some((w) => w.length > LIMITS.word)) e.wordsToUse = `Cada palabra o expresión puede tener como máximo ${LIMITS.word} caracteres.`;
+  else if (longUse) e.wordsToUse = longWordError(longUse);
   if (d.wordsToAvoid.length > LIMITS.wordsToAvoid) e.wordsToAvoid = `Máximo ${LIMITS.wordsToAvoid} palabras o expresiones.`;
-  else if (d.wordsToAvoid.some((w) => w.length > LIMITS.word)) e.wordsToAvoid = `Cada palabra o expresión puede tener como máximo ${LIMITS.word} caracteres.`;
+  else if (longAvoid) e.wordsToAvoid = longWordError(longAvoid);
   if (d.examplesWhatsapp.length > LIMITS.examples) e.examplesWhatsapp = `Máximo ${LIMITS.examples} caracteres.`;
   if (d.examplesInstagram.length > LIMITS.examples) e.examplesInstagram = `Máximo ${LIMITS.examples} caracteres.`;
   if (d.examplesOther.length > LIMITS.examples) e.examplesOther = `Máximo ${LIMITS.examples} caracteres.`;

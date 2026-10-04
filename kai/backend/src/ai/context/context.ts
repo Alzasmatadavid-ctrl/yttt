@@ -54,7 +54,18 @@ export interface ConversationContext {
   history: MessageRow[];
   /** Mensajes del lead todavía sin respuesta (pueden ser varios seguidos). */
   pendingInbound: MessageRow[];
+  /**
+   * El lead ya ha leído un mensaje nuestro escrito tal cual (de KAI o del equipo): KAI ya no está en su primer
+   * mensaje y no vuelve a saludar ni a presentarse. Las plantillas de WhatsApp NO cuentan: su texto lo redacta
+   * el entrenador en Meta y no incluye la presentación de KAI como asistente virtual (transparencia), así que
+   * tras un primer contacto por plantilla el primer texto libre de KAI sigue llevando la presentación.
+   */
   kaiHasSpoken: boolean;
+}
+
+/** ¿El lead ha visto ya un mensaje nuestro escrito tal cual? (las plantillas de WhatsApp no cuentan). */
+export function leadHasSeenOurText(history: Pick<MessageRow, 'direction' | 'contentType'>[]): boolean {
+  return history.some((m) => m.direction === 'outbound' && m.contentType !== 'template');
 }
 
 export async function loadBusinessContext(businessId: string): Promise<BusinessContext> {
@@ -124,5 +135,5 @@ export async function loadConversationContext(businessId: string, conversationId
     if (history[i].direction === 'inbound') pendingInbound.unshift(history[i]);
     else break;
   }
-  return { conversation, history, pendingInbound, kaiHasSpoken: history.some((m) => m.direction === 'outbound') };
+  return { conversation, history, pendingInbound, kaiHasSpoken: leadHasSeenOurText(history) };
 }

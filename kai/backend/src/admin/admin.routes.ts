@@ -129,7 +129,7 @@ export async function adminRoutes(app: FastifyInstance) {
       db
         .select({ id: conversations.id, channel: conversations.channel, preview: conversations.lastMessagePreview, lastMessageAt: conversations.lastMessageAt, leadName: leads.name, handoff: conversations.handoffActive })
         .from(conversations)
-        .innerJoin(leads, eq(leads.id, conversations.leadId))
+        .innerJoin(leads, and(eq(leads.id, conversations.leadId), eq(leads.businessId, id)))
         .where(eq(conversations.businessId, id))
         .orderBy(sql`${conversations.lastMessageAt} desc nulls last`)
         .limit(20),

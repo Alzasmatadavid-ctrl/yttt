@@ -56,6 +56,15 @@ interface DashboardData {
   insightsLocked?: boolean;
 }
 
+/** Hora actual (0-23) en la zona horaria del negocio; si la zona no es válida, la del navegador. */
+function businessHour(timeZone: string): number {
+  try {
+    return Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone }).format(new Date())) % 24;
+  } catch {
+    return new Date().getHours();
+  }
+}
+
 export default function Dashboard() {
   const { me } = useAuth();
   const navigate = useNavigate();
@@ -79,8 +88,9 @@ export default function Dashboard() {
     );
   }
   const firstName = me?.user?.name.split(' ')[0] ?? '';
-  const hour = new Date().getHours();
-  const greeting = hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
+  // La hora del saludo, en la zona horaria del negocio (la misma que la fecha de al lado).
+  const hour = businessHour(data.timezone);
+  const greeting = hour < 6 ? 'Buenas noches' : hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
   const { attention } = data;
   const handoffs = attention.alerts.filter((a) => a.alert.type === 'handoff');
   const otherAlerts = attention.alerts.filter((a) => a.alert.type !== 'handoff');
@@ -93,7 +103,9 @@ export default function Dashboard() {
     <div className="page">
       <PageHeader
         title={`${greeting}${firstName ? `, ${firstName}` : ''}`}
-        description={`${dayLabel(new Date(), data.timezone)} · ${attentionCount ? `${attentionCount} cosa(s) necesitan tu atención` : 'Todo bajo control: KAI se encarga del resto'}`}
+        description={`${dayLabel(new Date(), data.timezone)} · ${
+          attentionCount === 0 ? 'Todo bajo control: KAI se encarga del resto' : attentionCount === 1 ? '1 cosa necesita tu atención' : `${attentionCount} cosas necesitan tu atención`
+        }`}
         actions={
           <>
             <Button icon={FlaskConical} onClick={() => navigate('/app/simulador')}>
@@ -175,12 +187,13 @@ export default function Dashboard() {
                     navigate(
                       alert.type === 'call_outcome'
                         ? '/app/agenda'
-                        : alert.conversationId
-                          ? `/app/inbox/${alert.conversationId}`
-                          : alert.leadId
-                            ? `/app/leads/${alert.leadId}`
-                            : alert.type === 'no_availability'
-                              ? '/app/agenda'
+                        : // «No hay huecos libres»: lo que hay que revisar es el horario, aunque el aviso venga de una conversación.
+                          alert.type === 'no_availability'
+                          ? '/app/agenda?tab=disponibilidad'
+                          : alert.conversationId
+                            ? `/app/inbox/${alert.conversationId}`
+                            : alert.leadId
+                              ? `/app/leads/${alert.leadId}`
                               : '/app/integraciones',
                     )
                   }

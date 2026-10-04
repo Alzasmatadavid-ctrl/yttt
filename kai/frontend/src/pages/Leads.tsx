@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Plus, RotateCw, Search, Users } from 'lucide-react';
 import { LEAD_SOURCES, LEAD_STATUSES, LEAD_TEMPERATURES } from '@shared';
@@ -155,12 +155,15 @@ export default function Leads() {
               </thead>
               <tbody>
                 {leads.map((l) => (
+                  // Toda la fila se puede pulsar con el ratón; con teclado o lector de pantalla, el nombre es un enlace a la ficha.
                   <tr key={l.id} className="clickable" onClick={() => navigate(`/app/leads/${l.id}`)}>
                     <td>
                       <div className="row">
                         <LeadAvatar name={l.name} url={l.avatarUrl} size={30} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600 }}>{l.name || 'Sin nombre'}</div>
+                          <Link to={`/app/leads/${l.id}`} className="cell-link" onClick={(e) => e.stopPropagation()}>
+                            {l.name || 'Sin nombre'}
+                          </Link>
                           <div className="subtle xs">{l.phone ?? l.email ?? (l.instagramUsername ? `@${l.instagramUsername}` : '')}</div>
                         </div>
                       </div>

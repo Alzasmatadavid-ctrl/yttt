@@ -12,7 +12,7 @@ import { DEFAULT_TONE } from '../lib/domain.js';
 import {
   APPOINTMENT_MESSAGE_FIELDS,
   confirmationText,
-  DEFAULT_MESSAGE_TEMPLATES,
+  defaultMessageTemplates,
   MESSAGE_TEMPLATE_MAX_LENGTH,
   MESSAGE_VARIABLES,
   messageTemplateIssues,
@@ -132,10 +132,14 @@ export async function calendarRoutes(app: FastifyInstance) {
 
   // ───────────── Mensajes de la llamada (confirmación, recordatorios y no-show) ─────────────
 
-  /** Textos por defecto, campo de configuración de cada uno y variables disponibles (para la pantalla de Seguimientos). */
+  /**
+   * Textos por defecto (de tú o de usted, según el trato elegido en el tono de KAI), campo de configuración
+   * de cada uno y variables disponibles (para la pantalla de Seguimientos).
+   */
   app.get('/agenda/message-templates', async (request) => {
-    await requireTenant(request, 'settings:read');
-    return { defaults: DEFAULT_MESSAGE_TEMPLATES, fields: APPOINTMENT_MESSAGE_FIELDS, variables: MESSAGE_VARIABLES, maxLength: MESSAGE_TEMPLATE_MAX_LENGTH };
+    const ctx = await requireTenant(request, 'settings:read');
+    const [settings] = await getDb().select({ tone: aiSettings.tone }).from(aiSettings).where(eq(aiSettings.businessId, ctx.businessId)).limit(1);
+    return { defaults: defaultMessageTemplates(settings?.tone), fields: APPOINTMENT_MESSAGE_FIELDS, variables: MESSAGE_VARIABLES, maxLength: MESSAGE_TEMPLATE_MAX_LENGTH };
   });
 
   /**

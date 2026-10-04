@@ -16,6 +16,7 @@ import {
   recomputeLeadScore,
 } from './leads.service.js';
 import {
+  autopilotEnabled,
   getConversation,
   getConversationDetail,
   getOrCreateConversation,
@@ -211,6 +212,8 @@ export async function crmRoutes(app: FastifyInstance) {
   app.post('/leads/:id/start-test-conversation', async (request) => {
     const ctx = await requireTenant(request, 'leads:write');
     const { id } = parse(uuidParam, request.params);
+    // Solo con leads del negocio activo (404 si no): nunca se enlaza el lead de otro negocio.
+    await getLead(ctx.businessId, id);
     const conv = await getOrCreateConversation(ctx.businessId, id, 'web');
     return { conversationId: conv.id };
   });
@@ -228,8 +231,13 @@ export async function crmRoutes(app: FastifyInstance) {
       }),
       request.query,
     );
-    const [items, counts] = await Promise.all([listInbox(ctx.businessId, { ...q, filter: q.filter as InboxFilter }), inboxCounts(ctx.businessId)]);
-    return { items, counts };
+    const [items, counts, autopilot] = await Promise.all([
+      listInbox(ctx.businessId, { ...q, filter: q.filter as InboxFilter }),
+      inboxCounts(ctx.businessId),
+      autopilotEnabled(ctx.businessId),
+    ]);
+    // `autopilotEnabled: false` = KAI no contesta a nadie: la interfaz no debe decir «KAI responderá en breve».
+    return { items, counts, autopilotEnabled: autopilot };
   });
 
   app.get('/conversations/:id', async (request) => {

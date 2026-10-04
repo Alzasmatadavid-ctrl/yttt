@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ArrowLeftRight,
   Ban,
   Bell,
   CalendarDays,
@@ -29,7 +30,7 @@ import { api, errorText } from '../lib/api';
 import { applyTheme, getTheme, type Theme } from '../lib/theme';
 import { timeAgo } from '../lib/format';
 import { Logo } from '../components/brand';
-import { Button, ConfirmDialog, EmptyState, Field, Input, Modal, useToast } from '../components/ui';
+import { Button, Callout, ConfirmDialog, EmptyState, Field, Input, Modal, useToast } from '../components/ui';
 import { ScoreBandsContext } from '../components/lead-bits';
 import CopilotPanel from '../components/CopilotPanel';
 import { useCan } from '../lib/business';
@@ -76,9 +77,10 @@ function AlertsMenu() {
   const go = (row: AlertRow) => {
     setOpen(false);
     if (row.alert.type === 'call_outcome' && row.alert.leadId) navigate(`/app/leads/${row.alert.leadId}`);
+    // «No hay huecos libres»: lo que hay que revisar es el horario, aunque el aviso venga de una conversación.
+    else if (row.alert.type === 'no_availability') navigate('/app/agenda?tab=disponibilidad');
     else if (row.alert.conversationId) navigate(`/app/inbox/${row.alert.conversationId}`);
     else if (row.alert.leadId) navigate(`/app/leads/${row.alert.leadId}`);
-    else if (row.alert.type === 'no_availability') navigate('/app/agenda');
     else if (row.alert.type === 'integration_error' || row.alert.type === 'delivery_blocked') navigate('/app/integraciones');
   };
   return (
@@ -125,9 +127,11 @@ function AlertsMenu() {
 }
 
 export default function AppLayout() {
-  const { me, activeBusiness, logout, switchBusiness } = useAuth();
+  const { me, activeBusiness, otherTabBusiness, logout, switchBusiness } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  // Aviso de «has cambiado de negocio en otra pestaña»: se puede ocultar (hasta el siguiente cambio).
+  const [hiddenTabNotice, setHiddenTabNotice] = useState<string | null>(null);
   const [bizOpen, setBizOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getTheme());
   const [confirmAutopilot, setConfirmAutopilot] = useState(false);
@@ -169,6 +173,25 @@ export default function AppLayout() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
+  // Cajón de Copilot: es un diálogo. Al abrirlo, el foco va al campo de la pregunta; se cierra con Escape (salvo que haya
+  // un modal abierto encima, que se cierra primero) y, al cerrarlo, el foco vuelve al botón «Copilot» que lo abrió.
+  const copilotRef = useRef<HTMLElement>(null);
+  const copilotWasOpen = useRef(false);
+  useEffect(() => {
+    if (copilotOpen) {
+      copilotRef.current?.querySelector<HTMLElement>('.copilot-input input')?.focus();
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && !document.querySelector('.overlay')) setCopilotOpen(false);
+      };
+      window.addEventListener('keydown', onKey);
+      copilotWasOpen.current = true;
+      return () => window.removeEventListener('keydown', onKey);
+    }
+    if (copilotWasOpen.current) document.querySelector<HTMLElement>('.topbar .copilot-btn')?.focus();
+    copilotWasOpen.current = false;
+  }, [copilotOpen]);
+  // Al ir a otra pantalla (p. ej. al pulsar un lead de una respuesta de Copilot), el cajón se cierra.
+  useEffect(() => setCopilotOpen(false), [location.pathname]);
 
   // Con la cuenta suspendida el servidor rechaza todas las peticiones del negocio: no se piden datos.
   const suspended = activeBusiness?.status === 'suspended';
@@ -346,11 +369,31 @@ export default function AppLayout() {
           <div className="grow" />
           {!suspended && <AlertsMenu />}
           {!suspended && (
-            <Button variant="primary" size="sm" icon={Sparkles} onClick={() => setCopilotOpen(true)}>
+            <Button variant="primary" size="sm" icon={Sparkles} className="copilot-btn" onClick={() => setCopilotOpen(true)} aria-haspopup="dialog" aria-expanded={copilotOpen}>
               Copilot
             </Button>
           )}
         </header>
+        {otherTabBusiness && activeBusiness && hiddenTabNotice !== otherTabBusiness.businessId && (
+          <div className="tab-business-notice" role="status">
+            <Callout tone="warning" icon={ArrowLeftRight}>
+              <div className="row-between wrap" style={{ gap: 10 }}>
+                <span>
+                  Has cambiado a <strong>«{otherTabBusiness.name}»</strong> en otra pestaña. Esta pestaña sigue trabajando con <strong>«{activeBusiness.name}»</strong>: lo que
+                  guardes aquí se guarda en «{activeBusiness.name}». Si recargas la página, se abrirá «{otherTabBusiness.name}».
+                </span>
+                <span className="row" style={{ gap: 6 }}>
+                  <Button size="sm" onClick={() => setHiddenTabNotice(otherTabBusiness.businessId)}>
+                    Seguir aquí
+                  </Button>
+                  <Button size="sm" variant="primary" onClick={() => switchBusiness(otherTabBusiness.businessId).catch((e: unknown) => toast(errorText(e), 'error'))}>
+                    Ir a «{otherTabBusiness.name}»
+                  </Button>
+                </span>
+              </div>
+            </Callout>
+          </div>
+        )}
         {suspended ? (
           // Con la cuenta suspendida el servidor rechaza todas las pantallas: mejor explicarlo que dejar spinners o errores sueltos.
           <div className="page">
@@ -375,11 +418,11 @@ export default function AppLayout() {
       {copilotOpen && !suspended && (
         <>
           <div className="sidebar-backdrop" style={{ zIndex: 54 }} onClick={() => setCopilotOpen(false)} />
-          <aside className="drawer" aria-label="KAI Copilot">
+          <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="copilot-drawer-title" ref={copilotRef}>
             <div className="row-between" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
               <div className="row">
-                <Sparkles size={18} style={{ color: 'var(--accent-text)' }} />
-                <strong>KAI Copilot</strong>
+                <Sparkles size={18} style={{ color: 'var(--accent-text)' }} aria-hidden />
+                <strong id="copilot-drawer-title">KAI Copilot</strong>
               </div>
               <Button variant="ghost" size="sm" iconOnly icon={X} onClick={() => setCopilotOpen(false)}>
                 Cerrar

@@ -5,7 +5,7 @@ import { ArrowLeft, Ban, Brain, CalendarPlus, ClipboardCheck, History, MessageCi
 import { leadSourceLabel, leadStatusLabel, type LeadSource, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, money, timeAgo } from '../lib/format';
-import { useBusinessTimezone, useCan } from '../lib/business';
+import { useBusinessCurrency, useBusinessTimezone, useCan } from '../lib/business';
 import { Button, Callout, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageLoading, Textarea, useToast, TagInput } from '../components/ui';
 import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
 import { BookCallModal, OutcomeModal, QualificationList, StatusSelect } from '../components/lead-actions';
@@ -152,10 +152,13 @@ function useLeadDraft(lead: Lead | undefined) {
     /**
      * Tras guardar: lo guardado (normalizado por el servidor) pasa a ser la nueva base. Si mientras se guardaba
      * se siguió escribiendo, se conserva lo escrito (sigue habiendo cambios pendientes).
+     * `key` no se toca: sigue siendo la de los últimos datos del servidor que se han visto. Así, cuando la caché pase a
+     * tener el lead guardado, se resincroniza como cualquier refresco (respetando lo pendiente), y mientras tenga aún
+     * el lead de antes no se vuelve a él.
      */
     markSaved: (saved: Lead, sent: LeadForm) => {
       const f = toForm(saved);
-      setState((s) => ({ id: saved.id, key: JSON.stringify(f), base: f, draft: sameForm(s.draft, sent) ? f : s.draft }));
+      setState((s) => ({ ...s, id: saved.id, base: f, draft: sameForm(s.draft, sent) ? f : s.draft }));
     },
   };
 }
@@ -169,10 +172,13 @@ export default function LeadDetail() {
   const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [optOutOpen, setOptOutOpen] = useState(false);
+  // Llamada que se quiere cancelar (se pide confirmación: no se puede deshacer).
+  const [cancelFor, setCancelFor] = useState<Appointment | null>(null);
   const [newMemory, setNewMemory] = useState('');
   const { data, isLoading, error } = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.get<Profile>(`/leads/${leadId}`), enabled: Boolean(leadId) });
   const { form, setForm, dirty, markSaved } = useLeadDraft(data?.lead);
   const tz = useBusinessTimezone();
+  const currency = useBusinessCurrency();
   const canDelete = useCan('leads:delete');
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['lead', leadId] });
@@ -180,7 +186,12 @@ export default function LeadDetail() {
     mutationFn: (f: LeadForm) => api.patch<{ lead: Lead }>(`/leads/${leadId}`, { ...f, phone: f.phone || null, email: f.email || null, instagramUsername: f.instagramUsername || null }),
     onSuccess: (r, sent) => {
       toast('Datos guardados');
-      if (r?.lead) markSaved(r.lead, sent);
+      if (r?.lead) {
+        // La caché pasa a tener ya el lead guardado. Si no, hasta que llegara la consulta nueva el formulario
+        // se resincronizaría con los datos de antes de guardar (y un segundo «Guardar» los volvería a escribir).
+        qc.setQueryData<Profile>(['lead', leadId], (old) => (old ? { ...old, lead: r.lead } : old));
+        markSaved(r.lead, sent);
+      }
       invalidate();
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -204,10 +215,16 @@ export default function LeadDetail() {
     onError: (e) => toast(errorText(e), 'error'),
   });
   const cancelAppt = useMutation({
-    mutationFn: (id: string) => api.post(`/agenda/appointments/${id}/cancel`, { reason: 'Cancelada por el equipo' }),
-    onSuccess: () => {
-      toast('Llamada cancelada');
-      invalidate();
+    mutationFn: (v: { id: string; thenWrite: boolean }) => api.post(`/agenda/appointments/${v.id}/cancel`, { reason: 'Cancelada por el equipo' }),
+    onSuccess: (_r, v) => {
+      setCancelFor(null);
+      // Cambia la ficha, la agenda, el panel de hoy y el pipeline (el lead vuelve a una etapa anterior).
+      for (const key of ['lead', 'leads', 'appointments', 'dashboard', 'slots', 'conversation']) void qc.invalidateQueries({ queryKey: [key] });
+      const conv = data?.conversations.find((c) => c.channel !== 'web');
+      if (v.thenWrite && conv) {
+        toast('Llamada cancelada. Escríbele para avisarle.');
+        navigate(`/app/inbox/${conv.id}`);
+      } else toast('Llamada cancelada. KAI no avisa al lead: si quieres, escríbele desde la conversación.');
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
@@ -216,6 +233,8 @@ export default function LeadDetail() {
   if (error || !data) return <div className="page"><EmptyState icon={UserRound} title="Lead no encontrado" description={errorText(error)} action={<Button onClick={() => navigate('/app/leads')}>Volver a leads</Button>} /></div>;
   const { lead } = data;
   const conversation = data.conversations.find((c) => c.channel !== 'web') ?? data.conversations[0];
+  // ¿Se le puede escribir desde la bandeja? (no en pruebas del simulador ni si pidió la baja)
+  const canWriteToLead = Boolean(data.conversations.some((c) => c.channel !== 'web') && !lead.optedOut);
   const upcoming = data.appointments.find((a) => a.status === 'scheduled' && new Date(a.endsAt) > new Date());
   const totalWeight = data.scoreBreakdown.reduce((s, b) => s + b.weight, 0) || 1;
   const set = (k: 'name' | 'phone' | 'email' | 'instagramUsername' | 'notes') => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -387,7 +406,7 @@ export default function LeadDetail() {
               {lead.dealValueCents !== null && (
                 <>
                   <dt>Importe venta</dt>
-                  <dd>{money(lead.dealValueCents)}</dd>
+                  <dd>{money(lead.dealValueCents, currency)}</dd>
                 </>
               )}
               {lead.lostReason && (
@@ -425,10 +444,14 @@ export default function LeadDetail() {
                       </span>
                       {a.status === 'scheduled' && (
                         <div className="row" style={{ gap: 4 }}>
-                          <Button size="sm" onClick={() => setOutcomeFor(a.id)}>
-                            Resultado
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => cancelAppt.mutate(a.id)}>
+                          {/* El resultado solo se registra cuando la llamada ya ha empezado: marcar «no se presentó» en una
+                              llamada futura haría que KAI le escribiera al lead como si hubiera faltado. */}
+                          {new Date(a.startsAt) <= new Date() && (
+                            <Button size="sm" onClick={() => setOutcomeFor(a.id)}>
+                              Resultado
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => setCancelFor(a)}>
                             Cancelar
                           </Button>
                         </div>
@@ -481,6 +504,54 @@ export default function LeadDetail() {
       <OptOutDialog lead={lead} open={optOutOpen} onClose={() => setOptOutOpen(false)} />
       <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversation?.id} />
       <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
+      <Modal
+        open={cancelFor !== null}
+        onClose={() => !cancelAppt.isPending && setCancelFor(null)}
+        title="¿Cancelar la llamada?"
+        footer={
+          <>
+            <Button onClick={() => setCancelFor(null)} disabled={cancelAppt.isPending}>
+              Mantener la llamada
+            </Button>
+            {canWriteToLead && (
+              <Button
+                icon={MessagesSquare}
+                loading={cancelAppt.isPending && cancelAppt.variables?.thenWrite === true}
+                disabled={cancelAppt.isPending}
+                onClick={() => cancelFor && cancelAppt.mutate({ id: cancelFor.id, thenWrite: true })}
+              >
+                Cancelar y escribirle
+              </Button>
+            )}
+            <Button
+              variant="danger"
+              loading={cancelAppt.isPending && cancelAppt.variables?.thenWrite === false}
+              disabled={cancelAppt.isPending}
+              onClick={() => cancelFor && cancelAppt.mutate({ id: cancelFor.id, thenWrite: false })}
+            >
+              Cancelar llamada
+            </Button>
+          </>
+        }
+      >
+        {cancelFor && (
+          <div className="col gap-12">
+            <p className="muted" style={{ margin: 0 }}>
+              Vas a cancelar la llamada con <strong>{lead.name || 'este lead'}</strong> del <strong>{dateTime(cancelFor.startsAt, tz)}</strong>. Se quitará de tu
+              agenda, se cancelarán la confirmación y los recordatorios y el lead volverá a una etapa anterior del pipeline. No se puede deshacer.
+            </p>
+            {cancelFor.calendarProvider === 'google' && (
+              <p className="muted small" style={{ margin: 0 }}>
+                También se borrará de tu Google Calendar y, si el lead estaba invitado al evento, Google le enviará un email de cancelación.
+              </p>
+            )}
+            <Callout tone="warning">
+              KAI no le escribe para avisarle.{' '}
+              {canWriteToLead ? 'Si quieres que lo sepa, pulsa «Cancelar y escribirle» y cuéntaselo tú desde la conversación.' : 'Si quieres que lo sepa, avísale por otra vía.'}
+            </Callout>
+          </div>
+        )}
+      </Modal>
       <ConfirmDialog
         open={confirmDelete}
         title="¿Eliminar este lead?"

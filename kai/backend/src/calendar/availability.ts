@@ -43,6 +43,19 @@ function parseHm(hm: string): { hour: number; minute: number } | null {
 
 const overlaps = (a: Interval, b: Interval) => a.start < b.end && b.start < a.end;
 
+/**
+ * Rango de búsqueda de huecos recortado a lo que se puede reservar: desde ahora hasta `maxDaysAhead` días.
+ * Sin rango, es exactamente ese intervalo. Si el rango pedido queda fuera, `from >= to` (no hay huecos).
+ * Así ninguna consulta (tampoco una petición a la API con un rango de años) recorre más días de la cuenta.
+ */
+export function clampSlotRange(range: { from: Date; to: Date } | undefined, maxDaysAhead: number, now: Date = new Date()): { from: Date; to: Date } {
+  const earliest = now.getTime();
+  const latest = earliest + maxDaysAhead * 24 * 3600_000;
+  const from = Math.max(range?.from.getTime() ?? earliest, earliest);
+  const to = Math.min(range?.to.getTime() ?? latest, latest);
+  return { from: new Date(from), to: new Date(to) };
+}
+
 export function computeFreeSlots(
   cfg: AvailabilityConfig,
   busy: Interval[],

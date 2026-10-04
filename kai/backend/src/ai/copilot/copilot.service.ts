@@ -9,6 +9,7 @@ import { DateTime } from 'luxon';
 import { getDb } from '../../database/client.js';
 import { appointments, businesses, conversations, copilotMessages, leads } from '../../database/schema.js';
 import {
+  CLOSED_STATUSES,
   LEAD_SOURCES,
   LEAD_STATUS_KEYS,
   LEAD_TEMPERATURES,
@@ -55,7 +56,8 @@ const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type:
 export const COPILOT_TOOLS: ToolDefinition[] = [
   {
     name: 'search_leads',
-    description: 'Busca y ordena leads del negocio con filtros. Úsala para “más calientes”, “sin respuesta”, “de Instagram”, etc.',
+    description:
+      'Busca y ordena leads del negocio con filtros. Úsala para “más calientes”, “sin respuesta”, “de Instagram”, etc. Al filtrar por temperatura o por horas sin respuesta, si no indicas statuses se excluyen los clientes y los perdidos (pásalos en statuses si los quieres).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -143,6 +145,9 @@ export const COPILOT_TOOLS: ToolDefinition[] = [
   },
 ];
 
+/** Etapas de leads todavía “abiertos” (ni clientes ni perdidos). */
+const OPEN_LEAD_STATUSES: LeadStatus[] = LEAD_STATUS_KEYS.filter((k) => !CLOSED_STATUSES.includes(k));
+
 function leadCard(l: typeof leads.$inferSelect, conversationId?: string | null) {
   return {
     id: l.id,
@@ -181,11 +186,17 @@ class CopilotTools {
     const b = this.ctx.businessId;
     switch (name) {
       case 'search_leads': {
+        const temperatures = (input.temperatures as LeadTemperature[] | null) ?? undefined;
+        const noReplyHours = (input.no_reply_hours as number | null) ?? undefined;
+        let statuses = (input.statuses as LeadStatus[] | null) ?? undefined;
+        // “Más calientes” o “sin responder” son leads por los que hay que hacer algo: los clientes ya ganados y
+        // los perdidos no entran salvo que se pidan expresamente (con `statuses`).
+        if (!statuses?.length && (temperatures?.length || noReplyHours !== undefined)) statuses = OPEN_LEAD_STATUSES;
         const f: LeadFilters = {
-          temperature: (input.temperatures as LeadTemperature[] | null) ?? undefined,
-          status: (input.statuses as LeadStatus[] | null) ?? undefined,
+          temperature: temperatures,
+          status: statuses,
           source: (input.sources as LeadSource[] | null) ?? undefined,
-          noReplyHours: (input.no_reply_hours as number | null) ?? undefined,
+          noReplyHours,
           createdFrom: input.created_within_days ? new Date(Date.now() - Number(input.created_within_days) * 86_400_000) : undefined,
           search: (input.text as string | null) ?? undefined,
           sort: (input.sort as LeadFilters['sort']) ?? 'score',
@@ -216,7 +227,15 @@ class CopilotTools {
           .select({ a: appointments, name: leads.name })
           .from(appointments)
           .innerJoin(leads, eq(leads.id, appointments.leadId))
-          .where(and(eq(appointments.businessId, b), sql`${appointments.startsAt} >= ${from.toJSDate()} and ${appointments.startsAt} <= ${to.toJSDate()}`, sql`${appointments.status} in ('scheduled','completed','no_show')`))
+          .where(
+            and(
+              eq(appointments.businessId, b),
+              // Las citas del simulador no son llamadas reales (igual que en el panel).
+              eq(leads.isTest, false),
+              sql`${appointments.startsAt} >= ${from.toJSDate()} and ${appointments.startsAt} <= ${to.toJSDate()}`,
+              sql`${appointments.status} in ('scheduled','completed','no_show')`,
+            ),
+          )
           .orderBy(asc(appointments.startsAt));
         this.card.appointments = rows.map((r) => ({ id: r.a.id, leadId: r.a.leadId, leadName: r.name || 'Sin nombre', startsAt: r.a.startsAt.toISOString(), status: r.a.status }));
         return {
@@ -328,10 +347,47 @@ async function answerWithLLM(ctx: TenantContext, question: string, history: Chat
 
 // ───────────── Copilot por reglas (modo simulación) ─────────────
 
-async function findLeadByName(businessId: string, text: string) {
+type LeadRow = Awaited<ReturnType<typeof listLeads>>[number];
+
+/** Palabras de un texto en minúsculas, sin tildes ni signos (para comparar nombres por palabra completa). */
+function nameWords(text: string): string[] {
+  return normalize(text)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/**
+ * Leads mencionados por su nombre en la petición del entrenador.
+ * - Compara por palabras completas: “Eva” no está en “lleva”, ni “Ana” en “Mariana”.
+ * - Se queda con la coincidencia más larga: con “para Carlos Ruiz”, Carlos Ruiz gana a otro Carlos.
+ * Devuelve todos los que encajan igual de bien: si hay más de uno, hay que pedir que lo aclare
+ * (mejor preguntar que preparar el mensaje para otra persona).
+ */
+export async function findLeadsByName(businessId: string, text: string): Promise<LeadRow[]> {
   const all = await listLeads(businessId, { sort: 'recent', limit: 200 });
-  const n = normalize(text);
-  return all.find((l) => l.name && n.includes(normalize(l.name.split(' ')[0])) && normalize(l.name.split(' ')[0]).length > 2) ?? null;
+  const said = nameWords(text);
+  const mentions = (seq: string[]) => said.some((_, i) => seq.every((w, j) => said[i + j] === w));
+  let best = 0;
+  let matches: LeadRow[] = [];
+  for (const lead of all) {
+    const parts = nameWords(lead.name ?? '');
+    if (!parts.length || parts[0].length < 3) continue;
+    // Nº de palabras del nombre (empezando por el nombre de pila) que aparecen seguidas en la petición.
+    let score = 0;
+    for (let n = parts.length; n >= 1; n--) {
+      if (mentions(parts.slice(0, n))) {
+        score = n;
+        break;
+      }
+    }
+    if (score === 0 || score < best) continue;
+    if (score > best) {
+      best = score;
+      matches = [];
+    }
+    matches.push(lead);
+  }
+  return matches;
 }
 
 async function answerWithRules(ctx: TenantContext, question: string, timezone: string): Promise<CopilotAnswer> {
@@ -416,8 +472,18 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
     return { text: `Te he preparado el cambio de tono (${changes.join(', ')}). Confírmalo para aplicarlo.`, data: tools.card };
   }
   if (/(escribe|redacta|prepara|haz).*(seguimiento|mensaje)/.test(n)) {
-    const lead = await findLeadByName(ctx.businessId, question);
-    if (!lead) return { text: 'Dime el nombre del lead para el que quieres el seguimiento (o ábrelo desde la bandeja y pídemelo ahí).', data: {} };
+    const found = await findLeadsByName(ctx.businessId, question);
+    if (found.length === 0) return { text: 'Dime el nombre del lead para el que quieres el seguimiento (o ábrelo desde la bandeja y pídemelo ahí).', data: {} };
+    if (found.length > 1) {
+      // Varios leads con ese nombre: se muestran para que el entrenador elija, sin preparar nada todavía.
+      const shown = found.slice(0, 5);
+      const convs = await conversationIdsFor(ctx.businessId, shown.map((l) => l.id));
+      return {
+        text: `Tienes varios leads que encajan con ese nombre (${shown.map((l) => l.name).join(', ')}). Dime el nombre completo de a quién quieres escribir, o abre su conversación y pídemelo desde ahí.`,
+        data: { leads: shown.map((l) => leadCard(l, convs.get(l.id))) },
+      };
+    }
+    const lead = found[0];
     const r = (await tools.run('draft_follow_up', { lead_id: lead.id })) as { draft?: string; error?: string };
     if (!r.draft) return { text: r.error ?? 'No he podido redactar el seguimiento.', data: tools.card };
     const proposed = (await tools.run('propose_action', { type: 'send_message', lead_id: lead.id, text: r.draft, status: null, tone: null, automation: null, enabled: null, summary: `Enviar seguimiento a ${lead.name}` })) as { error?: string };

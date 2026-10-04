@@ -40,7 +40,10 @@ interface AnalyticsData {
   insightsLocked?: boolean;
 }
 
-type Period = 'today' | '7d' | '30d' | 'custom';
+type Period = 'today' | '7d' | '30d' | '90d' | 'custom';
+
+/** Periodos incluidos solo en los planes con analítica avanzada (el servidor aplica la misma regla). */
+const ADVANCED_PERIODS: Period[] = ['90d', 'custom'];
 
 /** Máximo de días de un periodo personalizado (el mismo límite que aplica el servidor). */
 const MAX_CUSTOM_DAYS = 366;
@@ -68,7 +71,7 @@ export default function Analytics() {
   const [to, setTo] = useState(isoDate(new Date()));
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsResponse>('/settings'), staleTime: 30_000 });
   const advanced = settings.data?.limits.advancedAnalytics ?? true;
-  const customLocked = period === 'custom' && !advanced;
+  const customLocked = ADVANCED_PERIODS.includes(period) && !advanced;
   // Las fechas se validan aquí con el mismo criterio que el servidor: así no se pide un periodo que va a fallar.
   const rangeError = period === 'custom' && !customLocked ? customRangeError(from, to) : null;
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -99,6 +102,7 @@ export default function Analytics() {
               { value: 'today', label: 'Hoy' },
               { value: '7d', label: '7 días' },
               { value: '30d', label: '30 días' },
+              { value: '90d', label: '90 días' },
               { value: 'custom', label: 'Personalizado' },
             ]}
           />
@@ -121,7 +125,8 @@ export default function Analytics() {
     <>
       {customLocked && (
         <Callout tone="info" icon={Lock}>
-          Los periodos personalizados están incluidos en los planes con analítica avanzada. Mientras tanto, se muestran los datos del último periodo consultado.{' '}
+          {period === '90d' ? 'El periodo de 90 días está incluido' : 'Los periodos personalizados están incluidos'} en los planes con analítica avanzada.
+          {data ? ' Mientras tanto, se muestran los datos del último periodo consultado.' : ''}{' '}
           <Link to="/app/ajustes?tab=plan">Ver mi plan</Link>
         </Callout>
       )}

@@ -23,7 +23,7 @@ export async function createAlert(input: CreateAlertInput) {
   const db = getDb();
   if (input.leadId) {
     // Los leads del simulador no generan avisos (no ensucian el panel real).
-    const [lead] = await db.select({ isTest: leads.isTest }).from(leads).where(eq(leads.id, input.leadId)).limit(1);
+    const [lead] = await db.select({ isTest: leads.isTest }).from(leads).where(and(eq(leads.businessId, input.businessId), eq(leads.id, input.leadId))).limit(1);
     if (lead?.isTest) return null;
   }
   const conds = [eq(alerts.businessId, input.businessId), eq(alerts.type, input.type), eq(alerts.status, 'open')];
@@ -54,7 +54,7 @@ export async function listOpenAlerts(businessId: string, limit = 50) {
   return getDb()
     .select({ alert: alerts, leadName: leads.name })
     .from(alerts)
-    .leftJoin(leads, eq(leads.id, alerts.leadId))
+    .leftJoin(leads, and(eq(leads.id, alerts.leadId), eq(leads.businessId, businessId)))
     .where(and(eq(alerts.businessId, businessId), eq(alerts.status, 'open')))
     .orderBy(desc(alerts.createdAt))
     .limit(limit);

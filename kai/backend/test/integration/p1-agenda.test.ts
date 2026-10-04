@@ -299,7 +299,8 @@ describe('no-show', () => {
     const quietHours = { start: now.minus({ hours: 1 }).toFormat('HH:mm'), end: now.plus({ hours: 2 }).toFormat('HH:mm') };
     await setAutomation(T.businessId, 'no_show_recovery', { enabled: true, config: { delayMinutes: 15, quietHours } });
     const l = await newLead(T, 'Marco Ausente');
-    const appt = await bookAppointment({ businessId: T.businessId, leadId: l.leadId, start: futureLocal(9, 10), bookedBy: 'human', actor: userActor(T) });
+    // La llamada ya ha empezado (antes de su hora no se puede registrar el resultado).
+    const appt = await bookAppointment({ businessId: T.businessId, leadId: l.leadId, start: new Date(Date.now() - 2 * 3600_000), bookedBy: 'human', actor: userActor(T), confirmationAlreadySent: true });
     await setAppointmentOutcome(T.businessId, appt.id, { attended: false }, userActor(T));
     const [job] = await getDb().select().from(scheduledJobs).where(eq(scheduledJobs.dedupeKey, `appt:${appt.id}:noshow`));
     expect(job.status).toBe('pending');

@@ -24,7 +24,7 @@ interface SimDetail {
 /** Por qué KAI no respondió en el simulador, explicado para el entrenador (los códigos vienen del motor del setter). */
 const SKIP_REASONS: Record<string, string> = {
   autopilot_off: 'KAI está en pausa para todo el negocio: reactívalo desde «KAI en pausa», en el menú lateral.',
-  ai_disabled: 'En esta prueba la conversación la lleva una persona. Pulsa «Devolver a KAI» para que vuelva a responder.',
+  ai_disabled: 'En esta prueba la conversación la lleva una persona. Pulsa «Devolver a KAI» (arriba del chat) para que vuelva a responder.',
   handoff_active: 'KAI pasó esta conversación a una persona. Pulsa «Devolver a KAI» para que vuelva a responder.',
   taken_over: 'Alguien tomó el control de la conversación mientras KAI preparaba la respuesta.',
   already_client: 'Este lead ya es cliente: KAI no le escribe como setter.',
@@ -32,12 +32,39 @@ const SKIP_REASONS: Record<string, string> = {
   superseded: 'Llegó otro mensaje mientras KAI escribía: responderá a todos juntos.',
   business_suspended: 'La cuenta está desactivada: KAI no responde a ningún lead.',
   limit_reached: 'Se ha alcanzado el límite del plan este mes: KAI no responde hasta que amplíes el plan o empiece el mes que viene.',
-  opted_out: 'Este lead pidió no recibir más mensajes, así que KAI no le escribe.',
+  opted_out: 'Este lead de prueba pidió no recibir más mensajes, así que KAI ya no le escribe. Crea una prueba nueva para seguir probando.',
   disabled: 'KAI está en pausa en esta conversación.',
   conversation_started: 'La conversación ya había empezado, así que KAI no envía el primer mensaje.',
 };
 
 const skipReasonText = (reason: string) => SKIP_REASONS[reason] ?? 'KAI ha decidido no responder a este mensaje.';
+
+/** Señales que KAI detecta en el mensaje del lead, explicadas para el entrenador (las claves vienen del análisis). */
+const FLAG_LABELS: Record<string, string> = {
+  humanRequest: 'Pide hablar con una persona',
+  asksIfBot: 'Pregunta si es un bot',
+  medical: 'Tema de salud',
+  angry: 'Está molesto',
+  optOut: 'Pide que no le escriban más',
+  asksPrice: 'Pregunta el precio',
+  wantsCall: 'Quiere la llamada',
+  declinesCall: 'No quiere llamada',
+  complexNegotiation: 'Negociación complicada',
+  outOfScope: 'Pide algo que no ofreces',
+  technicalIssue: 'Problema técnico',
+  wantsReschedule: 'Quiere cambiar la llamada',
+  wantsCancel: 'Quiere cancelar la llamada',
+  asksQuestion: 'Hace una pregunta',
+};
+
+/** Lo que hizo KAI con sus herramientas (agenda, reservas, escalado), en lenguaje del entrenador. */
+const TOOL_LABELS: Record<string, string> = {
+  get_available_slots: 'Consultó tu agenda',
+  book_call: 'Reservó la llamada',
+  reschedule_call: 'Cambió la llamada de hora',
+  cancel_call: 'Canceló la llamada',
+  request_human: 'Pidió que intervenga una persona',
+};
 
 const DIRECTIVE_LABELS: Record<string, string> = {
   greet_and_ask: 'Saludar y empezar a conocerle',
@@ -139,7 +166,9 @@ export default function Simulator() {
       setText('');
       // Si el lead acaba de pedir la baja, KAI se despide (hay mensaje) y no hace falta avisar; si ya estaba de baja, sí.
       const justOptedOut = r.result.reason === 'opted_out' && Boolean(r.result.messageId);
-      if (r.result.status === 'skipped' && r.result.reason && !justOptedOut) toast(`KAI no respondió. ${skipReasonText(r.result.reason)}`, 'info');
+      // Con la baja, KAI queda además en pausa en la conversación: el motor responde «ai_disabled», pero el motivo real es la baja.
+      const reason = r.result.reason === 'ai_disabled' && detail.data?.lead.optedOut ? 'opted_out' : r.result.reason;
+      if (r.result.status === 'skipped' && reason && !justOptedOut) toast(`KAI no respondió. ${skipReasonText(reason)}`, 'info');
       void qc.invalidateQueries({ queryKey: ['sim', conversationId] });
       void qc.invalidateQueries({ queryKey: ['sim-list'] });
     },
@@ -173,6 +202,7 @@ export default function Simulator() {
   const toolCalls = (lastKai?.metadata.toolCalls as { name: string; ok: boolean; input: Record<string, unknown> }[] | undefined) ?? [];
   const ai = settings.data?.ai;
   const tz = settings.data?.business.timezone;
+  const objectionLabel = analysis?.objectionKey ? settings.data?.objections.find((o) => o.key === analysis.objectionKey)?.label ?? 'detectada' : null;
 
   return (
     <div className="page" style={{ maxWidth: 'none' }}>
@@ -198,7 +228,8 @@ export default function Simulator() {
           )}
         </div>
       )}
-      <div className="grid-3" style={{ gridTemplateColumns: '260px minmax(0,1fr) 320px', alignItems: 'start' }}>
+      {/* Tres columnas en escritorio; en pantallas pequeñas, el chat primero y los paneles debajo (layout.css → .sim-layout). */}
+      <div className="sim-layout">
         <Card title="Pruebas" icon={FlaskConical} className="card-tight">
           {list.data?.conversations.length === 0 && <p className="muted small">Crea una prueba para empezar.</p>}
           <div className="col gap-4">
@@ -221,7 +252,7 @@ export default function Simulator() {
           </div>
         </Card>
 
-        <Card flush className="col" title={undefined}>
+        <Card flush className="col sim-chat-card" title={undefined}>
           {!conversationId ? (
             <EmptyState icon={Bot} title="Prueba a KAI" description="Crea una prueba y escribe como lo haría un cliente potencial: “Hola, vi tu anuncio y quiero perder grasa”." action={<Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Nueva prueba</Button>} />
           ) : detail.isLoading ? (
@@ -241,12 +272,14 @@ export default function Simulator() {
               }
             />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 290px)', minHeight: 420 }}>
+            <div className="sim-chat">
               <div className="thread-header">
-                <strong>{d.lead.name}</strong>
+                <strong className="ellipsis">{d.lead.name}</strong>
                 <StatusBadge status={d.lead.status} />
                 <div className="grow" />
-                {d.conversation.handoffActive && (
+                {/* KAI no responde si la prueba está escalada o en manos de una persona: se le devuelve desde aquí.
+                    Con la baja no sirve (KAI no escribe a quien la pidió): se explica abajo. */}
+                {(d.conversation.handoffActive || !d.conversation.aiEnabled) && !d.lead.optedOut && (
                   <Button size="sm" icon={Play} loading={release.isPending} onClick={() => release.mutate()}>
                     Devolver a KAI
                   </Button>
@@ -260,15 +293,31 @@ export default function Simulator() {
                   </div>
                 </div>
               )}
+              {d.lead.optedOut && (
+                <div className="handoff-banner" style={{ background: 'var(--danger-soft)' }}>
+                  <AlertTriangle style={{ color: 'var(--danger)' }} />
+                  <div className="grow">
+                    <strong>Este lead de prueba pidió la baja.</strong> KAI ya no le escribe, igual que haría con un lead real. Para seguir probando, crea una prueba
+                    nueva.
+                  </div>
+                  <Button size="sm" icon={Plus} onClick={() => setCreating(true)}>
+                    Nueva prueba
+                  </Button>
+                </div>
+              )}
               <div className="thread-messages">
                 {d.messages.map((m) => (
                   <Fragment key={m.id}>
                     <div className={`msg-row ${m.direction === 'inbound' ? 'in' : 'out'} ${m.senderType === 'kai' ? 'kai' : ''}`}>
                       <div className="bubble">{m.content}</div>
                       <div className="msg-meta">
-                        {m.direction === 'inbound' ? 'Lead (tú)' : m.senderType === 'kai' ? 'KAI' : 'Equipo'} · {timeOnly(m.createdAt)}
+                        {m.direction === 'inbound' ? 'Lead (tú)' : m.senderType === 'kai' ? 'KAI' : 'Equipo'} · {timeOnly(m.createdAt, tz)}
                         {typeof m.metadata.directive === 'string' && <span>· {DIRECTIVE_LABELS[m.metadata.directive] ?? m.metadata.directive}</span>}
-                        {typeof m.metadata.attempts === 'number' && m.metadata.attempts > 1 && <span>· regenerado {m.metadata.attempts - 1} vez/veces por control de calidad</span>}
+                        {typeof m.metadata.attempts === 'number' && m.metadata.attempts > 1 && (
+                          <span>
+                            · rehecho {m.metadata.attempts - 1 === 1 ? '1 vez' : `${m.metadata.attempts - 1} veces`} por el control de calidad
+                          </span>
+                        )}
                         {typeof m.metadata.step === 'number' && <span>· seguimiento {m.metadata.step}</span>}
                       </div>
                     </div>
@@ -306,7 +355,7 @@ export default function Simulator() {
           )}
         </Card>
 
-        <div className="col gap-12">
+        <div className="col gap-12 sim-side">
           {d && (
             <>
               <Card title="Lead" className="card-tight">
@@ -334,10 +383,10 @@ export default function Simulator() {
                         .filter(([, v]) => v)
                         .map(([k]) => (
                           <span key={k} className="badge badge-info">
-                            {k}
+                            {FLAG_LABELS[k] ?? 'Otra señal'}
                           </span>
                         ))}
-                      {analysis.objectionKey && <span className="badge badge-warning">objeción: {analysis.objectionKey}</span>}
+                      {objectionLabel && <span className="badge badge-warning">Objeción: {objectionLabel}</span>}
                     </div>
                   </div>
                 ) : (
@@ -346,14 +395,16 @@ export default function Simulator() {
                 {toolCalls.length > 0 && (
                   <div className="mt-12">
                     <div className="section-title" style={{ marginBottom: 6 }}>
-                      Herramientas usadas
+                      Qué ha hecho KAI
                     </div>
-                    {toolCalls.map((t, i) => (
-                      <div key={i} className="row small" style={{ gap: 6 }}>
-                        <span className={`badge ${t.ok ? 'badge-success' : 'badge-danger'}`}>{t.ok ? 'ok' : 'error'}</span>
-                        <code className="code-inline">{t.name}</code>
-                      </div>
-                    ))}
+                    <div className="col gap-4">
+                      {toolCalls.map((t, i) => (
+                        <div key={i} className="row small" style={{ gap: 6 }}>
+                          <span className={`badge ${t.ok ? 'badge-success' : 'badge-danger'}`}>{t.ok ? 'Hecho' : 'Falló'}</span>
+                          <span>{TOOL_LABELS[t.name] ?? 'Otra acción'}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {d.memories.length > 0 && (

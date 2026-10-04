@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { appointments, channelConnections, conversations, leadMemories, leads, messages } from '../database/schema.js';
+import { aiSettings, appointments, channelConnections, conversations, leadMemories, leads, messages } from '../database/schema.js';
 import type { ChannelKey, ConversationState } from '../lib/domain.js';
 import { notFound } from '../lib/errors.js';
 import { truncate } from '../lib/text.js';
@@ -29,6 +29,14 @@ export async function getOrCreateConversation(
     }
     return existing;
   }
+  // El esquema solo exige que el lead exista (no que sea de este negocio): nunca se crea una conversación
+  // que apunte al lead de otro negocio, porque la Bandeja mostraría sus datos.
+  const [own] = await db
+    .select({ id: leads.id })
+    .from(leads)
+    .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)))
+    .limit(1);
+  if (!own) throw notFound('Lead no encontrado.');
   const [created] = await db
     .insert(conversations)
     .values({ businessId, leadId, channel, channelConnectionId: channelConnectionId ?? null })
@@ -137,7 +145,35 @@ export async function listMessages(businessId: string, conversationId: string, l
 
 export type InboxFilter = 'all' | 'new' | 'hot' | 'qualified' | 'pending' | 'booked' | 'no_reply' | 'clients' | 'handoff';
 
-function inboxFilterCondition(filter: InboxFilter): SQL | undefined {
+/**
+ * Join conversación ↔ lead SIEMPRE dentro del mismo negocio (defensa en profundidad: aunque una
+ * conversación apuntara por error al lead de otro negocio, sus datos nunca saldrían en estos listados).
+ */
+export const conversationLeadJoin = and(eq(leads.id, conversations.leadId), eq(leads.businessId, conversations.businessId))!;
+
+/** ¿Tiene el negocio el piloto automático encendido? (sin ajustes guardados, KAI está activo por defecto). */
+export async function autopilotEnabled(businessId: string): Promise<boolean> {
+  const [row] = await getDb().select({ on: aiSettings.autopilotEnabled }).from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
+  return row?.on ?? true;
+}
+
+/**
+ * «Necesita respuesta humana»: hay un escalado abierto, o el último mensaje del lead está sin contestar y
+ * KAI no lo va a contestar porque:
+ *  - el entrenador lleva la conversación (KAI en pausa en ella),
+ *  - el piloto automático del negocio está apagado, o
+ *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes).
+ * Requiere el join con `leads` (ver `conversationLeadJoin`).
+ */
+export function needsHumanReplyCondition(opts: { autopilotOn: boolean }): SQL {
+  const unanswered = sql`(${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt}))`;
+  const kaiWontAnswer = opts.autopilotOn
+    ? sql`(${conversations.aiEnabled} = false or (${leads.status} = 'client' and (${leads.wonAt} is null or ${leads.wonAt} < ${conversations.lastInboundAt})))`
+    : sql`true`;
+  return sql`(${conversations.handoffActive} = true or (${unanswered} and ${kaiWontAnswer}))`;
+}
+
+function inboxFilterCondition(filter: InboxFilter, ctx: { autopilotOn: boolean }): SQL | undefined {
   switch (filter) {
     case 'new':
       return inArray(leads.status, ['new', 'contacted']);
@@ -146,11 +182,8 @@ function inboxFilterCondition(filter: InboxFilter): SQL | undefined {
     case 'qualified':
       return inArray(leads.status, ['qualified', 'call_proposed']);
     case 'pending':
-      // Necesita respuesta humana: KAI escalada/pausada o el último mensaje es del lead y nadie ha contestado.
-      return or(
-        eq(conversations.handoffActive, true),
-        and(eq(conversations.aiEnabled, false), sql`${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt})`),
-      );
+      // Necesita respuesta humana: escalado, o mensaje del lead sin contestar que KAI no va a contestar.
+      return needsHumanReplyCondition(ctx);
     case 'handoff':
       return eq(conversations.handoffActive, true);
     case 'booked':
@@ -168,9 +201,10 @@ export async function listInbox(
   businessId: string,
   opts: { filter?: InboxFilter; search?: string; limit?: number; offset?: number; includeTest?: boolean } = {},
 ) {
-  const conds: SQL[] = [eq(conversations.businessId, businessId)];
+  const autopilotOn = await autopilotEnabled(businessId);
+  const conds: SQL[] = [eq(conversations.businessId, businessId), eq(leads.businessId, businessId)];
   if (!opts.includeTest) conds.push(eq(leads.isTest, false));
-  const fc = inboxFilterCondition(opts.filter ?? 'all');
+  const fc = inboxFilterCondition(opts.filter ?? 'all', { autopilotOn });
   if (fc) conds.push(fc);
   if (opts.search?.trim()) {
     const q = `%${opts.search.trim().replace(/[%_]/g, '')}%`;
@@ -197,9 +231,11 @@ export async function listInbox(
         optedOut: leads.optedOut,
         isTest: leads.isTest,
       },
+      /** El último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar). */
+      needsHumanReply: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })}, false)`,
     })
     .from(conversations)
-    .innerJoin(leads, eq(leads.id, conversations.leadId))
+    .innerJoin(leads, conversationLeadJoin)
     .where(and(...conds))
     .orderBy(sql`${conversations.handoffActive} desc`, sql`${conversations.lastMessageAt} desc nulls last`)
     .limit(Math.min(opts.limit ?? 50, 200))
@@ -210,15 +246,16 @@ export async function listInbox(
 export async function inboxCounts(businessId: string) {
   const filters: InboxFilter[] = ['all', 'new', 'hot', 'qualified', 'pending', 'booked', 'no_reply', 'clients'];
   const out: Record<string, number> = {};
+  const autopilotOn = await autopilotEnabled(businessId);
   await Promise.all(
     filters.map(async (f) => {
-      const conds: SQL[] = [eq(conversations.businessId, businessId), eq(leads.isTest, false)];
-      const fc = inboxFilterCondition(f);
+      const conds: SQL[] = [eq(conversations.businessId, businessId), eq(leads.businessId, businessId), eq(leads.isTest, false)];
+      const fc = inboxFilterCondition(f, { autopilotOn });
       if (fc) conds.push(fc);
       const [r] = await getDb()
         .select({ n: sql<number>`count(*)::int` })
         .from(conversations)
-        .innerJoin(leads, eq(leads.id, conversations.leadId))
+        .innerJoin(leads, conversationLeadJoin)
         .where(and(...conds));
       out[f] = Number(r?.n ?? 0);
     }),

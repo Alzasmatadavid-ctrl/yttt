@@ -14,7 +14,7 @@ import { badRequest } from '../lib/errors.js';
 import { perBusinessRateLimit, requireTenant } from '../auth/guards.js';
 import { env } from '../config/env.js';
 import { createLead, deleteLead, getLeadProfile } from './leads.service.js';
-import { getConversationDetail, getOrCreateConversation } from './conversations.service.js';
+import { conversationLeadJoin, getConversationDetail, getOrCreateConversation } from './conversations.service.js';
 import { runFirstContact, runSetterReply } from '../ai/setter/setter-engine.js';
 import { ingestExternalLead, receiveInboundForConversation } from '../webhooks/inbound.service.js';
 import { scheduleNoReplyFollowUp } from '../automation/followups.js';
@@ -29,8 +29,8 @@ export async function simulatorRoutes(app: FastifyInstance) {
     const rows = await getDb()
       .select({ conversation: conversations, lead: leads })
       .from(conversations)
-      .innerJoin(leads, eq(leads.id, conversations.leadId))
-      .where(and(eq(conversations.businessId, ctx.businessId), eq(conversations.channel, 'web'), eq(leads.isTest, true)))
+      .innerJoin(leads, conversationLeadJoin)
+      .where(and(eq(conversations.businessId, ctx.businessId), eq(leads.businessId, ctx.businessId), eq(conversations.channel, 'web'), eq(leads.isTest, true)))
       .orderBy(desc(conversations.updatedAt))
       .limit(30);
     return { conversations: rows.map((r) => ({ id: r.conversation.id, leadId: r.lead.id, leadName: r.lead.name, score: r.lead.score, status: r.lead.status, preview: r.conversation.lastMessagePreview, updatedAt: r.conversation.updatedAt })) };

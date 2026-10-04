@@ -25,7 +25,7 @@ export default function Pipeline() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({ queryKey: ['leads', 'pipeline'], queryFn: () => api.get<{ leads: Lead[] }>('/leads', { limit: 500, sort: 'score' }), refetchInterval: 20_000 });
   const settings = useBusinessSettings();
   const price = settings.data?.services.find((s) => s.isPrimary)?.priceCents ?? 0;
-  const currency = settings.data?.business.currency ?? 'EUR';
+  const currency = settings.data?.business.currency || 'EUR';
 
   const move = useMutation({
     mutationFn: (v: { leadId: string; status: LeadStatus; dealValueCents?: number | null }) => api.post(`/leads/${v.leadId}/status`, { status: v.status, dealValueCents: v.dealValueCents }),
@@ -92,7 +92,7 @@ export default function Pipeline() {
 
   const confirmClient = () => {
     if (!clientModal) return;
-    const amount = parseOptionalAmount(deal);
+    const amount = parseOptionalAmount(deal, { currency });
     if (amount.error) return setDealError(amount.error);
     move.mutate({ leadId: clientModal.leadId, status: 'client', dealValueCents: amount.cents });
     setClientModal(null);

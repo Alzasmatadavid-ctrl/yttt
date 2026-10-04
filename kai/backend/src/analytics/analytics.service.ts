@@ -21,6 +21,7 @@ import {
 } from '../database/schema.js';
 import { DEFAULT_SCORE_BANDS, type LeadStatus } from '../lib/domain.js';
 import { bandMin } from '../crm/scoring.js';
+import { autopilotEnabled, conversationLeadJoin, needsHumanReplyCondition } from '../crm/conversations.service.js';
 import { getInsights } from './insights.js';
 
 export type Period = 'today' | '7d' | '30d' | '90d' | 'custom';
@@ -59,7 +60,10 @@ async function primaryPriceCents(businessId: string): Promise<{ price: number; c
     .where(and(eq(services.businessId, businessId), eq(services.isActive, true)))
     .orderBy(sql`${services.isPrimary} desc`, asc(services.createdAt))
     .limit(1);
-  return { price: svc?.price ?? 0, currency: svc?.currency ?? 'EUR' };
+  if (svc) return { price: svc.price ?? 0, currency: svc.currency };
+  // Sin servicio: los importes (valor de las ventas, inversión en anuncios) están en la moneda del negocio.
+  const [biz] = await getDb().select({ currency: businesses.currency }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return { price: 0, currency: biz?.currency ?? 'EUR' };
 }
 
 export async function getFunnel(businessId: string, range: { from: Date; to: Date }) {
@@ -100,8 +104,8 @@ export async function getFunnel(businessId: string, range: { from: Date; to: Dat
       noShows: sql<number>`count(distinct ${appointments.leadId}) filter (where ${appointments.status} = 'no_show')::int`,
     })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
-    .where(and(cohort, sql`${appointments.status} <> 'rescheduled'`));
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, businessId)))
+    .where(and(cohort, eq(appointments.businessId, businessId), sql`${appointments.status} <> 'rescheduled'`));
   const [msg] = await db
     .select({
       total: sql<number>`count(*)::int`,
@@ -111,7 +115,7 @@ export async function getFunnel(businessId: string, range: { from: Date; to: Dat
       conversations: sql<number>`count(distinct ${messages.conversationId})::int`,
     })
     .from(messages)
-    .innerJoin(leads, eq(leads.id, messages.leadId))
+    .innerJoin(leads, and(eq(leads.id, messages.leadId), eq(leads.businessId, businessId)))
     .where(and(eq(messages.businessId, businessId), eq(leads.isTest, false), gte(messages.createdAt, range.from), lt(messages.createdAt, range.to)));
   const [won] = await db
     .select({
@@ -163,7 +167,7 @@ export async function getTimeseries(businessId: string, range: { from: Date; to:
   const appts = await db
     .select({ day: apptDay, n: sql<number>`count(*)::int` })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, businessId)))
     .where(and(eq(appointments.businessId, businessId), eq(leads.isTest, false), gte(appointments.createdAt, range.from), lt(appointments.createdAt, range.to), sql`${appointments.status} <> 'rescheduled'`))
     .groupBy(sql.raw('1'));
   const wonDay = sql<string>`to_char(date_trunc('day', ${leads.wonAt} at time zone ${timezone}), 'YYYY-MM-DD')`;
@@ -232,22 +236,44 @@ export async function getPipelineValue(businessId: string) {
   };
 }
 
-export async function getRoi(businessId: string, range: { from: Date; to: Date }, revenueCents: number) {
+/**
+ * ROI estimado del periodo. `currency` es la moneda de los ingresos (la del servicio principal, ver getFunnel).
+ * Nunca se suman importes en monedas distintas: si el plan de KAI se cobra en otra moneda (p. ej. EUR con un
+ * negocio en MXN), su coste no entra en el cálculo, y lo mismo con la inversión en anuncios (moneda del negocio).
+ */
+export async function getRoi(businessId: string, range: { from: Date; to: Date }, revenueCents: number, currency: string) {
   const db = getDb();
   const [row] = await db
-    .select({ planPrice: plans.priceMonthlyCents, adSpend: businesses.monthlyAdSpendCents })
+    .select({ planPrice: plans.priceMonthlyCents, planCurrency: plans.currency, adSpend: businesses.monthlyAdSpendCents, businessCurrency: businesses.currency })
     .from(businesses)
     .leftJoin(plans, eq(plans.id, businesses.planId))
     .where(eq(businesses.id, businessId))
     .limit(1);
+  const cur = currency.toUpperCase();
+  const planPrice = row?.planPrice ?? 0;
+  const adSpend = row?.adSpend ?? 0;
+  const planIncluded = planPrice > 0 && (row?.planCurrency ?? 'EUR').toUpperCase() === cur;
+  const adIncluded = adSpend > 0 && (row?.businessCurrency ?? cur).toUpperCase() === cur;
   const days = Math.max(1, Math.round((range.to.getTime() - range.from.getTime()) / 86_400_000));
-  const monthly = (row?.planPrice ?? 0) + (row?.adSpend ?? 0);
+  const monthly = (planIncluded ? planPrice : 0) + (adIncluded ? adSpend : 0);
   const costCents = Math.round((monthly * days) / 30);
+
+  const left: string[] = [];
+  if (planPrice > 0 && !planIncluded) left.push(`el coste de KAI (tu plan se cobra en ${(row?.planCurrency ?? 'EUR').toUpperCase()})`);
+  if (adSpend > 0 && !adIncluded) left.push(`la inversión en anuncios (está en ${(row?.businessCurrency ?? '').toUpperCase()})`);
+  const counted = [planIncluded ? 'el coste de KAI' : '', adIncluded ? 'la inversión en anuncios indicada' : ''].filter(Boolean).join(' y ');
+  const note = costCents > 0
+    ? `Estimación: ingresos de clientes cerrados en el periodo frente a ${counted}.${left.length ? ` No incluye ${left.join(' ni ')}, porque tus importes están en ${cur} y no se mezclan monedas.` : ''}`
+    : left.length
+      ? `No se puede estimar el ROI: ${left.join(' y ')} y tus ingresos están en ${cur}, y no se mezclan monedas.`
+      : 'Estimación: ingresos de clientes cerrados en el periodo frente al coste de KAI y la inversión en anuncios indicada.';
   return {
     costCents,
     revenueCents,
+    currency: cur,
+    includes: { plan: planIncluded, adSpend: adIncluded },
     roi: costCents > 0 ? Math.round(((revenueCents - costCents) / costCents) * 1000) / 10 : null,
-    note: 'Estimación: ingresos de clientes cerrados en el periodo frente al coste de KAI y la inversión en anuncios indicada.',
+    note,
   };
 }
 
@@ -276,8 +302,8 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
   const [convs] = await db
     .select({ active: sql<number>`count(*)::int` })
     .from(conversations)
-    .innerJoin(leads, eq(leads.id, conversations.leadId))
-    .where(and(eq(conversations.businessId, businessId), eq(leads.isTest, false), sql`${conversations.lastMessageAt} >= now() - interval '24 hours'`));
+    .innerJoin(leads, conversationLeadJoin)
+    .where(and(eq(conversations.businessId, businessId), eq(leads.businessId, businessId), eq(leads.isTest, false), sql`${conversations.lastMessageAt} >= now() - interval '24 hours'`));
 
   const [fus] = await db
     .select({ pending: sql<number>`count(*)::int` })
@@ -288,7 +314,7 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
   const callsToday = await db
     .select({ appointment: appointments, leadName: leads.name, leadScore: leads.score, goal: leads.goalSummary })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, and(eq(leads.id, appointments.leadId), eq(leads.businessId, businessId)))
     .where(
       and(
         eq(appointments.businessId, businessId),
@@ -307,23 +333,24 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     lt(appointments.startsAt, new Date(Date.now() + 7 * 86_400_000)),
   );
   // La lista muestra las 10 primeras; el indicador cuenta todas las de los próximos 7 días.
+  const apptLeadJoin = and(eq(leads.id, appointments.leadId), eq(leads.businessId, businessId));
   const upcoming = await db
     .select({ appointment: appointments, leadName: leads.name, leadScore: leads.score, goal: leads.goalSummary })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, apptLeadJoin)
     .where(upcomingWhere)
     .orderBy(asc(appointments.startsAt))
     .limit(10);
   const [upcomingCount] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(appointments)
-    .innerJoin(leads, eq(leads.id, appointments.leadId))
+    .innerJoin(leads, apptLeadJoin)
     .where(upcomingWhere);
 
   const openAlerts = await db
     .select({ alert: alerts, leadName: leads.name })
     .from(alerts)
-    .leftJoin(leads, eq(leads.id, alerts.leadId))
+    .leftJoin(leads, and(eq(leads.id, alerts.leadId), eq(leads.businessId, businessId)))
     .where(and(eq(alerts.businessId, businessId), eq(alerts.status, 'open')))
     .orderBy(sql`case ${alerts.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`, sql`${alerts.createdAt} desc`)
     .limit(20);
@@ -346,16 +373,20 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     .orderBy(sql`${leads.score} desc`)
     .limit(8);
 
-  // Leads calientes esperando respuesta humana (KAI pausado o escalado).
+  // Leads esperando respuesta de una persona: KAI escalado o en pausa, piloto automático apagado o un
+  // cliente que ha escrito (la misma condición que «Pendientes» en la Bandeja).
+  const autopilotOn = await autopilotEnabled(businessId);
   const waiting = await db
     .select({ conversationId: conversations.id, leadId: leads.id, name: leads.name, score: leads.score, temperature: leads.temperature, preview: conversations.lastMessagePreview, lastInboundAt: conversations.lastInboundAt, handoff: conversations.handoffActive })
     .from(conversations)
-    .innerJoin(leads, eq(leads.id, conversations.leadId))
+    .innerJoin(leads, conversationLeadJoin)
     .where(
       and(
         eq(conversations.businessId, businessId),
+        eq(leads.businessId, businessId),
         eq(leads.isTest, false),
-        sql`(${conversations.handoffActive} = true or ${conversations.aiEnabled} = false)`,
+        needsHumanReplyCondition({ autopilotOn }),
+        // Con un escalado sin mensaje nuevo del lead no hay nada que contestar aquí: ya sale como aviso.
         sql`${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt})`,
       ),
     )
@@ -364,11 +395,13 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
 
   const funnel = await getFunnel(businessId, last30);
   const value = await getPipelineValue(businessId);
-  const roi = await getRoi(businessId, last30, funnel.revenueCents);
+  const roi = await getRoi(businessId, last30, funnel.revenueCents, funnel.currency);
   const insights = opts.advanced ? await getInsights(businessId, last30, funnel, await getSourceBreakdown(businessId, last30)) : [];
 
   return {
     timezone: tz,
+    /** false = piloto automático apagado: KAI no contesta a nadie (la interfaz no debe decir que «se encarga»). */
+    autopilotEnabled: autopilotOn,
     leads: { newToday: counts?.newToday ?? 0, contacted: counts?.contacted ?? 0, active: counts?.active ?? 0, hot: counts?.hot ?? 0, qualified: counts?.qualified ?? 0 },
     conversion: funnel.rates,
     funnel30d: funnel,
@@ -399,7 +432,7 @@ export async function getAnalytics(businessId: string, period: Period, custom?: 
     getSourceBreakdown(businessId, range),
     getPipelineValue(businessId),
   ]);
-  const [roi, insights] = await Promise.all([getRoi(businessId, range, funnel.revenueCents), opts.advanced ? getInsights(businessId, range, funnel, sources) : Promise.resolve([])]);
+  const [roi, insights] = await Promise.all([getRoi(businessId, range, funnel.revenueCents, funnel.currency), opts.advanced ? getInsights(businessId, range, funnel, sources) : Promise.resolve([])]);
   return { period, range: { from: range.from.toISOString(), to: range.to.toISOString() }, timezone: tz, funnel, series, sources, value, roi, insights, insightsLocked: !opts.advanced };
 }
 

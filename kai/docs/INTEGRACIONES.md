@@ -151,12 +151,14 @@ KAI consulta los huecos ocupados del calendario y crea el evento (con enlace de 
 
 ## 4. Calendly
 
-Si el entrenador ya usa Calendly, KAI le ofrece los huecos reales de Calendly al lead y le envía el enlace de reserva; cuando el lead reserva, la cita aparece en KAI automáticamente.
+Si el entrenador ya usa Calendly, KAI le ofrece los huecos reales de Calendly al lead y le envía el enlace de reserva; cuando el lead reserva, la cita aparece en KAI automáticamente (gracias al webhook del paso 4).
 
 1. En Calendly: **Integraciones y aplicaciones → API y webhooks → Tokens de acceso personal → Generar nuevo token**. Copia el token (Calendly solo lo enseña una vez).
 2. En KAI → **Integraciones → Calendario**, tarjeta **Calendly**: pega el token, pulsa **Conectar Calendly** y, si tienes varios tipos de evento, elige cuál debe ofrecer KAI (por ejemplo “Llamada de valoración”).
 3. Para cambiar de cuenta o de tipo de evento, pulsa **Volver a conectar** o **Cambiar tipo de evento** y pega de nuevo el token. Si Calendly no lo acepta, no se cambia nada: sigue funcionando la conexión anterior.
-4. KAI crea automáticamente el webhook en Calendly. Necesita que KAI esté publicado (dirección pública) y un plan de Calendly que permita webhooks (Standard o superior). Si no se puede crear, la pantalla lo indica y KAI seguirá ofreciendo el enlace, pero tendrás que registrar las citas a mano.
+4. KAI crea automáticamente el webhook en Calendly. Necesita que KAI esté publicado (dirección pública) y un plan de Calendly que permita webhooks (Standard o superior). Si no se puede crear, la pantalla lo indica.
+
+> **Sin webhook, Calendly no le sirve a KAI.** KAI seguiría enviando tu enlace de reserva, pero no sabría cuándo alguien reserva o cancela: esas llamadas no aparecerían en la Agenda (y con Calendly conectado no se pueden apuntar a mano), los leads no recibirían confirmación ni recordatorios y el panel y Analítica no las contarían. Lo único que podrías hacer es pasar tú al lead a “Llamada agendada” desde su ficha. Mientras no tengas webhooks, **usa la agenda de KAI o Google Calendar**: pulsa **Desconectar** en la tarjeta de Calendly y KAI volverá a ofrecer los huecos de su propia agenda. Cuando lo soluciones, vuelve a conectar Calendly.
 
 ---
 

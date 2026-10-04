@@ -33,7 +33,7 @@ import { expireOldActions } from '../ai/copilot/copilot-actions.js';
 import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp, stopBusinessAutomations } from './followups.js';
 import { sendMessage } from '../crm/messaging.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
-import { getAutomation } from './reminders.js';
+import { appointmentMessageEnabled, getAutomation } from './reminders.js';
 import { configuredMessage, confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
 import { requestOutcomeAlert } from '../calendar/calendar.service.js';
 import { rollupAnalyticsForAll } from '../analytics/analytics.service.js';
@@ -162,6 +162,11 @@ const handlers: Record<string, Handler> = {
     if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || !ctx.conversationId || ctx.lead.optedOut) return;
     if (ctx.appointment.startsAt.getTime() <= Date.now()) return; // la llamada ya empezó: no tiene sentido confirmarla
     const automation = await getAutomation(businessId, 'appointment_reminders');
+    // El entrenador la desactivó después de reservar: los trabajos ya programados tampoco se envían.
+    if (!appointmentMessageEnabled(automation, 'confirmation')) {
+      logger.info('appointment_confirmation.disabled', { appointmentId: ctx.appointment.id });
+      return;
+    }
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
@@ -188,6 +193,10 @@ const handlers: Record<string, Handler> = {
       return;
     }
     const automation = await getAutomation(businessId, 'appointment_reminders');
+    if (!appointmentMessageEnabled(automation, kind === '24h' ? 'reminder24h' : 'reminder1h')) {
+      logger.info('appointment_reminder.disabled', { appointmentId, kind });
+      return;
+    }
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
@@ -210,6 +219,8 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const ctx = await appointmentContext(businessId, (job.payload as { appointmentId: string }).appointmentId);
     if (!ctx) return;
+    const post = await getAutomation(businessId, 'post_call');
+    if (post?.enabled === false) return; // desactivado después de reservar
     await requestOutcomeAlert(businessId, ctx.appointment, ctx.lead.name);
   },
 
@@ -217,6 +228,11 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const ctx = await appointmentContext(businessId, (job.payload as { appointmentId: string }).appointmentId);
     if (!ctx || ctx.appointment.status !== 'no_show' || !ctx.conversationId || ctx.lead.optedOut) return;
+    // Marcada como no-show antes de que empezara la llamada (un error): no se le dice al lead que “no pudo entrar”.
+    if (ctx.appointment.updatedAt.getTime() < ctx.appointment.startsAt.getTime()) {
+      logger.info('no_show_message.before_start', { appointmentId: ctx.appointment.id });
+      return;
+    }
     if (ctx.lead.lastInboundAt && ctx.lead.lastInboundAt > ctx.appointment.updatedAt) return; // ya escribió
     if (!(await conversationIsActiveForKai(businessId, ctx.conversationId))) return;
     const recovery = await getAutomation(businessId, 'no_show_recovery');

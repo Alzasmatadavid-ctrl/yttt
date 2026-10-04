@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { matchPath, useLocation, useNavigate } from 'react-router';
 import { ArrowUp, Check, Sparkles, X } from 'lucide-react';
 import { api, errorText } from '../lib/api';
 import { dateTime, timeAgo } from '../lib/format';
@@ -33,6 +33,28 @@ const SUGGESTIONS = [
   'Cambia el tono de KAI para que sea más directo',
   '¿Qué puedo mejorar según mis datos?',
 ];
+
+/** Lead o conversación que el entrenador tiene abiertos detrás del panel (para que «este lead» tenga sentido). */
+interface CopilotContext {
+  leadId?: string;
+  conversationId?: string;
+}
+
+function useScreenContext(): { context: CopilotContext | undefined; leadName: string | null } {
+  const { pathname } = useLocation();
+  const qc = useQueryClient();
+  const inbox = matchPath('/app/inbox/:conversationId', pathname);
+  const lead = matchPath('/app/leads/:leadId', pathname);
+  if (inbox?.params.conversationId) {
+    const d = qc.getQueryData<{ lead?: { name?: string } }>(['conversation', inbox.params.conversationId]);
+    return { context: { conversationId: inbox.params.conversationId }, leadName: d?.lead?.name || null };
+  }
+  if (lead?.params.leadId) {
+    const d = qc.getQueryData<{ lead?: { name?: string } }>(['lead', lead.params.leadId]);
+    return { context: { leadId: lead.params.leadId }, leadName: d?.lead?.name || null };
+  }
+  return { context: undefined, leadName: null };
+}
 
 function ActionCard({ action, pending }: { action: { id: string; summary: string }; pending: boolean }) {
   const qc = useQueryClient();
@@ -138,8 +160,11 @@ export default function CopilotPanel({ compact }: { compact?: boolean }) {
   const history = useQuery({ queryKey: ['copilot-history'], queryFn: () => api.get<{ messages: CopilotMsg[] }>('/copilot/history') });
   const pending = useQuery({ queryKey: ['copilot-actions'], queryFn: () => api.get<{ actions: { id: string }[] }>('/copilot/actions') });
   const pendingIds = new Set((pending.data?.actions ?? []).map((a) => a.id));
+  // Si el panel se abre encima de una conversación o de la ficha de un lead, la pregunta viaja con ese contexto
+  // (p. ej. «Escribe un seguimiento para este lead»). El servidor comprueba que pertenece al negocio.
+  const { context, leadName } = useScreenContext();
   const ask = useMutation({
-    mutationFn: (question: string) => api.post<{ id: string; text: string; data: CopilotData }>('/copilot/ask', { question }),
+    mutationFn: (question: string) => api.post<{ id: string; text: string; data: CopilotData }>('/copilot/ask', context ? { question, context } : { question }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['copilot-actions'] });
       await qc.invalidateQueries({ queryKey: ['copilot-history'] });
@@ -204,13 +229,19 @@ export default function CopilotPanel({ compact }: { compact?: boolean }) {
         )}
         <div ref={endRef} />
       </div>
-      {(messages.length === 0 || !compact) && (
+      {(messages.length === 0 || !compact || leadName) && (
         <div className="suggestions" style={{ padding: '0 14px 10px' }}>
-          {SUGGESTIONS.slice(0, compact ? 4 : 7).map((s) => (
-            <button key={s} className="chip" onClick={() => send(s)}>
-              {s}
+          {leadName && (
+            <button className="chip" onClick={() => send(`Escribe un seguimiento para ${leadName}`)}>
+              Escribe un seguimiento para {leadName}
             </button>
-          ))}
+          )}
+          {(messages.length === 0 || !compact) &&
+            SUGGESTIONS.slice(0, compact ? 4 : 7).map((s) => (
+              <button key={s} className="chip" onClick={() => send(s)}>
+                {s}
+              </button>
+            ))}
         </div>
       )}
       <form

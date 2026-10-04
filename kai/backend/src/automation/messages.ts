@@ -1,7 +1,7 @@
 /**
  * Textos de confirmación, recordatorios y no-show.
  * Se generan de forma determinista (no con IA) para que la fecha y la hora sean SIEMPRE exactas,
- * adaptando el tono (emojis, formalidad) a la configuración del entrenador.
+ * adaptando el tono (emojis, formalidad y trato de tú o de usted) a la configuración del entrenador.
  *
  * El entrenador puede sustituir cada texto por el suyo (Seguimientos → mensajes de la llamada) usando
  * variables que se rellenan con los datos reales de cada cita: {nombre}, {fecha}, {hora}, {llamada},
@@ -27,6 +27,12 @@ const end = (tone: AiTone, emoji: string) => (tone.emojiUsage === 'none' ? '.' :
 
 /** “Laura, te confirmo…” o, sin nombre, “Te confirmo…”. */
 const withName = (name: string, rest: string) => (name ? `${name}, ${rest}` : rest.charAt(0).toUpperCase() + rest.slice(1));
+
+/** El entrenador ha elegido tratar a los leads “de usted” (Ajustes de KAI → Tono). */
+const isUsted = (tone: Pick<AiTone, 'addressing'> | null | undefined) => tone?.addressing === 'usted';
+
+/** Elige la forma de tú o de usted según el tono configurado. */
+const tuUsted = (tone: Pick<AiTone, 'addressing'> | null | undefined, tu: string, usted: string) => (isUsted(tone) ? usted : tu);
 
 // ───────────── Textos editables ─────────────
 
@@ -62,13 +68,26 @@ const REQUIRED_VARIABLES: Record<AppointmentMessageKind, string[]> = {
   noShow: [],
 };
 
-/** Textos por defecto, para mostrarlos como punto de partida en la interfaz. */
+/** Textos por defecto, para mostrarlos como punto de partida en la interfaz (tratando al lead de tú). */
 export const DEFAULT_MESSAGE_TEMPLATES: Record<AppointmentMessageKind, string> = {
   confirmation: '{nombre}, te confirmo la {llamada} con {entrenador} {fecha} a las {hora} ✅\nEnlace: {enlace}\nSi necesitas cambiarla, dímelo por aquí.',
   reminder24h: '¡Hola {nombre}! Te recuerdo que {fecha} a las {hora} tienes la {llamada} con {entrenador} 📅\nEnlace: {enlace}\n¿Te sigue viniendo bien?',
   reminder1h: '{nombre}, en una hora (a las {hora}) es la {llamada} con {entrenador} 🙌\nTe dejo el enlace: {enlace}',
   noShow: 'Ey {nombre}, veo que finalmente no pudiste entrar a la {llamada}. ¿Todo bien? Si quieres, buscamos otro hueco.',
 };
+
+/** Los mismos textos tratando al lead de usted. */
+export const DEFAULT_MESSAGE_TEMPLATES_USTED: Record<AppointmentMessageKind, string> = {
+  confirmation: '{nombre}, le confirmo la {llamada} con {entrenador} {fecha} a las {hora} ✅\nEnlace: {enlace}\nSi necesita cambiarla, dígamelo por aquí.',
+  reminder24h: '¡Hola {nombre}! Le recuerdo que {fecha} a las {hora} tiene la {llamada} con {entrenador} 📅\nEnlace: {enlace}\n¿Le sigue viniendo bien?',
+  reminder1h: '{nombre}, en una hora (a las {hora}) es la {llamada} con {entrenador} 🙌\nLe dejo el enlace: {enlace}',
+  noShow: 'Hola {nombre}, veo que finalmente no pudo entrar a la {llamada}. ¿Va todo bien? Si quiere, buscamos otro hueco.',
+};
+
+/** Textos por defecto según el trato elegido por el entrenador (de tú o de usted). */
+export function defaultMessageTemplates(tone: Pick<AiTone, 'addressing'> | null | undefined): Record<AppointmentMessageKind, string> {
+  return isUsted(tone) ? DEFAULT_MESSAGE_TEMPLATES_USTED : DEFAULT_MESSAGE_TEMPLATES;
+}
 
 const RX_VARIABLE = /\{([^{}\n]*)\}/g;
 const RX_PRICE = /\d+(?:[.,]\d{1,2})?\s?(?:€|euros?\b|eur\b)|€\s?\d/i;
@@ -191,7 +210,7 @@ export function confirmationText(c: Ctx, custom?: string | null): string {
   const when = formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm");
   return withName(
     name,
-    `te confirmo la ${c.callLabel} con ${c.trainerName} el ${when}${end(c.tone, '✅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} Si necesitas cambiarla, dímelo por aquí.`,
+    `${tuUsted(c.tone, 'te', 'le')} confirmo la ${c.callLabel} con ${c.trainerName} el ${when}${end(c.tone, '✅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ${tuUsted(c.tone, 'Si necesitas cambiarla, dímelo por aquí.', 'Si necesita cambiarla, dígamelo por aquí.')}`,
   );
 }
 
@@ -200,15 +219,20 @@ export function reminderText(c: Ctx, kind: '24h' | '1h', custom?: string | null)
   if (template) return renderMessageTemplate(template, c);
   const name = firstName(c.leadName);
   const seed = hashString(`${c.leadName}${c.startsAt.toISOString()}${kind}`);
+  const usted = isUsted(c.tone);
   if (kind === '24h') {
     const label = humanSlotLabel(c.startsAt, c.timezone, new Date());
-    const opener = pick(['¡Hola', 'Hola', 'Buenas'], seed);
-    return `${opener}${name ? ` ${name}` : ''}! Te recuerdo que ${label} tienes la ${c.callLabel} con ${c.trainerName}${end(c.tone, '📅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ¿Te sigue viniendo bien?`;
+    // “Buenas” es demasiado coloquial para quien trata al lead de usted.
+    const opener = pick(usted ? ['¡Hola', 'Hola'] : ['¡Hola', 'Hola', 'Buenas'], seed);
+    const body = usted
+      ? `Le recuerdo que ${label} tiene la ${c.callLabel} con ${c.trainerName}`
+      : `Te recuerdo que ${label} tienes la ${c.callLabel} con ${c.trainerName}`;
+    return `${opener}${name ? ` ${name}` : ''}! ${body}${end(c.tone, '📅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ${usted ? '¿Le sigue viniendo bien?' : '¿Te sigue viniendo bien?'}`;
   }
   const time = formatInZone(c.startsAt, c.timezone, 'HH:mm');
   return withName(
     name,
-    `en una hora (a las ${time}) es la ${c.callLabel} con ${c.trainerName}${end(c.tone, '🙌')}${c.meetingUrl ? ` Te dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`,
+    `en una hora (a las ${time}) es la ${c.callLabel} con ${c.trainerName}${end(c.tone, '🙌')}${c.meetingUrl ? ` ${usted ? 'Le' : 'Te'} dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`,
   );
 }
 
@@ -216,6 +240,10 @@ export function noShowText(c: Pick<Ctx, 'leadName' | 'callLabel' | 'tone'> & Par
   const template = customTemplate('noShow', custom);
   if (template) return renderMessageTemplate(template, c);
   const name = firstName(c.leadName);
+  if (isUsted(c.tone)) {
+    // De usted, siempre “Hola” (un “Ey” no encaja con ese trato).
+    return `Hola${name ? ` ${name}` : ''}, veo que finalmente no pudo entrar a la ${c.callLabel}. ¿Va todo bien? Si quiere, buscamos otro hueco.`;
+  }
   const opener = c.tone.formality <= 2 ? `Ey${name ? ` ${name}` : ''}` : `Hola${name ? ` ${name}` : ''}`;
   return `${opener}, veo que finalmente no pudiste entrar a la ${c.callLabel}. ¿Todo bien? Si quieres, buscamos otro hueco.`;
 }

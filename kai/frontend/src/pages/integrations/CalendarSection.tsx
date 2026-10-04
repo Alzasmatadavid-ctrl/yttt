@@ -294,10 +294,23 @@ function CalendlyCard({
           <CalendarErrorBox row={calendly} />
           {webhookError && (
             <Callout tone="warning">
-              <strong>Calendly no ha permitido crear el aviso automático de reservas (webhook).</strong> Suele pasar por dos motivos: tu plan de Calendly
-              no incluye webhooks (hace falta el plan Standard o superior) o KAI todavía no está publicado en una dirección pública de internet. KAI seguirá
-              enviando tu enlace de reserva, pero no se enterará solo cuando alguien reserve o cancele: tendrás que apuntar esas llamadas tú en la Agenda.
-              Cuando lo soluciones, pulsa «Volver a conectar». <span className="xs subtle intg-break">Detalle: {webhookError}</span>
+              {/* Sin webhook, KAI no puede saber nada de las reservas de Calendly, y la Agenda tampoco deja apuntarlas a mano
+                  (con Calendly la reserva solo la registra el aviso de Calendly). Por eso se explica qué se pierde y se recomienda otra agenda. */}
+              <p>
+                <strong>Calendly no ha permitido crear el aviso automático de reservas (webhook).</strong> Suele pasar por dos motivos: tu plan de Calendly
+                no incluye webhooks (hace falta el plan Standard o superior) o KAI todavía no está publicado en una dirección pública de internet.
+              </p>
+              <p className="mt-8">
+                Mientras siga así, KAI enviará tu enlace de reserva, pero no sabrá cuándo alguien reserva o cancela: esas llamadas no aparecerán en tu Agenda
+                de KAI (y tampoco se pueden apuntar a mano), tus leads no recibirán la confirmación ni los recordatorios, y el panel y Analítica no las
+                contarán como llamadas agendadas ni como asistencias. Lo único que puedes hacer tú es pasar al lead a «Llamada agendada» desde su ficha.
+              </p>
+              <p className="mt-8">
+                <strong>Te recomendamos usar la agenda de KAI o Google Calendar hasta que lo soluciones</strong>: al pulsar «Desconectar», KAI vuelve a ofrecer
+                los huecos de su propia agenda y lo gestiona todo él. Cuando lo soluciones, pulsa «Volver a conectar» (o, si ya lo desconectaste, conecta
+                Calendly de nuevo).
+              </p>
+              <p className="xs subtle intg-break mt-8">Detalle: {webhookError}</p>
             </Callout>
           )}
           {eventTypes && eventTypes.length === 0 && (
@@ -407,8 +420,9 @@ function CalendlyCard({
             <li>Pégalo aquí y pulsa «Conectar Calendly». Si tienes varios tipos de evento, elige después cuál debe ofrecer KAI.</li>
             <li>
               Para que KAI se entere solo de las reservas y cancelaciones, KAI crea un webhook (aviso automático) en tu Calendly. Para eso tu plan de Calendly
-              tiene que incluir webhooks (Standard o superior) y KAI debe estar publicado en una dirección pública. Si no se puede crear, aquí te lo
-              indicaremos.
+              tiene que incluir webhooks (Standard o superior) y KAI debe estar publicado en una dirección pública. Sin ese aviso, las reservas de
+              Calendly no llegan a KAI (ni a la Agenda, ni a los recordatorios, ni a las métricas): si no se puede crear, aquí te lo indicaremos y te
+              conviene seguir con la agenda de KAI o con Google Calendar.
             </li>
           </Steps>
         </Guide>

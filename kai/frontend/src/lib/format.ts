@@ -85,18 +85,22 @@ export function parseEurosToCents(raw: string): number | null {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
-/** Importe máximo de una venta que acepta el servidor (1.000.000 €). */
+/** Importe máximo de una venta que acepta el servidor (1.000.000 en la moneda del negocio). */
 export const MAX_DEAL_CENTS = 100_000_000;
 
 /**
  * Valida un importe opcional escrito por el entrenador (por ejemplo, el de una venta).
  * Vacío → sin importe (cents null, sin error). Inválido o fuera de rango → mensaje de error listo para mostrar.
+ * currency: moneda del negocio (para el mensaje del importe máximo; por defecto, euros).
  */
-export function parseOptionalAmount(raw: string, maxCents = MAX_DEAL_CENTS): { cents: number | null; error: string | null } {
+export function parseOptionalAmount(
+  raw: string,
+  { maxCents = MAX_DEAL_CENTS, currency = 'EUR' }: { maxCents?: number; currency?: string } = {},
+): { cents: number | null; error: string | null } {
   if (!raw.trim()) return { cents: null, error: null };
   const cents = parseEurosToCents(raw);
   if (cents === null) return { cents: null, error: 'Escribe solo el importe, por ejemplo 1200 o 1.200,50.' };
-  if (cents > maxCents) return { cents: null, error: `El importe máximo es ${formatMoney(maxCents, 'EUR')}.` };
+  if (cents > maxCents) return { cents: null, error: `El importe máximo es ${formatMoney(maxCents, currency || 'EUR')}.` };
   return { cents, error: null };
 }
 

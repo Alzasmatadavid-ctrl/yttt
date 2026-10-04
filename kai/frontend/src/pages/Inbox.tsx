@@ -471,6 +471,7 @@ export default function Inbox() {
             </div>
             <div className="row wrap mt-4" style={{ gap: 5 }}>
               {it.conversation.handoffActive && <span className="badge badge-warning">Te necesita</span>}
+              {it.lead.optedOut && <span className="badge badge-danger">Dado de baja</span>}
               <StatusBadge status={it.lead.status} />
               <TemperatureBadge temperature={it.lead.temperature} />
               <ScoreBadge score={it.lead.score} />

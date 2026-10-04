@@ -1,10 +1,12 @@
 /* Acciones reutilizables sobre un lead: cambiar etapa, agendar llamada, cualificación, memoria. */
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Minus } from 'lucide-react';
 import { LEAD_STATUSES, type LeadQualification, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dayLabel, parseOptionalAmount, timeOnly } from '../lib/format';
+import { useBusinessCurrency } from '../lib/business';
 import { Button, Field, Input, Modal, Select, Spinner, useToast } from './ui';
 import type { QualificationRule } from '../lib/types';
 
@@ -14,6 +16,7 @@ export function StatusSelect({ leadId, status, onChanged }: { leadId: string; st
   const [pending, setPending] = useState<LeadStatus | null>(null);
   const [deal, setDeal] = useState('');
   const [dealError, setDealError] = useState<string | null>(null);
+  const currency = useBusinessCurrency();
   const mutate = useMutation({
     mutationFn: (body: { status: LeadStatus; dealValueCents?: number | null }) => api.post(`/leads/${leadId}/status`, body),
     onSuccess: () => {
@@ -51,7 +54,7 @@ export function StatusSelect({ leadId, status, onChanged }: { leadId: string; st
               variant="primary"
               loading={mutate.isPending}
               onClick={() => {
-                const amount = parseOptionalAmount(deal);
+                const amount = parseOptionalAmount(deal, { currency });
                 if (amount.error) return setDealError(amount.error);
                 mutate.mutate({ status: 'client', dealValueCents: amount.cents });
               }}
@@ -121,7 +124,11 @@ export function BookCallModal({ open, onClose, leadId, conversationId }: { open:
       {slots.isLoading && <Spinner />}
       {slots.error && <p className="error-text">{errorText(slots.error)}</p>}
       {slots.data?.provider === 'calendly' && <p className="muted small">Con Calendly conectado, la reserva la confirma el lead desde el enlace que le envía KAI.</p>}
-      {slots.data && slots.data.slots.length === 0 && <p className="muted">No hay huecos libres. Revisa tu disponibilidad en Agenda.</p>}
+      {slots.data && slots.data.slots.length === 0 && (
+        <p className="muted">
+          No hay huecos libres. Revisa tu horario en <Link to="/app/agenda?tab=disponibilidad">Agenda → Disponibilidad</Link>.
+        </p>
+      )}
       <div className="col" style={{ gap: 14, maxHeight: 420, overflowY: 'auto' }}>
         {[...grouped.entries()].slice(0, 10).map(([day, list]) => (
           <div key={day}>
@@ -181,6 +188,7 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
   const [notes, setNotes] = useState('');
   const [deal, setDeal] = useState('');
   const [dealError, setDealError] = useState<string | null>(null);
+  const currency = useBusinessCurrency();
   // El modal está siempre montado: al abrirlo (o al pasar a otra cita) el formulario vuelve a empezar de cero,
   // para no registrar en un lead el resultado, las notas o el importe que se escribieron para otro.
   const formKey = open ? appointmentId : null;
@@ -223,7 +231,7 @@ export function OutcomeModal({ appointmentId, open, onClose }: { appointmentId: 
             loading={save.isPending}
             onClick={() => {
               const won = attended === 'yes' && outcome === 'won';
-              const amount = won ? parseOptionalAmount(deal) : { cents: null, error: null };
+              const amount = won ? parseOptionalAmount(deal, { currency }) : { cents: null, error: null };
               if (amount.error) return setDealError(amount.error);
               save.mutate(amount.cents);
             }}

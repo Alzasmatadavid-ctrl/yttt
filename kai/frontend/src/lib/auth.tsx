@@ -9,10 +9,11 @@ interface AuthValue {
   refresh: () => Promise<unknown>;
   logout: () => Promise<void>;
   switchBusiness: (businessId: string) => Promise<void>;
+  /** Negocio con el que trabaja esta pestaña (todas sus peticiones van a él). */
   activeBusiness: Me['businesses'][number] | null;
   /**
-   * Negocio al que se ha cambiado en OTRA pestaña (la sesión es común a todas). Esta pestaña sigue trabajando con el suyo
-   * (activeBusiness), así que nunca se guarda nada en el negocio equivocado; la app solo lo avisa. null si no ha pasado.
+   * Negocio al que se ha cambiado desde OTRA pestaña (la sesión es común a todas). Esta pestaña sigue trabajando con el
+   * suyo (activeBusiness), así que nunca guarda nada en el negocio equivocado; la app solo lo avisa. null si no ha pasado.
    */
   otherTabBusiness: Me['businesses'][number] | null;
 }
@@ -30,65 +31,63 @@ function openChannel(): BroadcastChannel | null {
   }
 }
 
-/** Descarta de la caché los datos del negocio anterior (se conserva la sesión, `me`). */
-function forgetBusinessData(qc: QueryClient) {
-  void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
-  qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
-}
+/** Negocio activo de la sesión según /auth/me (el que abriría una pestaña nueva). */
+const sessionBusinessId = (data: Me) => data.activeBusinessId ?? data.businesses[0]?.businessId ?? null;
 
 /**
- * Decide con qué negocio trabaja esta pestaña a partir de la respuesta de /auth/me:
- * - la primera vez (o si aún no tenía ninguno), el negocio activo de la sesión;
- * - después se mantiene, aunque la sesión cambie de negocio desde otra pestaña;
- * - solo cambia si ya no se tiene acceso a él o si esta misma pestaña lo pide (adopt: entrar, aceptar una invitación…).
+ * Esta pestaña pasa a trabajar con el negocio activo de la sesión. Si ya trabajaba con otro, se descarta lo que hubiera
+ * en caché (era de ese otro negocio y no debe verse, ni un instante, en el nuevo). Se conserva la sesión (`me`).
  */
-function pinBusiness(data: Me | undefined, qc: QueryClient, adopt = false) {
-  if (!data?.user) {
-    setRequestBusiness(null);
-    return;
+function adoptSessionBusiness(data: Me | undefined, qc: QueryClient): boolean {
+  const next = data?.user ? sessionBusinessId(data) : null;
+  const previous = getRequestBusiness();
+  if (next === previous) return false;
+  if (previous !== null) {
+    void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
   }
-  const pinned = getRequestBusiness();
-  const stillMember = pinned !== null && data.businesses.some((b) => b.businessId === pinned);
-  if (stillMember && !adopt) return;
-  const next = data.activeBusinessId ?? data.businesses[0]?.businessId ?? null;
-  if (next === pinned) return;
-  // Si esta pestaña ya trabajaba con otro negocio, lo que hubiera en caché era de ese negocio: no debe verse en el nuevo.
-  if (pinned !== null) forgetBusinessData(qc);
   setRequestBusiness(next);
+  return true;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
+  const [, rerender] = useState(0);
   const { data, isLoading, refetch } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me'), staleTime: 60_000 });
-  // Se fija durante el render (antes de que las pantallas pidan sus datos), para que la primera petición ya lleve la cabecera.
-  pinBusiness(data, qc);
-  const pinned = getRequestBusiness();
-  const activeBusiness = data?.businesses.find((b) => b.businessId === pinned) ?? data?.businesses.find((b) => b.businessId === data.activeBusinessId) ?? data?.businesses[0] ?? null;
-  const sessionBusiness = data?.activeBusinessId ? data.businesses.find((b) => b.businessId === data.activeBusinessId) ?? null : null;
-  const otherTabBusiness = sessionBusiness && activeBusiness && sessionBusiness.businessId !== activeBusiness.businessId ? sessionBusiness : null;
 
-  // Cuando otra pestaña cambia de negocio, se vuelve a pedir la sesión para poder avisar (sin cambiar el negocio de esta pestaña).
-  const [, setTick] = useState(0);
+  // El negocio de la pestaña se fija con el primer /auth/me que tenga negocio, durante el render: así la primera petición
+  // de cualquier pantalla ya sale con la cabecera. Después se mantiene aunque otra pestaña cambie el negocio de la sesión.
+  if (data?.user && getRequestBusiness() === null && sessionBusinessId(data)) setRequestBusiness(sessionBusinessId(data));
+  const pinned = getRequestBusiness();
+  // Si se ha perdido el acceso a ese negocio (te han quitado del equipo, se cerró la sesión…), se pasa al de la sesión.
+  // (Mientras /auth/me no ha respondido nunca, data es undefined: eso no es perder el acceso.)
+  const lostPinned = pinned !== null && data !== undefined && (!data.user || !data.businesses.some((b) => b.businessId === pinned));
+  useEffect(() => {
+    if (lostPinned && adoptSessionBusiness(data, qc)) rerender((n) => n + 1);
+  }, [lostPinned, data, qc]);
+
+  // Cuando otra pestaña cambia de negocio, se vuelve a pedir la sesión para poder avisar (sin tocar el negocio de esta).
   useEffect(() => {
     const channel = openChannel();
     if (!channel) return;
     channel.onmessage = (e: MessageEvent) => {
-      if ((e.data as { type?: string } | null)?.type === 'business-switched') {
-        void qc.invalidateQueries({ queryKey: ['me'] });
-        setTick((t) => t + 1);
-      }
+      if ((e.data as { type?: string } | null)?.type === 'business-switched') void qc.invalidateQueries({ queryKey: ['me'] });
     };
     return () => channel.close();
   }, [qc]);
 
+  const businesses = data?.businesses ?? [];
+  const activeBusiness = businesses.find((b) => b.businessId === pinned) ?? businesses.find((b) => b.businessId === data?.activeBusinessId) ?? businesses[0] ?? null;
+  const sessionBusiness = data?.activeBusinessId ? businesses.find((b) => b.businessId === data.activeBusinessId) ?? null : null;
+  const otherTabBusiness = sessionBusiness && activeBusiness && sessionBusiness.businessId !== activeBusiness.businessId ? sessionBusiness : null;
+
   const value: AuthValue = {
     me: data,
     loading: isLoading,
-    // Un refresco pedido por la propia pestaña (al entrar, crear un negocio o aceptar una invitación) sí adopta el negocio de la sesión.
+    // Un refresco que pide la propia pestaña (al entrar, crear un negocio o aceptar una invitación) sí adopta el negocio de la sesión.
     refresh: async () => {
       const r = await refetch();
-      pinBusiness(r.data, qc, true);
-      setTick((t) => t + 1);
+      if (adoptSessionBusiness(r.data, qc)) rerender((n) => n + 1);
       return r;
     },
     activeBusiness,
@@ -101,11 +100,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     switchBusiness: async (businessId) => {
       await api.post('/auth/switch-business', { businessId });
+      // Las demás pestañas siguen con su negocio, pero lo saben y pueden avisar.
       const channel = openChannel();
       channel?.postMessage({ type: 'business-switched', businessId });
       channel?.close();
       qc.clear();
-      setRequestBusiness(businessId);
       window.location.href = '/app';
     },
   };

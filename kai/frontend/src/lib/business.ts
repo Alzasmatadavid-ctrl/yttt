@@ -1,4 +1,4 @@
-/* Datos del negocio activo que necesitan muchas pantallas: zona horaria y permisos del rol. */
+/* Datos del negocio activo que necesitan muchas pantallas: zona horaria, moneda y permisos del rol. */
 import { useQuery } from '@tanstack/react-query';
 import { ROLE_PERMISSIONS, type Permission } from '@shared';
 import { api } from './api';
@@ -17,6 +17,14 @@ export function useBusinessSettings() {
  */
 export function useBusinessTimezone(): string | undefined {
   return useBusinessSettings().data?.business.timezone;
+}
+
+/**
+ * Moneda del negocio (código ISO, p. ej. «EUR» o «MXN»). Los importes de ventas y precios se muestran siempre en ella.
+ * Mientras no se conoce, euros.
+ */
+export function useBusinessCurrency(): string {
+  return useBusinessSettings().data?.business.currency || 'EUR';
 }
 
 /** ¿Puede el usuario hacer esta acción en el negocio activo? (mismo reparto de permisos que el servidor). */

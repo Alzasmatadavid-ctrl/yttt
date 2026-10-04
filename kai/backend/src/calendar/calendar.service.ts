@@ -11,7 +11,7 @@ import { applyPipelineEvent, recordLeadEvent, setLeadStatus, type Actor } from '
 import { createAlert, resolveAlertsFor } from '../crm/alerts.service.js';
 import { cancelAppointmentJobs, getAutomation, scheduleAppointmentJobs } from '../automation/reminders.js';
 import { scheduleJob } from '../automation/jobs.js';
-import { computeFreeSlots, pickOfferSlots, slotId, type AvailabilityConfig, type Interval, type PartOfDay, type Slot } from './availability.js';
+import { clampSlotRange, computeFreeSlots, pickOfferSlots, slotId, type AvailabilityConfig, type Interval, type PartOfDay, type Slot } from './availability.js';
 import { getCalendarConnection, googleAccessToken, markCalendarError, type CalendlyCredentials } from './connections.js';
 import { googleCreateEvent, googleDeleteEvent, googleFreeBusy } from './providers/google.js';
 import { calendlyAvailableTimes, calendlyPrefilledUrl } from './providers/calendly.js';
@@ -73,6 +73,10 @@ async function internalBusy(
  *
  * `includeTestLeads` (por defecto, sí): si las citas del simulador ocupan hueco. Para un lead real se pasa
  * false; para un lead de prueba, true (el simulador ve la agenda completa).
+ *
+ * El rango pedido se recorta SIEMPRE a [ahora, ahora + días de antelación máxima] antes de consultar nada:
+ * fuera de ahí no se puede reservar, y un rango enorme supondría cientos de consultas seguidas a Calendly
+ * (una por semana) que bloquearían el servidor y gastarían el cupo de la API del entrenador.
  */
 export async function getFreeSlots(
   businessId: string,
@@ -80,9 +84,9 @@ export async function getFreeSlots(
   opts: { excludeAppointmentId?: string; includeTestLeads?: boolean } = {},
 ): Promise<{ slots: SlotWithUrl[]; config: AvailabilityConfig & { callDurationMinutes: number }; provider: 'internal' | 'google' | 'calendly' }> {
   const config = await getAvailabilityConfig(businessId);
-  const from = range?.from ?? new Date();
-  const to = range?.to ?? new Date(Date.now() + config.maxDaysAhead * 24 * 3600_000);
+  const { from, to } = clampSlotRange(range, config.maxDaysAhead);
   const connection = await getCalendarConnection(businessId);
+  if (from >= to) return { slots: [], config, provider: connection?.provider ?? 'internal' };
 
   if (connection?.provider === 'calendly') {
     try {
@@ -99,11 +103,17 @@ export async function getFreeSlots(
     }
   }
 
-  const busy = await internalBusy(businessId, { from, to }, { excludeAppointmentId: opts.excludeAppointmentId, includeTestLeads: opts.includeTestLeads ?? true });
+  // Las ocupaciones se piden con margen (descanso entre llamadas + duración del último hueco): una cita que
+  // acaba justo antes de `from` o empieza justo después de `to` también puede chocar con un hueco del rango.
+  const busyRange = {
+    from: new Date(from.getTime() - config.bufferMinutes * 60_000),
+    to: new Date(to.getTime() + (config.callDurationMinutes + config.bufferMinutes) * 60_000),
+  };
+  const busy = await internalBusy(businessId, busyRange, { excludeAppointmentId: opts.excludeAppointmentId, includeTestLeads: opts.includeTestLeads ?? true });
   if (connection?.provider === 'google') {
     try {
       const token = await googleAccessToken(connection);
-      busy.push(...(await googleFreeBusy(token, connection.calendarId ?? 'primary', { from, to }, config.timezone)));
+      busy.push(...(await googleFreeBusy(token, connection.calendarId ?? 'primary', busyRange, config.timezone)));
     } catch (err) {
       await markCalendarError(connection.id, errorMessage(err));
       await logError('calendar.google.freebusy', err, {}, businessId);
@@ -440,6 +450,11 @@ export async function setAppointmentOutcome(
 ) {
   const appt = await getAppointment(businessId, id);
   if (appt.status === 'cancelled' || appt.status === 'rescheduled') throw badRequest('Esta cita fue cancelada o reprogramada.');
+  // Antes de la hora no hay resultado que registrar: marcar un “no se presentó” por error enviaría al lead
+  // el mensaje de no-show de una llamada que todavía no ha ocurrido (y lo sacaría de “llamada agendada”).
+  if (appt.startsAt.getTime() > Date.now()) {
+    throw badRequest('La llamada todavía no ha empezado: podrás registrar el resultado a partir de la hora de inicio.');
+  }
   const db = getDb();
   if (!input.attended) {
     await db.update(appointments).set({ status: 'no_show', outcome: null, outcomeNotes: input.notes ?? null, updatedAt: new Date() }).where(eq(appointments.id, id));

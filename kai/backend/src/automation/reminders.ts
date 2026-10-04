@@ -15,6 +15,18 @@ export async function getAutomation(businessId: string, type: AutomationType): P
 }
 
 /**
+ * ¿Se envía este mensaje de la llamada? La automatización tiene que estar activada y su opción concreta
+ * (confirmación, recordatorio de 24 h o de 1 h) sin desmarcar. Se usa al programar Y al enviar: si el
+ * entrenador lo desactiva después de reservar, los trabajos ya programados tampoco se envían.
+ */
+export function appointmentMessageEnabled(
+  automation: { enabled: boolean; config: AutomationConfig } | null,
+  kind: 'confirmation' | 'reminder24h' | 'reminder1h',
+): boolean {
+  return Boolean(automation?.enabled) && automation!.config[kind] !== false;
+}
+
+/**
  * Programa confirmación, recordatorios (24 h y 1 h antes) y el aviso post-llamada de una cita.
  */
 export async function scheduleAppointmentJobs(
@@ -31,10 +43,10 @@ export async function scheduleAppointmentJobs(
 
   if (reminders?.enabled) {
     const cfg = reminders.config;
-    if (opts.sendConfirmation && cfg.confirmation !== false) {
+    if (opts.sendConfirmation && appointmentMessageEnabled(reminders, 'confirmation')) {
       await scheduleJob({ ...base, type: 'appointment_confirmation', runAt: addMinutes(now, 1), dedupeKey: `appt:${appointment.id}:confirm` });
     }
-    if (cfg.reminder24h !== false) {
+    if (appointmentMessageEnabled(reminders, 'reminder24h')) {
       let at = addHours(appointment.startsAt, -24);
       if (isWithinQuietHours(at, tz, cfg.quietHours)) {
         const shifted = shiftOutOfQuietHours(at, tz, cfg.quietHours);
@@ -44,7 +56,7 @@ export async function scheduleAppointmentJobs(
         await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at, payload: { ...base.payload, kind: '24h' }, dedupeKey: `appt:${appointment.id}:r24` });
       }
     }
-    if (cfg.reminder1h !== false) {
+    if (appointmentMessageEnabled(reminders, 'reminder1h')) {
       const at = addHours(appointment.startsAt, -1);
       if (at.getTime() > now.getTime() + 5 * 60_000) {
         await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at, payload: { ...base.payload, kind: '1h' }, dedupeKey: `appt:${appointment.id}:r1` });

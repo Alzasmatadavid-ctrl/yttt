@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Lock, Plus, RotateCw, Save, Trash2 } from 'lucide-react';
 import { WEEKDAY_LABELS, type AvailabilityWeek } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime } from '../lib/format';
 import { useCan } from '../lib/business';
-import { Button, Callout, Card, EmptyState, Field, Input, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
+import { Button, Callout, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
 import { OutcomeModal } from '../components/lead-actions';
 import type { Appointment, AvailabilityConfig, CalendarConnection } from '../lib/types';
 
@@ -136,20 +136,76 @@ function WeekView({ timezone, weekly, offset, onPick }: { timezone: string; week
   );
 }
 
-function AvailabilityEditor({ config, connections }: { config: AvailabilityConfig; connections: CalendarConnection[] }) {
+/** Lo que se edita en «Disponibilidad» (la antelación, en horas). */
+type AvailabilityDraft = {
+  weekly: AvailabilityWeek;
+  slotMinutes: number;
+  bufferMinutes: number;
+  minNoticeHours: number;
+  maxDaysAhead: number;
+  blackout: string[];
+};
+
+function toDraft(config: AvailabilityConfig): AvailabilityDraft {
+  return {
+    weekly: config.weekly,
+    slotMinutes: config.slotMinutes,
+    bufferMinutes: config.bufferMinutes,
+    minNoticeHours: Math.round(config.minNoticeMinutes / 60),
+    maxDaysAhead: config.maxDaysAhead,
+    blackout: config.blackoutDates,
+  };
+}
+
+const sameDraft = (a: AvailabilityDraft, b: AvailabilityDraft) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Borrador del horario. Se resincroniza con el servidor solo si no hay cambios pendientes: volver a la pestaña del
+ * navegador refresca la disponibilidad, y eso no debe borrar las franjas que se están editando y aún no se han guardado.
+ */
+function useAvailabilityDraft(config: AvailabilityConfig) {
+  const source = toDraft(config);
+  const sourceKey = JSON.stringify(source);
+  const [state, setState] = useState({ key: sourceKey, base: source, draft: source });
+  let current = state;
+  if (state.key !== sourceKey) {
+    const pending = !sameDraft(state.draft, state.base);
+    current = { key: sourceKey, base: source, draft: pending ? state.draft : source };
+    setState(current);
+  }
+  return {
+    draft: current.draft,
+    dirty: !sameDraft(current.draft, current.base),
+    update: (fn: (d: AvailabilityDraft) => AvailabilityDraft) => setState((s) => ({ ...s, draft: fn(s.draft) })),
+    discard: () => setState((s) => ({ ...s, draft: s.base })),
+    /** Tras guardar, lo enviado es la nueva base (si se siguió editando mientras tanto, se conserva lo escrito). */
+    markSaved: (sent: AvailabilityDraft) => setState((s) => ({ ...s, base: sent, draft: sameDraft(s.draft, sent) ? sent : s.draft })),
+  };
+}
+
+function AvailabilityEditor({ config, connections, onDirtyChange }: { config: AvailabilityConfig; connections: CalendarConnection[]; onDirtyChange: (dirty: boolean) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [weekly, setWeekly] = useState<AvailabilityWeek>(config.weekly);
-  const [slotMinutes, setSlotMinutes] = useState(config.slotMinutes);
-  const [bufferMinutes, setBufferMinutes] = useState(config.bufferMinutes);
-  const [minNoticeHours, setMinNoticeHours] = useState(Math.round(config.minNoticeMinutes / 60));
-  const [maxDaysAhead, setMaxDaysAhead] = useState(config.maxDaysAhead);
-  const [blackout, setBlackout] = useState<string[]>(config.blackoutDates);
+  const { draft, dirty, update, markSaved } = useAvailabilityDraft(config);
+  const { weekly, slotMinutes, bufferMinutes, minNoticeHours, maxDaysAhead, blackout } = draft;
   const [newDate, setNewDate] = useState('');
-  useEffect(() => setWeekly(config.weekly), [config.weekly]);
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  const setWeekly = (fn: (w: AvailabilityWeek) => AvailabilityWeek) => update((d) => ({ ...d, weekly: fn(d.weekly) }));
+  const setField = <K extends 'slotMinutes' | 'bufferMinutes' | 'minNoticeHours' | 'maxDaysAhead'>(key: K) => (e: { target: { value: string } }) =>
+    update((d) => ({ ...d, [key]: Number(e.target.value) }));
+  const setBlackout = (fn: (b: string[]) => string[]) => update((d) => ({ ...d, blackout: fn(d.blackout) }));
   const save = useMutation({
-    mutationFn: () => api.put('/agenda/availability', { weekly, slotMinutes, bufferMinutes, minNoticeMinutes: minNoticeHours * 60, maxDaysAhead, blackoutDates: blackout }),
-    onSuccess: () => {
+    mutationFn: (d: AvailabilityDraft) =>
+      api.put('/agenda/availability', {
+        weekly: d.weekly,
+        slotMinutes: d.slotMinutes,
+        bufferMinutes: d.bufferMinutes,
+        minNoticeMinutes: d.minNoticeHours * 60,
+        maxDaysAhead: d.maxDaysAhead,
+        blackoutDates: d.blackout,
+      }),
+    onSuccess: (_r, sent) => {
+      markSaved(sent);
       toast('Disponibilidad guardada. KAI solo ofrecerá estos horarios.');
       void qc.invalidateQueries({ queryKey: ['availability'] });
       void qc.invalidateQueries({ queryKey: ['slots'] });
@@ -163,7 +219,20 @@ function AvailabilityEditor({ config, connections }: { config: AvailabilityConfi
   const canEdit = useCan('settings:write');
 
   return (
-    <Card title="Disponibilidad para llamadas" icon={Clock} actions={canEdit ? <Button variant="primary" size="sm" icon={Save} loading={save.isPending} onClick={() => save.mutate()}>Guardar</Button> : undefined}>
+    <Card
+      title="Disponibilidad para llamadas"
+      icon={Clock}
+      actions={
+        canEdit ? (
+          <>
+            {dirty && <span className="subtle small">Cambios sin guardar</span>}
+            <Button variant="primary" size="sm" icon={Save} loading={save.isPending} onClick={() => save.mutate(draft)}>
+              Guardar
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
       {!canEdit && (
         <div style={{ marginBottom: 12 }}>
           <Callout tone="info" icon={Lock}>
@@ -204,16 +273,16 @@ function AvailabilityEditor({ config, connections }: { config: AvailabilityConfi
             <Input value={`${config.callDurationMinutes} min`} disabled />
           </Field>
           <Field label="Intervalo entre huecos (min)">
-            <Input type="number" min={10} max={240} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} />
+            <Input type="number" min={10} max={240} value={slotMinutes} onChange={setField('slotMinutes')} />
           </Field>
           <Field label="Margen entre citas (min)">
-            <Input type="number" min={0} max={120} value={bufferMinutes} onChange={(e) => setBufferMinutes(Number(e.target.value))} />
+            <Input type="number" min={0} max={120} value={bufferMinutes} onChange={setField('bufferMinutes')} />
           </Field>
           <Field label="Antelación mínima (horas)">
-            <Input type="number" min={0} max={168} value={minNoticeHours} onChange={(e) => setMinNoticeHours(Number(e.target.value))} />
+            <Input type="number" min={0} max={168} value={minNoticeHours} onChange={setField('minNoticeHours')} />
           </Field>
           <Field label="Agendar hasta (días vista)">
-            <Input type="number" min={1} max={90} value={maxDaysAhead} onChange={(e) => setMaxDaysAhead(Number(e.target.value))} />
+            <Input type="number" min={1} max={90} value={maxDaysAhead} onChange={setField('maxDaysAhead')} />
           </Field>
         </div>
         <div className="mt-16">
@@ -239,15 +308,65 @@ function AvailabilityEditor({ config, connections }: { config: AvailabilityConfi
   );
 }
 
+type AgendaTab = 'semana' | 'disponibilidad';
+const STATUS_TEXT: Record<Appointment['status'], string> = { scheduled: 'Programada', completed: 'Realizada', no_show: 'No presentado', cancelled: 'Cancelada', rescheduled: 'Reprogramada' };
+
 export default function Agenda() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'semana' | 'disponibilidad'>('semana');
+  // La pestaña va en la URL (?tab=disponibilidad): así los avisos y textos que mandan a «Disponibilidad» la abren directamente.
+  const [params, setParams] = useSearchParams();
+  const tab: AgendaTab = params.get('tab') === 'disponibilidad' ? 'disponibilidad' : 'semana';
+  const selectTab = (next: AgendaTab) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === 'semana') p.delete('tab');
+        else p.set('tab', next);
+        return p;
+      },
+      { replace: true },
+    );
+  // El editor del horario se monta la primera vez que se abre la pestaña y después solo se oculta: así no se pierden
+  // las franjas editadas y aún no guardadas al pasar a «Semana» y volver.
+  const [editorVisited, setEditorVisited] = useState(tab === 'disponibilidad');
+  if (tab === 'disponibilidad' && !editorVisited) setEditorVisited(true);
+  const [availabilityDirty, setAvailabilityDirty] = useState(false);
   const [offset, setOffset] = useState(0);
   const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
   const [picked, setPicked] = useState<ApptRow | null>(null);
   const availability = useQuery({ queryKey: ['availability'], queryFn: () => api.get<{ config: AvailabilityConfig; connections: CalendarConnection[] }>('/agenda/availability') });
   const pastRange = useMemo(() => ({ from: new Date(Date.now() - 14 * 86_400_000).toISOString(), to: new Date().toISOString() }), []);
   const pending = useQuery({ queryKey: ['appointments', 'past'], queryFn: () => api.get<{ appointments: ApptRow[] }>('/agenda/appointments', pastRange) });
+
+  // Aviso del navegador si se intenta cerrar o recargar con cambios sin guardar en el horario.
+  useEffect(() => {
+    if (!availabilityDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [availabilityDirty]);
+  // Aviso propio al ir a otra pantalla de la aplicación (menú lateral, enlaces…) con cambios sin guardar.
+  const [leaveTo, setLeaveTo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!availabilityDirty) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null;
+      if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLeaveTo(url.pathname + url.search + url.hash);
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, [availabilityDirty]);
+  const goTo = (path: string) => (availabilityDirty ? setLeaveTo(path) : navigate(path));
+
   if (availability.isLoading) return <PageLoading />;
   if (!availability.data) {
     return (
@@ -266,8 +385,12 @@ export default function Agenda() {
     );
   }
   const tz = availability.data.config.timezone;
+  const now = new Date();
   // Las citas de prueba (simulador) no se registran: no son leads reales ni cuentan en las estadísticas.
-  const needOutcome = (pending.data?.appointments ?? []).filter((a) => !a.lead.isTest && a.appointment.status === 'scheduled' && new Date(a.appointment.endsAt) < new Date());
+  const needOutcome = (pending.data?.appointments ?? []).filter((a) => !a.lead.isTest && a.appointment.status === 'scheduled' && new Date(a.appointment.endsAt) < now);
+  // El resultado solo se registra cuando la llamada ya ha empezado: en una futura, «no se presentó» haría que KAI
+  // le escribiera al lead como si hubiera faltado.
+  const pickedStarted = picked ? new Date(picked.appointment.startsAt) <= now : false;
 
   return (
     <div className="page">
@@ -311,50 +434,48 @@ export default function Agenda() {
         <Tabs
           tabs={[
             { value: 'semana', label: 'Semana' },
-            { value: 'disponibilidad', label: 'Disponibilidad' },
+            { value: 'disponibilidad', label: availabilityDirty ? 'Disponibilidad (sin guardar)' : 'Disponibilidad' },
           ]}
           value={tab}
-          onChange={setTab}
+          onChange={selectTab}
         />
       </div>
-      {tab === 'semana' ? (
-        <WeekView timezone={tz} weekly={availability.data.config.weekly} offset={offset} onPick={setPicked} />
-      ) : (
-        <AvailabilityEditor config={availability.data.config} connections={availability.data.connections} />
+      {tab === 'semana' && availabilityDirty && (
+        <p className="small muted" role="status" style={{ marginBottom: 12 }}>
+          Tienes cambios sin guardar en «Disponibilidad». Se conservan mientras no salgas de esta página: vuelve a esa pestaña y pulsa Guardar.
+        </p>
       )}
-      {picked && (
-        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setPicked(null)}>
-          <div className="modal" role="dialog" aria-modal="true">
-            <div className="modal-header">
-              <h2 className="row">
-                <CalendarClock size={18} /> {picked.lead.name}
-                {picked.lead.isTest && <span className="badge">Prueba</span>}
-              </h2>
-              <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
-                Cerrar
+      {tab === 'semana' && <WeekView timezone={tz} weekly={availability.data.config.weekly} offset={offset} onPick={setPicked} />}
+      {editorVisited && (
+        <div hidden={tab !== 'disponibilidad'}>
+          <AvailabilityEditor config={availability.data.config} connections={availability.data.connections} onDirtyChange={setAvailabilityDirty} />
+        </div>
+      )}
+      <Modal
+        open={picked !== null}
+        onClose={() => setPicked(null)}
+        title={
+          picked ? (
+            <span className="row">
+              <CalendarClock size={18} aria-hidden /> {picked.lead.name}
+              {picked.lead.isTest && <span className="badge">Prueba</span>}
+            </span>
+          ) : (
+            ''
+          )
+        }
+        footer={
+          picked && (
+            <>
+              <Button
+                onClick={() => {
+                  setPicked(null);
+                  goTo(`/app/leads/${picked.lead.id}`);
+                }}
+              >
+                Ver lead
               </Button>
-            </div>
-            <dl className="kv">
-              <dt>Cuándo</dt>
-              <dd>{dateTime(picked.appointment.startsAt, tz)}</dd>
-              <dt>Objetivo</dt>
-              <dd>{picked.lead.goalSummary ?? '—'}</dd>
-              <dt>Estado</dt>
-              <dd>{{ scheduled: 'Programada', completed: 'Realizada', no_show: 'No presentado', cancelled: 'Cancelada', rescheduled: 'Reprogramada' }[picked.appointment.status]}</dd>
-              {picked.appointment.meetingUrl && (
-                <>
-                  <dt>Enlace</dt>
-                  <dd>
-                    <a href={picked.appointment.meetingUrl} target="_blank" rel="noreferrer">
-                      {picked.appointment.meetingUrl}
-                    </a>
-                  </dd>
-                </>
-              )}
-            </dl>
-            <div className="modal-footer">
-              <Button onClick={() => navigate(`/app/leads/${picked.lead.id}`)}>Ver lead</Button>
-              {picked.appointment.status === 'scheduled' && (
+              {picked.appointment.status === 'scheduled' && pickedStarted && (
                 <Button
                   variant="primary"
                   onClick={() => {
@@ -365,11 +486,52 @@ export default function Agenda() {
                   Registrar resultado
                 </Button>
               )}
-            </div>
-          </div>
-        </div>
-      )}
+            </>
+          )
+        }
+      >
+        {picked && (
+          <>
+            <dl className="kv">
+              <dt>Cuándo</dt>
+              <dd>{dateTime(picked.appointment.startsAt, tz)}</dd>
+              <dt>Objetivo</dt>
+              <dd>{picked.lead.goalSummary ?? '—'}</dd>
+              <dt>Estado</dt>
+              <dd>{STATUS_TEXT[picked.appointment.status]}</dd>
+              {picked.appointment.meetingUrl && (
+                <>
+                  <dt>Enlace</dt>
+                  <dd style={{ overflowWrap: 'anywhere' }}>
+                    <a href={picked.appointment.meetingUrl} target="_blank" rel="noreferrer">
+                      {picked.appointment.meetingUrl}
+                    </a>
+                  </dd>
+                </>
+              )}
+            </dl>
+            {picked.appointment.status === 'scheduled' && !pickedStarted && (
+              <p className="subtle small" style={{ marginBottom: 0 }}>
+                Podrás registrar cómo fue cuando empiece la llamada. Si el lead no puede asistir, cancélala desde su ficha y agenda otra.
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
       <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
+      <ConfirmDialog
+        open={leaveTo !== null}
+        title="¿Salir sin guardar?"
+        message="Tienes cambios sin guardar en tu horario de llamadas. Si sales ahora, se perderán. Para conservarlos, quédate y pulsa Guardar en «Disponibilidad»."
+        confirmLabel="Salir sin guardar"
+        danger
+        onConfirm={() => {
+          const target = leaveTo;
+          setLeaveTo(null);
+          if (target) navigate(target);
+        }}
+        onClose={() => setLeaveTo(null)}
+      />
     </div>
   );
 }
