@@ -305,13 +305,13 @@ function findDayRefs(f: string): DayRef[] {
   return refs;
 }
 
-/** Día que acompaña a una hora: el más cercano antes de ella en la misma frase, o justo después (“a las 18:00 del jueves”). */
+/** Día que acompaña a una hora: el que va justo después (“a las 18:00 del jueves”) o el más cercano antes, en la misma frase. */
 function dayFor(time: TimeMention, refs: DayRef[], f: string): DayRef | null {
+  const after = refs.find((r) => r.index >= time.end && /^\s*,?\s*(?:del?|el|este|esta|para el|para)?\s*$/.test(f.slice(time.end, r.index)));
+  if (after) return after;
   const sentenceStart = Math.max(...[...f.slice(0, time.index).matchAll(/[.!?\n](?=\s|$)/g)].map((b) => b.index! + 1), 0);
   const before = refs.filter((r) => r.end <= time.index && r.index >= sentenceStart);
-  if (before.length) return before[before.length - 1];
-  const after = refs.find((r) => r.index >= time.end && /^\s*,?\s*(?:del?|el|este|esta|para el|para)?\s*$/.test(f.slice(time.end, r.index)));
-  return after ?? null;
+  return before.length ? before[before.length - 1] : null;
 }
 
 function sameDay(a: DateTime, ref: DayRef, today: DateTime | null): boolean | null {
