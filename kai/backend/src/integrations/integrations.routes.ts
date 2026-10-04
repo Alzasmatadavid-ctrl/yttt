@@ -12,7 +12,7 @@ import { audit, logError } from '../audit/audit.service.js';
 import { aiModeInfo } from '../ai/providers/index.js';
 import type { ChannelConfig } from '../lib/domain.js';
 import { disconnectConnection, listConnections, updateConnectionConfig, upsertConnection } from './connections.service.js';
-import { graphRequest } from './meta/graph.js';
+import { friendlyMetaError, graphRequest } from './meta/graph.js';
 import { getCalendarConnection, listCalendarConnections, saveCalendarConnection, updateCalendarConnection, type CalendlyCredentials } from '../calendar/connections.js';
 import { exchangeGoogleCode, googleAuthUrl } from '../calendar/providers/google.js';
 import { calendlyCreateWebhook, calendlyDeleteWebhook, calendlyEventTypes, calendlyMe } from '../calendar/providers/calendly.js';
@@ -76,6 +76,8 @@ export async function integrationsRoutes(app: FastifyInstance) {
         displayName: z.string().trim().max(120).optional(),
         config: ChannelConfigSchema.default({}),
         skipVerification: z.boolean().optional(),
+        /** Al cambiar de número o de cuenta: id de la conexión anterior, que se desconecta en la misma operación. */
+        replacesConnectionId: z.string().uuid().optional(),
       }),
       request.body,
     );
@@ -84,7 +86,8 @@ export async function integrationsRoutes(app: FastifyInstance) {
       try {
         verified = await verifyMetaAccount(body.channel, body.externalAccountId, body.accessToken, body.config);
       } catch (err) {
-        throw badRequest(`Meta no ha aceptado los datos: ${errorMessage(err)}`);
+        await logError('integrations.verify_meta', err, { channel: body.channel }, ctx.businessId, 'warn');
+        throw badRequest(`Meta no ha aceptado los datos: ${friendlyMetaError(err)}`);
       }
     }
     const connection = await upsertConnection(ctx.businessId, ctx.userId, {
@@ -93,6 +96,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
       displayName: body.displayName || verified.displayName,
       accessToken: body.accessToken,
       config: { ...body.config, ...(verified.phoneNumber ? { phoneNumber: verified.phoneNumber } : {}) },
+      replacesConnectionId: body.replacesConnectionId,
     });
     return { connection };
   });

@@ -104,7 +104,6 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
   const send = useMutation({
     mutationFn: (body: { text: string; pauseKai: boolean }) => api.post<{ delivered: boolean; blockedReason: string | null }>(`/conversations/${conversationId}/messages`, body),
     onSuccess: (r) => {
-      setText('');
       if (!r.delivered) toast(`Mensaje no enviado: ${r.blockedReason ?? 'revisa el canal'}`, 'error');
       void qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
       void qc.invalidateQueries({ queryKey: ['inbox'] });
@@ -129,9 +128,19 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
   });
   // Un solo envío a la vez: el texto no se borra hasta que el servidor confirma, así que pulsar Enter
   // dos veces seguidas (o Enter y el botón) mandaría el mismo mensaje dos veces al lead.
+  // La ref bloquea al instante, sin esperar a que React vuelva a pintar con send.isPending.
+  const sendingRef = useRef(false);
   const submit = () => {
-    if (!text.trim() || send.isPending || data?.lead.optedOut) return;
-    send.mutate({ text, pauseKai });
+    if (!text.trim() || sendingRef.current || send.isPending || data?.lead.optedOut) return;
+    sendingRef.current = true;
+    const body = { text, pauseKai };
+    send.mutate(body, {
+      // Se vacía el cuadro solo si no se ha seguido escribiendo mientras se enviaba.
+      onSuccess: () => setText((t) => (t === body.text ? '' : t)),
+      onSettled: () => {
+        sendingRef.current = false;
+      },
+    });
   };
 
   if (isLoading) return <div className="thread page-loading"><Spinner /></div>;
@@ -388,11 +397,19 @@ export default function Inbox() {
   }, [search]);
   // La ficha superpuesta se cierra al cambiar de conversación…
   useEffect(() => setShowPanel(false), [conversationId]);
-  // …y con Escape (salvo que haya un modal abierto encima, como «Agendar llamada»: Escape cierra ese modal).
+  // …con su botón «Cerrar», pulsando fuera o con Escape; el foco vuelve al botón que la abrió.
+  const closePanel = () => {
+    setShowPanel(false);
+    document.querySelector<HTMLElement>('.thread-panel-toggle')?.focus();
+  };
   useEffect(() => {
     if (!showPanel) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.querySelector('.overlay')) setShowPanel(false);
+      // Si hay un modal abierto encima (p. ej. «Agendar llamada»), Escape cierra ese modal, no la ficha.
+      if (e.key === 'Escape' && !document.querySelector('.overlay')) {
+        setShowPanel(false);
+        document.querySelector<HTMLElement>('.thread-panel-toggle')?.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -484,8 +501,8 @@ export default function Inbox() {
       {activeId ? (
         <>
           <Thread key={activeId} conversationId={activeId} onBack={() => navigate('/app/inbox')} onTogglePanel={() => setShowPanel((s) => !s)} panelOpen={showPanel} />
-          {showPanel && <div className="inbox-panel-backdrop" onClick={() => setShowPanel(false)} aria-hidden />}
-          <LeadPanel key={activeId} conversationId={activeId} overlayOpen={showPanel} onClose={() => setShowPanel(false)} />
+          {showPanel && <div className="inbox-panel-backdrop" onClick={closePanel} aria-hidden />}
+          <LeadPanel key={activeId} conversationId={activeId} overlayOpen={showPanel} onClose={closePanel} />
         </>
       ) : (
         <section className="thread" style={{ display: 'grid', placeItems: 'center', gridColumn: 'span 2' }}>

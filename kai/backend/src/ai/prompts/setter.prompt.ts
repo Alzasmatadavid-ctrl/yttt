@@ -7,8 +7,9 @@
 import { DateTime } from 'luxon';
 import { BILLING_PERIOD_LABELS, CHANNEL_LABELS, formatMoney, leadStatusLabel, type ChannelKey, type ConversationState } from '../../lib/domain.js';
 import { firstName } from '../../lib/text.js';
+import { humanSlotLabel } from '../../lib/time.js';
 import type { BusinessContext, LeadContext } from '../context/context.js';
-import type { Directive } from '../setter/strategy.js';
+import type { Directive, SetterState } from '../setter/strategy.js';
 import { describeTone } from './tone.js';
 
 export function describeServices(biz: BusinessContext): string {
@@ -113,7 +114,9 @@ export function buildSetterTurnContext(input: {
     })
     .join('\n');
   const memories = leadCtx.memories.map((m) => `- ${m.content}`).join('\n');
-  const offered = (state.offeredSlots ?? []).map((s) => `- ${s.label} (slot_id ${s.id})`).join('\n');
+  // Etiquetas recalculadas para ESTE momento (“mañana” de una oferta de ayer es “hoy”).
+  const offered = (state.offeredSlots ?? []).map((s) => `- ${humanSlotLabel(s.start, tz, now)} (slot_id ${s.id})`).join('\n');
+  const st = state as SetterState;
   const appt = leadCtx.upcomingAppointment
     ? `Tiene una ${biz.settings.callLabel} agendada: ${DateTime.fromJSDate(leadCtx.upcomingAppointment.startsAt).setZone(tz).setLocale('es').toFormat("cccc d 'de' LLLL 'a las' HH:mm")}${leadCtx.upcomingAppointment.meetingUrl ? ` (enlace: ${leadCtx.upcomingAppointment.meetingUrl})` : ''}.`
     : 'No tiene ninguna llamada agendada.';
@@ -132,7 +135,7 @@ ${memories || '(sin recuerdos guardados)'}
 
 # Estado de la conversación
 - Precio preguntado: ${state.priceAskedCount ?? 0} vez/veces${state.priceShared ? ' (ya se le dio)' : ''}
-- Llamada propuesta: ${state.callProposedAt ? 'sí' : 'no'}
+- Llamada propuesta: ${state.callProposedAt ? 'sí' : 'no'}${st.callDeclinedAt ? ' (el lead prefirió no hacerla: no se la vuelvas a proponer salvo que la pida él)' : ''}
 ${offered ? `- Horarios ya ofrecidos:\n${offered}` : ''}
 
 # Objetivo de ESTE mensaje

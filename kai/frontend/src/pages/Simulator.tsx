@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, Brain, FlaskConical, FormInput, Play, Plus, Repeat, Send, Sparkles, Trash2, User, Wrench } from 'lucide-react';
+import { AlertTriangle, Bot, Brain, FlaskConical, FormInput, Play, Plus, Repeat, Send, Sparkles, Trash2, User, Wrench } from 'lucide-react';
 import { HANDOFF_REASONS, type HandoffReason } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, timeOnly } from '../lib/format';
@@ -20,6 +20,22 @@ interface SimDetail {
   scoreBreakdown: { key: string; weight: number; earned: number }[];
   pendingFollowUps: { id: string; step: number; scheduledFor: string }[];
 }
+
+/** Por qué KAI no respondió en el simulador, explicado para el entrenador (los códigos vienen del motor del setter). */
+const SKIP_REASONS: Record<string, string> = {
+  autopilot_off: 'KAI está en pausa para todo el negocio: reactívalo desde «KAI en pausa», en el menú lateral.',
+  ai_disabled: 'En esta prueba la conversación la lleva una persona. Pulsa «Devolver a KAI» para que vuelva a responder.',
+  handoff_active: 'KAI pasó esta conversación a una persona. Pulsa «Devolver a KAI» para que vuelva a responder.',
+  taken_over: 'Alguien tomó el control de la conversación mientras KAI preparaba la respuesta.',
+  already_client: 'Este lead ya es cliente: KAI no le escribe como setter.',
+  nothing_to_answer: 'No había ningún mensaje nuevo del lead al que responder.',
+  superseded: 'Llegó otro mensaje mientras KAI escribía: responderá a todos juntos.',
+  business_suspended: 'La cuenta está suspendida: KAI no responde a ningún lead.',
+  disabled: 'KAI está en pausa en esta conversación.',
+  conversation_started: 'La conversación ya había empezado, así que KAI no envía el primer mensaje.',
+};
+
+const skipReasonText = (reason: string) => SKIP_REASONS[reason] ?? 'KAI ha decidido no responder a este mensaje.';
 
 const DIRECTIVE_LABELS: Record<string, string> = {
   greet_and_ask: 'Saludar y empezar a conocerle',
@@ -114,7 +130,7 @@ export default function Simulator() {
     mutationFn: (t: string) => api.post<{ result: { status: string; reason?: string } }>(`/simulator/conversations/${conversationId}/messages`, { text: t }),
     onSuccess: (r) => {
       setText('');
-      if (r.result.status === 'skipped' && r.result.reason && !['opted_out'].includes(r.result.reason)) toast(`KAI no respondió: ${r.result.reason}`, 'info');
+      if (r.result.status === 'skipped' && r.result.reason && !['opted_out'].includes(r.result.reason)) toast(`KAI no respondió. ${skipReasonText(r.result.reason)}`, 'info');
       void qc.invalidateQueries({ queryKey: ['sim', conversationId] });
       void qc.invalidateQueries({ queryKey: ['sim-list'] });
     },
@@ -128,13 +144,16 @@ export default function Simulator() {
   const release = useMutation({
     mutationFn: () => api.post(`/conversations/${conversationId}/release`, { replyNow: false }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['sim', conversationId] }),
+    onError: (e) => toast(errorText(e), 'error'),
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/simulator/conversations/${id}`),
-    onSuccess: () => {
+    onSuccess: (_r, id) => {
       void qc.invalidateQueries({ queryKey: ['sim-list'] });
-      navigate('/app/simulador');
+      // Solo se sale de la prueba abierta si es la que se ha borrado.
+      if (id === conversationId) navigate('/app/simulador');
     },
+    onError: (e) => toast(errorText(e), 'error'),
   });
   useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [detail.data?.messages.length, sendMsg.isPending]);
 
@@ -144,6 +163,7 @@ export default function Simulator() {
   const analysis = lastInbound?.metadata.analysis as { engine?: string; summary?: string; flags?: Record<string, boolean>; objectionKey?: string | null } | undefined;
   const toolCalls = (lastKai?.metadata.toolCalls as { name: string; ok: boolean; input: Record<string, unknown> }[] | undefined) ?? [];
   const ai = settings.data?.ai;
+  const tz = settings.data?.business.timezone;
 
   return (
     <div className="page" style={{ maxWidth: 'none' }}>
@@ -195,10 +215,22 @@ export default function Simulator() {
         <Card flush className="col" title={undefined}>
           {!conversationId ? (
             <EmptyState icon={Bot} title="Prueba a KAI" description="Crea una prueba y escribe como lo haría un cliente potencial: “Hola, vi tu anuncio y quiero perder grasa”." action={<Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Nueva prueba</Button>} />
-          ) : detail.isLoading || !d ? (
+          ) : detail.isLoading ? (
             <div className="page-loading" style={{ minHeight: 300 }}>
               <Spinner />
             </div>
+          ) : !d ? (
+            // Prueba borrada o enlace antiguo: se explica en vez de dejar el chat cargando para siempre.
+            <EmptyState
+              icon={AlertTriangle}
+              title="No se pudo abrir esta prueba"
+              description={errorText(detail.error)}
+              action={
+                <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
+                  Nueva prueba
+                </Button>
+              }
+            />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 290px)', minHeight: 420 }}>
               <div className="thread-header">
@@ -251,7 +283,7 @@ export default function Simulator() {
                 className="composer"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (text.trim()) sendMsg.mutate(text.trim());
+                  if (text.trim() && !sendMsg.isPending) sendMsg.mutate(text.trim());
                 }}
               >
                 <div className="composer-box">
@@ -276,7 +308,7 @@ export default function Simulator() {
                 </div>
                 {d.appointments.filter((a) => a.status === 'scheduled').map((a) => (
                   <p key={a.id} className="small mt-8">
-                    📅 Llamada reservada: <strong>{dateTime(a.startsAt)}</strong>
+                    📅 Llamada reservada: <strong>{dateTime(a.startsAt, tz)}</strong>
                   </p>
                 ))}
                 <div className="mt-12">
@@ -331,7 +363,7 @@ export default function Simulator() {
               <Card title="Seguimiento automático" icon={Repeat} className="card-tight">
                 <p className="muted small">
                   {d.pendingFollowUps.length
-                    ? `Programado el paso ${d.pendingFollowUps[0].step} para ${dateTime(d.pendingFollowUps[0].scheduledFor)}.`
+                    ? `Programado el paso ${d.pendingFollowUps[0].step} para ${dateTime(d.pendingFollowUps[0].scheduledFor, tz)}.`
                     : 'No hay seguimientos programados ahora mismo.'}
                 </p>
                 <Button size="sm" className="mt-8" icon={Play} loading={followUp.isPending} onClick={() => followUp.mutate()}>

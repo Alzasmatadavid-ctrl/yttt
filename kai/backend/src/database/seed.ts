@@ -9,7 +9,7 @@
  * conectes un canal real a este negocio nunca se enviará un mensaje a una persona de verdad.
  * No crea trabajos programados: nada se envía solo.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { closeDatabase, getDb, initDatabase } from './client.js';
 import { bootstrapData } from './bootstrap.js';
@@ -32,7 +32,8 @@ import {
 import { createBusiness } from '../business/business.service.js';
 import { MEDICAL_MESSAGE } from '../ai/setter/setter-engine.js';
 import { DEFAULT_QUALIFICATION_RULES } from '../config/defaults.js';
-import { isProduction } from '../config/env.js';
+import { env, isProduction } from '../config/env.js';
+import { planDemoReset, PUBLIC_DEMO_PASSWORD, seedEnvironmentProblem } from './seed-safety.js';
 import { computeScore, temperatureFor } from '../crm/scoring.js';
 import { hashPassword } from '../lib/crypto.js';
 import type {
@@ -48,7 +49,7 @@ import type {
 import { DEFAULT_SCORE_BANDS, DEFAULT_TONE } from '../lib/domain.js';
 
 const DEMO_EMAIL = (process.env.DEMO_EMAIL ?? 'demo@kai.local').trim().toLowerCase();
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'KaiDemo2026';
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD?.trim() || PUBLIC_DEMO_PASSWORD;
 const BUSINESS_NAME = 'Demo · David Alzas Coach';
 const TZ = 'Europe/Madrid';
 const DEMO_TAG = 'demo';
@@ -494,23 +495,38 @@ const DEMO_LEADS: DemoLead[] = [
 
 const SCORING_RULES = DEFAULT_QUALIFICATION_RULES.map((r) => ({ key: r.key, weight: r.weight, enabled: true, required: r.required }));
 
-async function removeExistingDemo() {
+/** Borra la cuenta demo anterior, solo si de verdad es la demo (ver planDemoReset). */
+async function removeExistingDemo(): Promise<boolean> {
   const db = getDb();
   const [user] = await db.select().from(users).where(eq(users.email, DEMO_EMAIL)).limit(1);
   if (!user) return false;
-  const owned = await db
-    .select({ businessId: memberships.businessId })
+  const rows = await db
+    .select({
+      businessId: memberships.businessId,
+      businessName: businesses.name,
+      role: memberships.role,
+      memberCount: sql<number>`(select count(*)::int from ${memberships} m2 where m2.business_id = ${memberships.businessId})`,
+    })
     .from(memberships)
-    .where(and(eq(memberships.userId, user.id), eq(memberships.role, 'trainer')));
-  const ids = owned.map((o) => o.businessId);
-  if (ids.length) await db.delete(businesses).where(inArray(businesses.id, ids));
+    .innerJoin(businesses, eq(businesses.id, memberships.businessId))
+    .where(eq(memberships.userId, user.id));
+  const plan = planDemoReset(user, rows.map((r) => ({ ...r, memberCount: Number(r.memberCount) })), BUSINESS_NAME);
+  if (!plan.ok) throw new Error(plan.reason);
+  if (plan.businessIds.length) await db.delete(businesses).where(inArray(businesses.id, plan.businessIds));
   await db.delete(users).where(eq(users.id, user.id));
   return true;
 }
 
 async function seed() {
-  if (isProduction() && !force) {
-    console.error('✖ Estás en producción. Los datos demo solo deberían crearse en local. Si de verdad quieres hacerlo, añade --force.');
+  const problem = seedEnvironmentProblem({
+    production: isProduction(),
+    force,
+    demoEmail: DEMO_EMAIL,
+    demoPassword: process.env.DEMO_PASSWORD,
+    adminEmail: env.ADMIN_EMAIL,
+  });
+  if (problem) {
+    console.error(`✖ ${problem}`);
     process.exitCode = 1;
     return;
   }

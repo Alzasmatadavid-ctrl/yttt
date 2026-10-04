@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decideDirective, nextQualificationRule, type StrategyInput } from '../../src/ai/setter/strategy.js';
 import type { ConversationState } from '../../src/lib/domain.js';
+import { humanSlotLabel } from '../../src/lib/time.js';
 import {
   makeAnalysis,
   makeAppointment,
@@ -124,19 +125,32 @@ describe('decideDirective', () => {
       expect(d.kind).toBe('book_slot');
     });
 
-    it('post_booking si ya tiene una llamada agendada', () => {
-      const d = decide({ leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }), analysis: makeAnalysis({ flags: { asksPrice: true, wantsCall: true } }) });
+    it('post_booking si ya tiene una llamada agendada (sin volver a ofrecer horarios)', () => {
+      const d = decide({ leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }), analysis: makeAnalysis({ flags: { wantsCall: true } }) });
       expect(d.kind).toBe('post_booking');
     });
 
-    it.each(['wantsReschedule', 'wantsCancel'] as const)('reschedule con cita agendada y %s', (flag) => {
+    // Con la llamada agendada, el precio no se oculta (sección 16): se da el real, sin volver a cualificar.
+    it('con la llamada agendada, si pregunta el precio se le da (sin contextualizar ni proponer otra llamada)', () => {
+      const d = decide({ leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }), analysis: makeAnalysis({ flags: { asksPrice: true, wantsCall: true } }), state: { priceAskedCount: 1 } });
+      expect(d.kind).toBe('share_price');
+      expect(d.instruction).toContain('ya tiene la llamada de valoración agendada');
+    });
+
+    it.each([{ wantsReschedule: true }, { wantsReschedule: true, wantsCancel: true }])('reschedule con cita agendada y %j', (flags) => {
       const d = decide({
         leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }),
-        analysis: makeAnalysis({ flags: { [flag]: true }, preferredDate: '2026-10-08', preferredPartOfDay: 'morning' }),
+        analysis: makeAnalysis({ flags, preferredDate: '2026-10-08', preferredPartOfDay: 'morning' }),
       });
       expect(d.kind).toBe('reschedule');
       expect(d.needsSlots).toBe(true);
       expect(d.slotQuery).toEqual({ date: '2026-10-08', partOfDay: 'morning' });
+    });
+
+    it('cancel_booking si pide cancelar (y no moverla)', () => {
+      const d = decide({ leadCtx: makeLeadContext({ upcomingAppointment: makeAppointment() }), analysis: makeAnalysis({ flags: { wantsCancel: true } }) });
+      expect(d.kind).toBe('cancel_booking');
+      expect(d.instruction).toContain('cancel_call');
     });
   });
 
@@ -208,7 +222,9 @@ describe('decideDirective', () => {
       const d = decide({ state: recentOfferState(), analysis: makeAnalysis({ flags: { wantsCall: true } }) });
       expect(d.kind).toBe('clarify_slot');
       expect(d.needsSlots).toBeUndefined();
-      expect(d.instruction).toContain('“mañana a las 18:00” o “mañana a las 19:30”');
+      // Etiquetas recalculadas en el momento de responder (la oferta pudo hacerse ayer).
+      const [A, B] = recentOfferState().offeredSlots!;
+      expect(d.instruction).toContain(`“${humanSlotLabel(A.start, 'Europe/Madrid')}” o “${humanSlotLabel(B.start, 'Europe/Madrid')}”`);
     });
 
     it('si pide otro día, vuelve a consultar la agenda', () => {

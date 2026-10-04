@@ -21,7 +21,7 @@ import {
   type LeadStatus,
   type LeadTemperature,
 } from '../../lib/domain.js';
-import { errorMessage, limitReached } from '../../lib/errors.js';
+import { AppError, errorMessage, limitReached } from '../../lib/errors.js';
 import { normalize } from '../../lib/text.js';
 import { audit, logError } from '../../audit/audit.service.js';
 import type { TenantContext } from '../../auth/guards.js';
@@ -271,7 +271,14 @@ class CopilotTools {
           payload.tone = tone;
         }
         if (!canPropose(this.ctx, type)) return { error: NOT_ALLOWED_MESSAGE, not_allowed: true };
-        const action = await createPendingAction(this.ctx, type, payload);
+        let action: Awaited<ReturnType<typeof createPendingAction>>;
+        try {
+          action = await createPendingAction(this.ctx, type, payload);
+        } catch (err) {
+          // Propuesta incompleta o que no pasa el control de calidad: se explica (al modelo o al entrenador) en vez de fallar.
+          if (err instanceof AppError && err.statusCode < 500) return { error: err.message, ...(err.details ? { details: err.details } : {}) };
+          throw err;
+        }
         this.card.actions = [...(this.card.actions ?? []), { id: action.id, type: action.type, summary: action.summary }];
         return { pending_confirmation: true, summary: action.summary };
       }

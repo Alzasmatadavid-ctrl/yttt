@@ -1,11 +1,25 @@
 import type { FastifyInstance } from 'fastify';
+import { eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { parse, uuidParam } from '../lib/http.js';
 import { requireTenant } from '../auth/guards.js';
 import { getDb } from '../database/client.js';
-import { availabilitySettings } from '../database/schema.js';
+import { aiSettings, availabilitySettings, businesses, trainers } from '../database/schema.js';
 import { audit } from '../audit/audit.service.js';
 import { humanSlotLabel } from '../lib/time.js';
+import { DEFAULT_TONE } from '../lib/domain.js';
+import {
+  APPOINTMENT_MESSAGE_FIELDS,
+  confirmationText,
+  DEFAULT_MESSAGE_TEMPLATES,
+  MESSAGE_TEMPLATE_MAX_LENGTH,
+  MESSAGE_VARIABLES,
+  messageTemplateIssues,
+  noShowText,
+  reminderText,
+  renderMessageTemplate,
+} from '../automation/messages.js';
 import {
   bookAppointment,
   cancelAppointment,
@@ -114,6 +128,54 @@ export async function calendarRoutes(app: FastifyInstance) {
       request.body,
     );
     return { appointment: await setAppointmentOutcome(ctx.businessId, id, body, { type: 'user', userId: ctx.userId }) };
+  });
+
+  // ───────────── Mensajes de la llamada (confirmación, recordatorios y no-show) ─────────────
+
+  /** Textos por defecto, campo de configuración de cada uno y variables disponibles (para la pantalla de Seguimientos). */
+  app.get('/agenda/message-templates', async (request) => {
+    await requireTenant(request, 'settings:read');
+    return { defaults: DEFAULT_MESSAGE_TEMPLATES, fields: APPOINTMENT_MESSAGE_FIELDS, variables: MESSAGE_VARIABLES, maxLength: MESSAGE_TEMPLATE_MAX_LENGTH };
+  });
+
+  /**
+   * Vista previa de un texto con los datos del negocio y una llamada de ejemplo (mañana a las 18:00).
+   * Texto vacío = texto por defecto de KAI (adaptado al tono). Devuelve también los problemas que impedirían guardarlo.
+   */
+  app.post('/agenda/message-templates/preview', async (request) => {
+    const ctx = await requireTenant(request, 'settings:read');
+    const body = parse(z.object({ kind: z.enum(['confirmation', 'reminder24h', 'reminder1h', 'noShow']), text: z.string().max(2000).default('') }), request.body);
+    const db = getDb();
+    const [[biz], [settings], [trainer]] = await Promise.all([
+      db.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, ctx.businessId)).limit(1),
+      db.select({ callLabel: aiSettings.callLabel, tone: aiSettings.tone }).from(aiSettings).where(eq(aiSettings.businessId, ctx.businessId)).limit(1),
+      db.select({ displayName: trainers.displayName }).from(trainers).where(eq(trainers.businessId, ctx.businessId)).limit(1),
+    ]);
+    const timezone = biz?.timezone ?? 'Europe/Madrid';
+    const kind = body.kind;
+    const sample = {
+      leadName: 'Laura',
+      trainerName: trainer?.displayName || 'el equipo',
+      callLabel: settings?.callLabel ?? 'llamada',
+      // 24 h antes: la llamada es mañana; 1 h antes: dentro de una hora; resto: mañana a las 18:00.
+      startsAt:
+        kind === 'reminder1h'
+          ? DateTime.now().setZone(timezone).plus({ hours: 1 }).startOf('hour').toJSDate()
+          : DateTime.now().setZone(timezone).plus({ days: 1 }).set({ hour: 18, minute: 0, second: 0, millisecond: 0 }).toJSDate(),
+      timezone,
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+      tone: settings?.tone ?? DEFAULT_TONE,
+    };
+    const issues = messageTemplateIssues(kind, body.text);
+    const usesDefault = !body.text.trim();
+    const preview = !usesDefault
+      ? renderMessageTemplate(body.text, sample)
+      : kind === 'confirmation'
+        ? confirmationText(sample)
+        : kind === 'noShow'
+          ? noShowText(sample)
+          : reminderText(sample, kind === 'reminder24h' ? '24h' : '1h');
+    return { preview, issues, usesDefault };
   });
 }
 

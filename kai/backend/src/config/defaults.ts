@@ -75,7 +75,8 @@ export const DEFAULT_QUALIFICATION_RULES: QualificationTemplate[] = [
     key: 'urgency',
     label: 'Urgencia',
     description: 'Por qué ahora; si hay una fecha o evento.',
-    question: '¿Por qué ahora? ¿Hay alguna fecha o algo que te haga querer empezar ya?',
+    // Una sola pregunta por mensaje (sección 4): nada de “¿Por qué ahora? ¿Hay alguna fecha…?”.
+    question: '¿Hay alguna fecha o motivo que te haga querer empezar ahora?',
     weight: 14,
     required: false,
   },

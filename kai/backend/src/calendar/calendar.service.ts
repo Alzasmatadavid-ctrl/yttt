@@ -152,7 +152,7 @@ type NewAppointment = typeof appointments.$inferInsert;
  */
 async function insertAppointmentAtomically(
   values: NewAppointment & { startsAt: Date; endsAt: Date },
-  opts: { bufferMinutes: number; excludeAppointmentId?: string; includeTestLeads: boolean },
+  opts: { bufferMinutes: number; excludeAppointmentId?: string; includeTestLeads: boolean; conflictMessage: string },
 ): Promise<Appointment> {
   return getDb().transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`kai:appointments:${values.businessId}`}))`);
@@ -167,21 +167,27 @@ async function insertAppointmentAtomically(
       .innerJoin(leads, eq(leads.id, appointments.leadId))
       .where(and(...conds))
       .limit(1);
-    if (clash) throw conflict('Ese horario ya no está disponible.');
+    if (clash) throw conflict(opts.conflictMessage);
     const [row] = await tx.insert(appointments).values(values).returning();
     return row;
   });
 }
 
-/** La conversación indicada tiene que ser del mismo negocio y del mismo lead (si no, la confirmación le llegaría a otra persona). */
-async function assertConversationOfLead(businessId: string, leadId: string, conversationId: string) {
+/** Lead dueño de una conversación del negocio (null si no existe en este negocio). */
+async function conversationLeadId(businessId: string, conversationId: string): Promise<string | null> {
   const [conv] = await getDb()
     .select({ leadId: conversations.leadId })
     .from(conversations)
     .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)))
     .limit(1);
-  if (!conv) throw notFound('Conversación no encontrada.');
-  if (conv.leadId !== leadId) throw badRequest('Esa conversación es de otro lead.');
+  return conv?.leadId ?? null;
+}
+
+/** La conversación indicada tiene que ser del mismo negocio y del mismo lead (si no, la confirmación le llegaría a otra persona). */
+async function assertConversationOfLead(businessId: string, leadId: string, conversationId: string) {
+  const owner = await conversationLeadId(businessId, conversationId);
+  if (!owner) throw notFound('Conversación no encontrada.');
+  if (owner !== leadId) throw badRequest('Esa conversación es de otro lead.');
 }
 
 /** Reserva una llamada verificando de nuevo que el hueco sigue libre (evita dobles reservas). */
@@ -244,13 +250,20 @@ async function createAppointment(input: BookInput & { excludeAppointmentId?: str
       bookedBy: input.bookedBy,
       confirmationSentAt: input.confirmationAlreadySent ? new Date() : null,
     },
-    { bufferMinutes: input.bookedBy === 'kai' ? config.bufferMinutes : 0, excludeAppointmentId: input.excludeAppointmentId, includeTestLeads },
+    {
+      bufferMinutes: input.bookedBy === 'kai' ? config.bufferMinutes : 0,
+      excludeAppointmentId: input.excludeAppointmentId,
+      includeTestLeads,
+      conflictMessage: input.bookedBy === 'kai' ? 'Ese horario ya no está disponible.' : 'Ya hay una cita en ese horario.',
+    },
   );
 
   if (!google) return { appointment, sendConfirmation: !input.confirmationAlreadySent };
+  let token: string | null = null;
+  let ev: Awaited<ReturnType<typeof googleCreateEvent>> | null = null;
   try {
-    const token = await googleAccessToken(google);
-    const ev = await googleCreateEvent(token, google.calendarId ?? 'primary', {
+    token = await googleAccessToken(google);
+    ev = await googleCreateEvent(token, google.calendarId ?? 'primary', {
       summary: title,
       description: [
         `Reservada por ${input.bookedBy === 'kai' ? 'KAI' : 'el equipo'} para ${trainer?.displayName || 'el entrenador'}.`,
@@ -273,7 +286,12 @@ async function createAppointment(input: BookInput & { excludeAppointmentId?: str
       .returning();
     return { appointment: updated ?? appointment, sendConfirmation: !input.confirmationAlreadySent };
   } catch (err) {
-    // Sin evento en Google la cita no vale: se deshace para no dejar el hueco bloqueado.
+    // Sin evento en Google la cita no vale: se deshace (también el evento, si llegó a crearse) para no dejar nada a medias.
+    if (token && ev) {
+      await googleDeleteEvent(token, google.calendarId ?? 'primary', ev.id).catch((e) =>
+        logError('calendar.google.delete_event', e, { appointmentId: appointment.id }, input.businessId, 'warn'),
+      );
+    }
     await db.delete(appointments).where(eq(appointments.id, appointment.id));
     await markCalendarError(google.id, errorMessage(err));
     await logError('calendar.google.create_event', err, { leadId: lead.id }, input.businessId);
@@ -356,10 +374,12 @@ export async function cancelAppointment(businessId: string, id: string, actor: A
 export async function rescheduleAppointment(businessId: string, id: string, newStart: Date, actor: Actor, bookedBy: 'kai' | 'human') {
   const appt = await getAppointment(businessId, id);
   if (appt.status !== 'scheduled') throw badRequest('Solo se pueden mover citas programadas.');
+  // Una cita antigua mal enlazada a la conversación de otro lead no debe impedir moverla.
+  const conversationId = appt.conversationId && (await conversationLeadId(businessId, appt.conversationId)) === appt.leadId ? appt.conversationId : null;
   const { appointment: created, sendConfirmation } = await createAppointment({
     businessId,
     leadId: appt.leadId,
-    conversationId: appt.conversationId,
+    conversationId,
     start: newStart,
     bookedBy,
     actor,

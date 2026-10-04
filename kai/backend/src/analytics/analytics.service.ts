@@ -63,10 +63,25 @@ async function primaryPriceCents(businessId: string): Promise<{ price: number; c
 export async function getFunnel(businessId: string, range: { from: Date; to: Date }) {
   const db = getDb();
   const cohort = and(eq(leads.businessId, businessId), eq(leads.isTest, false), gte(leads.createdAt, range.from), lt(leads.createdAt, range.to));
+  // “Respondió” = escribió DESPUÉS de nuestro primer mensaje entregado. Quien escribe primero por Instagram
+  // o WhatsApp y luego no contesta a KAI no cuenta (antes contaba todo lead con algún mensaje entrante).
+  // Los mensajes de leads de la cohorte siempre son posteriores a `range.from` (el primero saliente lo es).
+  const replies = db
+    .select({
+      leadId: messages.leadId,
+      firstOut: sql<Date | null>`min(${messages.createdAt}) filter (where ${messages.direction} = 'outbound' and ${messages.status} not in ('failed', 'skipped'))`.as(
+        'first_out',
+      ),
+      lastIn: sql<Date | null>`max(${messages.createdAt}) filter (where ${messages.direction} = 'inbound')`.as('last_in'),
+    })
+    .from(messages)
+    .where(and(eq(messages.businessId, businessId), gte(messages.createdAt, range.from)))
+    .groupBy(messages.leadId)
+    .as('replies');
   const [row] = await db
     .select({
       leads: sql<number>`count(*)::int`,
-      responded: sql<number>`count(*) filter (where ${leads.lastInboundAt} is not null)::int`,
+      responded: sql<number>`count(*) filter (where ${replies.firstOut} is not null and ${replies.lastIn} > ${replies.firstOut})::int`,
       contacted: sql<number>`count(*) filter (where ${leads.lastOutboundAt} is not null)::int`,
       qualified: sql<number>`count(*) filter (where ${leads.qualifiedAt} is not null or ${inArray(leads.status, QUALIFIED_STATUSES)})::int`,
       clients: sql<number>`count(*) filter (where ${leads.status} = 'client')::int`,
@@ -74,6 +89,7 @@ export async function getFunnel(businessId: string, range: { from: Date; to: Dat
       avgFirstResponse: sql<number>`coalesce(avg(${leads.firstResponseSeconds}), 0)::int`,
     })
     .from(leads)
+    .leftJoin(replies, eq(replies.leadId, leads.id))
     .where(cohort);
   const [appt] = await db
     .select({

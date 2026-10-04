@@ -32,6 +32,8 @@ ENCRYPTION_KEY=<pega aquí la clave generada>
 ADMIN_EMAIL=tu@email.com
 ADMIN_PASSWORD=<una contraseña larga>
 ANTHROPIC_API_KEY=sk-ant-...
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_...
 ```
 
 - `DATABASE_URL=${{Postgres.DATABASE_URL}}` se escribe tal cual: Railway lo sustituye por la dirección de tu base de datos.
@@ -42,6 +44,9 @@ ANTHROPIC_API_KEY=sk-ant-...
   Guárdala en un gestor de contraseñas: si la pierdes, habrá que reconectar todas las integraciones.
 - Añade también las de Meta, Google y Resend cuando las tengas ([INTEGRACIONES.md](INTEGRACIONES.md)).
 - No hace falta `PORT`: Railway la pone sola.
+- `ADMIN_EMAIL` y `ADMIN_PASSWORD` crean tu cuenta de administración al arrancar. Registrarse en la web con ese email **no** da acceso al panel. Si ya tenías una cuenta normal con ese email y quieres que sea la de administración, añade `ADMIN_PROMOTE_EXISTING=true` para un arranque y luego quítala.
+- Sin `EMAIL_PROVIDER=resend` y `RESEND_API_KEY`, en producción **no se envía ningún email** (recuperar contraseña, invitaciones). Las invitaciones se pueden copiar como enlace desde **Ajustes → Equipo**.
+- `TRUST_PROXY` puede quedarse vacío en Railway y Render: KAI confía solo en sus proxies internos para saber la IP real de cada visitante (la necesita para los límites de intentos). Si pones Cloudflare delante, añade sus rangos de IP (ver `.env.example`).
 
 ### Paso 4 · Despliega y comprueba
 
@@ -90,7 +95,7 @@ docker build -t kai .
 docker run -d -p 3000:3000 --env-file .env -e NODE_ENV=production -e SERVE_FRONTEND=true kai
 ```
 
-Los `-e` del final aseguran el modo producción y que se sirva la web aunque tu `.env` diga otra cosa (con `--env-file`, el `.env` tiene prioridad sobre los valores de la imagen). Pon delante un proxy con HTTPS (por ejemplo Caddy: `app.tudominio.com { reverse_proxy localhost:3000 }`).
+Los `-e` del final aseguran el modo producción y que se sirva la web aunque tu `.env` diga otra cosa (con `--env-file`, el `.env` tiene prioridad sobre los valores de la imagen). Pon delante un proxy con HTTPS (por ejemplo Caddy: `app.tudominio.com { reverse_proxy localhost:3000 }`). Con el proxy en la misma máquina no hace falta tocar `TRUST_PROXY`; evita que el puerto 3000 quede abierto a internet sin pasar por el proxy (cortafuegos).
 
 ### Supabase como base de datos
 
@@ -103,12 +108,13 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 - [ ] `NODE_ENV=production`, `ENCRYPTION_KEY` y `DATABASE_URL` configuradas (sin ellas KAI no arranca en producción, a propósito).
 - [ ] `APP_URL` con `https://` y tu dominio definitivo (las cookies de sesión se marcan como seguras).
 - [ ] `ADMIN_PASSWORD` larga y única. Tras el primer arranque puedes borrarla de las variables: la cuenta ya existe.
-- [ ] Email real configurado (Resend) para recuperar contraseñas e invitaciones.
+- [ ] Email real configurado (Resend) para recuperar contraseñas e invitaciones (sin él, en producción no se envía ningún email).
+- [ ] Entra con la cuenta de `ADMIN_EMAIL` y comprueba que ves el panel de **Administración**.
 - [ ] Copias de seguridad de la base de datos activadas (Railway, Neon y Supabase las incluyen).
 - [ ] App de Meta revisada y aprobada, y negocio verificado en Business Manager.
 - [ ] Pantalla de consentimiento de Google publicada (o entrenadores añadidos como usuarios de prueba).
 - [ ] Política de privacidad y condiciones de uso completadas: KAI incluye una plantilla en `/privacidad` y `/terminos` (archivo `frontend/src/pages/Legal.tsx`). Sustituye los datos entre [corchetes] y revísala con un profesional.
-- [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador).
+- [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador). Si aun así lo haces, exige `--force`, una `DEMO_PASSWORD` propia y un `DEMO_EMAIL` que no sea el de ninguna cuenta real.
 
 ## Varias instancias
 

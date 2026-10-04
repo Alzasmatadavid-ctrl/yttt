@@ -157,7 +157,7 @@ kai/
 
 - **Transparencia (Reglamento Europeo de IA, art. 50).** Por defecto KAI se presenta en su primer mensaje como asistente automatizado del equipo del entrenador. Puedes cambiarlo a “Solo si se lo preguntan” en **Setter IA → Personalidad**, pero si un lead pregunta si habla con un bot, KAI **nunca lo niega**. Recomendación: mantener la presentación en el primer mensaje.
 - **Salud.** KAI no diagnostica ni recomienda nada médico: ante lesiones, enfermedades, medicación o embarazo, responde con un mensaje prudente y te pasa la conversación.
-- **Bajas.** Si un lead pide que no le escriban más, KAI se despide y no vuelve a escribirle nunca.
+- **Bajas.** Si un lead pide que no le escriban más, KAI se despide y no vuelve a escribirle nunca. Si en ese momento la conversación la llevas tú (o el piloto automático está apagado), la baja se registra igualmente y te avisamos. También se puede dar de baja o de alta a un lead a mano.
 - **Datos.** Cada negocio solo ve sus datos. Los tokens de integraciones se guardan cifrados. Todas las acciones importantes quedan registradas (auditoría).
 - **Protección de datos (RGPD).** Al usar KAI tratas datos personales de tus leads: incluye en tu política de privacidad que usas un asistente automatizado y qué proveedores intervienen (Meta, Anthropic, Google/Calendly, tu hosting).
 

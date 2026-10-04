@@ -4,9 +4,17 @@
  * KAI nunca intenta cerrar la venta: eso lo hace el entrenador en la llamada.
  */
 import type { ConversationState } from '../../lib/domain.js';
+import { humanSlotLabel } from '../../lib/time.js';
 import type { LeadAnalysis } from '../analysis/analyzer.js';
 import type { BusinessContext, LeadContext, ObjectionRow, RuleRow } from '../context/context.js';
 import { requiredCaptured } from '../../crm/scoring.js';
+
+/**
+ * Estado de la conversación con los campos propios del setter:
+ *  - callDeclinedAt: el lead rechazó la llamada (o canceló la que tenía). No se le vuelve a proponer salvo que la pida.
+ *  - callReassuredAt: ya se resolvieron sus dudas sobre la llamada una vez; no se le vuelve a preguntar en cada mensaje.
+ */
+export type SetterState = ConversationState & { callDeclinedAt?: string; callReassuredAt?: string };
 
 export type DirectiveKind =
   | 'greet_and_ask'
@@ -19,6 +27,7 @@ export type DirectiveKind =
   | 'clarify_slot'
   | 'book_slot'
   | 'reschedule'
+  | 'cancel_booking'
   | 'post_booking'
   | 'disqualify_kindly'
   | 'continue_without_call'
@@ -37,15 +46,29 @@ export interface Directive {
   needsSlots?: boolean;
   slotQuery?: { date: string | null; partOfDay: 'morning' | 'afternoon' | 'evening' | 'any' };
   answerQuestionFirst?: boolean;
+  /** continue_without_call: el lead acaba de rechazar la llamada (se le confirma que no pasa nada) o ya lo hizo antes. */
+  justDeclined?: boolean;
 }
 
 export interface StrategyInput {
   biz: BusinessContext;
   leadCtx: LeadContext;
-  state: ConversationState;
+  state: SetterState;
   analysis: LeadAnalysis | null;
   kaiHasSpoken: boolean;
   isFirstContact?: boolean;
+}
+
+/**
+ * Deja una sola pregunta en el texto configurado por el entrenador: “¿Por qué ahora? ¿Hay alguna fecha…?” →
+ * “¿Hay alguna fecha…?”. KAI nunca hace más de una pregunta por mensaje, aunque la plantilla traiga dos.
+ */
+export function oneQuestion(question: string): string {
+  const q = question.trim();
+  if ((q.match(/\?/g) ?? []).length <= 1) return q;
+  const parts = q.match(/[^?]*\?/g) ?? [q];
+  const last = parts[parts.length - 1].trim();
+  return last.startsWith('¿') || !last.includes('¿') ? last : last.slice(last.lastIndexOf('¿'));
 }
 
 /** Siguiente variable de cualificación por preguntar (en el orden configurado). */
@@ -55,7 +78,7 @@ export function nextQualificationRule(rules: RuleRow[], lead: LeadContext['lead'
     if (r.key === 'fit') continue; // el encaje se deduce, no se pregunta
     const item = lead.qualification[r.key];
     const signal = (lead.signals as Record<string, string | undefined>)[r.key];
-    if (!item?.value && !signal) return r;
+    if (!item?.value && !signal) return { ...r, question: oneQuestion(r.question) };
   }
   return null;
 }
@@ -67,10 +90,11 @@ function recentOffer(state: ConversationState) {
   return ids.map((id) => (state.offeredSlots ?? []).find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => Boolean(s));
 }
 
-function clarifyDirective(slots: { label: string; id: string }[], answerQuestionFirst: boolean): Directive {
+function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean): Directive {
+  // Etiquetas recalculadas ahora: “mañana” de ayer es “hoy”.
   return {
     kind: 'clarify_slot',
-    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${s.label}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
+    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${humanSlotLabel(s.start, timezone)}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
     answerQuestionFirst,
   };
 }
@@ -82,6 +106,7 @@ export function decideDirective(input: StrategyInput): Directive {
   const answerQuestionFirst = Boolean(flags?.asksQuestion);
   const offered = state.offeredSlots ?? [];
   const settings = biz.settings;
+  const trainer = biz.trainer.displayName || 'el entrenador';
 
   if (input.isFirstContact) {
     const rule = nextQualificationRule(biz.rules, lead);
@@ -97,15 +122,24 @@ export function decideDirective(input: StrategyInput): Directive {
   // 1) Ha elegido uno de los horarios ofrecidos → reservar.
   if (analysis?.selectedSlotId && offered.some((s) => s.id === analysis.selectedSlotId)) {
     const slot = offered.find((s) => s.id === analysis.selectedSlotId)!;
+    const label = humanSlotLabel(slot.start, biz.business.timezone);
     return {
       kind: 'book_slot',
       slotId: slot.id,
-      instruction: `El lead ha elegido el horario “${slot.label}” (slot_id ${slot.id}). Llama a la herramienta book_call con ese slot_id y, según el resultado, confirma la cita de forma breve y cercana (o, si no está disponible, ofrece las alternativas que devuelva get_available_slots). No hagas más preguntas de cualificación.`,
+      instruction: `El lead ha elegido el horario “${label}” (slot_id ${slot.id}). Llama a la herramienta ${leadCtx.upcomingAppointment ? 'reschedule_call' : 'book_call'} con ese slot_id y, según el resultado, confirma la cita de forma breve y cercana (o, si no está disponible, ofrece las alternativas que devuelva get_available_slots). No hagas más preguntas de cualificación.`,
     };
   }
 
   // 2) Ya tiene una llamada agendada.
   if (leadCtx.upcomingAppointment) {
+    if (flags?.wantsCancel && !flags.wantsReschedule) {
+      return {
+        kind: 'cancel_booking',
+        instruction:
+          'El lead pide cancelar su llamada. Usa cancel_call y confírmale con amabilidad que queda cancelada. Sin insistir ni proponer otra fecha (salvo que la pida), dile que si más adelante quiere retomarlo puede escribirte por aquí.',
+        answerQuestionFirst,
+      };
+    }
     if (flags?.wantsReschedule || flags?.wantsCancel) {
       return {
         kind: 'reschedule',
@@ -113,6 +147,14 @@ export function decideDirective(input: StrategyInput): Directive {
         slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
         instruction:
           'El lead quiere mover (o no puede asistir a) su llamada. Sin dramas: consulta huecos con get_available_slots y ofrécele 2 alternativas para reprogramar. Si elige una, usa reschedule_call. Solo usa cancel_call si pide cancelar explícitamente y no quiere otra hora.',
+        answerQuestionFirst,
+      };
+    }
+    if (flags?.asksPrice) {
+      // Con la llamada ya agendada no hay nada que contextualizar: el precio no se oculta (sección 16).
+      return {
+        kind: 'share_price',
+        instruction: `El lead ya tiene la ${settings.callLabel} agendada y pregunta el precio. Dáselo de forma clara usando EXCLUSIVAMENTE el precio real configurado (servicio, importe y periodicidad) y dile que en la llamada lo verá en detalle con ${trainer}. No vuelvas a cualificar ni propongas otra llamada. Nunca inventes descuentos ni condiciones.`,
         answerQuestionFirst,
       };
     }
@@ -146,6 +188,8 @@ export function decideDirective(input: StrategyInput): Directive {
   }
 
   const captured = requiredCaptured(biz.rules, lead.qualification);
+  // Rechazó la llamada antes y ahora no la pide: no se le vuelve a proponer, ni se le ofrecen horarios.
+  const callDeclined = Boolean(state.callDeclinedAt) && !flags?.wantsCall;
 
   // 5) Precio.
   if (flags?.asksPrice) {
@@ -161,11 +205,12 @@ export function decideDirective(input: StrategyInput): Directive {
           'El lead pregunta el precio. Antes de darlo, contextualiza con naturalidad: algo como “Claro. Antes de decirte qué opción tendría sentido para ti, quiero entender un poco tu situación para no recomendarte algo que no encaje.” y haz UNA pregunta de cualificación. NO ocultes el precio si vuelve a insistir.',
       };
     }
+    const next = callDeclined ? 'pregúntale qué duda tiene (sin volver a proponer la llamada: ya dijo que prefiere seguir por aquí)' : 'pregúntale qué duda tiene o si quiere verlo en la llamada';
     return {
       kind: 'share_price',
       instruction: state.priceShared
-        ? 'El lead vuelve a preguntar por el precio, que ya le diste. Recuérdaselo brevemente (mismo importe real, sin repetir el mensaje anterior palabra por palabra) y pregúntale qué duda tiene o si quiere verlo en la llamada.'
-        : 'El lead quiere saber el precio. Dáselo de forma clara usando EXCLUSIVAMENTE el precio real configurado (servicio, importe y periodicidad), con una frase de lo que incluye si está configurado. Después avanza con UNA pregunta (por ejemplo, si quiere valorarlo en la llamada). Nunca inventes descuentos ni condiciones.',
+        ? `El lead vuelve a preguntar por el precio, que ya le diste. Recuérdaselo brevemente (mismo importe real, sin repetir el mensaje anterior palabra por palabra) y ${next}.`
+        : `El lead quiere saber el precio. Dáselo de forma clara usando EXCLUSIVAMENTE el precio real configurado (servicio, importe y periodicidad), con una frase de lo que incluye si está configurado. Después avanza con UNA pregunta (${callDeclined ? 'por ejemplo, qué duda tiene; no vuelvas a proponer la llamada, ya la rechazó' : 'por ejemplo, si quiere valorarlo en la llamada'}). Nunca inventes descuentos ni condiciones.`,
     };
   }
 
@@ -173,7 +218,7 @@ export function decideDirective(input: StrategyInput): Directive {
   const offer = recentOffer(state);
   const newPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
   if (flags?.wantsCall && !flags.declinesCall) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, answerQuestionFirst);
+    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
     return {
       kind: 'offer_slots',
       needsSlots: true,
@@ -183,38 +228,42 @@ export function decideDirective(input: StrategyInput): Directive {
     };
   }
 
+  const nextRule = nextQualificationRule(biz.rules, lead);
+
   if (flags?.declinesCall) {
-    const rule = nextQualificationRule(biz.rules, lead);
     return {
       kind: 'continue_without_call',
-      questionKey: rule?.key,
-      question: rule?.question,
+      questionKey: nextRule?.key,
+      question: nextRule?.question,
+      justDeclined: true,
       instruction:
-        'El lead no quiere la llamada ahora. Respétalo sin insistir. Muestra que no pasa nada, ofrece resolver dudas por aquí y continúa la conversación con UNA pregunta útil si tiene sentido.',
+        'El lead no quiere la llamada ahora. Respétalo sin insistir. Muestra que no pasa nada, ofrece resolver dudas por aquí y continúa la conversación con UNA pregunta útil si tiene sentido. No vuelvas a proponer la llamada.',
     };
   }
 
-  // 7) Cualificado → proponer la llamada.
-  const nextRule = nextQualificationRule(biz.rules, lead);
-  const readyForCall = (lead.score >= settings.proposeCallMinScore && captured) || (!nextRule && captured);
+  // 7) Cualificado → proponer la llamada (salvo que ya la rechazara: entonces se sigue conversando por aquí).
+  const readyForCall = !callDeclined && ((lead.score >= settings.proposeCallMinScore && captured) || (!nextRule && captured));
   if (readyForCall && !state.callProposedAt) {
     return {
       kind: 'propose_call',
-      instruction: `El lead está cualificado. Conecta brevemente con lo que te ha contado (su objetivo y su motivo) y propón una ${settings.callLabel} de ${settings.callDurationMinutes} minutos con ${biz.trainer.displayName || 'el entrenador'} para valorar su caso${settings.callDescription ? ` (${settings.callDescription})` : ''}. Pregunta si le encaja. Todavía NO des horarios.`,
+      instruction: `El lead está cualificado. Conecta brevemente con lo que te ha contado (su objetivo y su motivo) y propón una ${settings.callLabel} de ${settings.callDurationMinutes} minutos con ${trainer} para valorar su caso${settings.callDescription ? ` (${settings.callDescription})` : ''}. Pregunta si le encaja. Todavía NO des horarios.`,
       answerQuestionFirst,
     };
   }
-  if (state.callProposedAt && !offer.length && !flags?.wantsCall && analysis) {
-    // Se propuso la llamada y el lead no la ha aceptado ni rechazado claramente.
-    return {
-      kind: 'reassure_call',
-      instruction:
-        'Le propusiste la llamada y no ha respondido con un sí claro. Responde a lo que ha dicho con naturalidad y, sin presionar, pregúntale si le encaja agendarla o qué duda tiene antes de dar el paso.',
-      answerQuestionFirst,
-    };
-  }
-  if (readyForCall && state.callProposedAt) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, answerQuestionFirst);
+  if (!callDeclined && state.callProposedAt && !offer.length && !flags?.wantsCall && analysis) {
+    // Se propuso la llamada y el lead no la ha aceptado ni rechazado claramente. Se resuelven sus dudas UNA vez;
+    // después no se le vuelve a preguntar en cada mensaje: se sigue conversando (y cualificando si falta algo).
+    if (!state.callReassuredAt) {
+      return {
+        kind: 'reassure_call',
+        instruction:
+          'Le propusiste la llamada y no ha respondido con un sí claro. Responde a lo que ha dicho con naturalidad y, sin presionar, pregúntale si le encaja agendarla o qué duda tiene antes de dar el paso.',
+        answerQuestionFirst,
+      };
+    }
+    if (!nextRule) return keepTalking(answerQuestionFirst);
+  } else if (readyForCall && state.callProposedAt) {
+    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
     return {
       kind: 'offer_slots',
       needsSlots: true,
@@ -227,7 +276,7 @@ export function decideDirective(input: StrategyInput): Directive {
 
   // 8) Primer mensaje de KAI.
   if (!input.kaiHasSpoken) {
-    const rule = nextQualificationRule(biz.rules, lead);
+    const rule = nextRule;
     return {
       kind: 'greet_and_ask',
       questionKey: rule?.key,
@@ -248,9 +297,21 @@ export function decideDirective(input: StrategyInput): Directive {
     };
   }
 
+  if (callDeclined || state.callProposedAt) return keepTalking(answerQuestionFirst);
+
   return {
     kind: 'propose_call',
-    instruction: `Ya tienes la información principal. Propón con naturalidad una ${settings.callLabel} de ${settings.callDurationMinutes} minutos con ${biz.trainer.displayName || 'el entrenador'} para valorar su caso y pregunta si le encaja.`,
+    instruction: `Ya tienes la información principal. Propón con naturalidad una ${settings.callLabel} de ${settings.callDurationMinutes} minutos con ${trainer} para valorar su caso y pregunta si le encaja.`,
+    answerQuestionFirst,
+  };
+}
+
+/** Seguir la conversación por escrito sin volver a sacar la llamada (ya la rechazó o ya se le propuso). */
+function keepTalking(answerQuestionFirst: boolean): Directive {
+  return {
+    kind: 'continue_without_call',
+    instruction:
+      'Sigue la conversación por aquí: responde a lo que ha dicho con naturalidad y de forma útil, y ofrécele resolver cualquier duda por escrito. No vuelvas a proponer la llamada ni le ofrezcas horarios; si él la pide, entonces sí.',
     answerQuestionFirst,
   };
 }

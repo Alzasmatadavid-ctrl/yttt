@@ -7,7 +7,7 @@ import { logError } from '../audit/audit.service.js';
 import { verifyMetaSignature } from '../integrations/meta/graph.js';
 import { handleMetaWebhook } from './meta.webhook.js';
 import { handleCalendlyEvent, verifyCalendlyRequest } from './calendly.webhook.js';
-import { businessByPublicKey, ExternalLeadSchema, ingestFromForm, verifyLeadWebhookAuth } from './leads.webhook.js';
+import { businessByPublicKey, ExternalLeadSchema, ingestFromForm, publicFormQuotaExceeded, verifyLeadWebhookAuth } from './leads.webhook.js';
 import { listPublicPlans } from '../plans/plans.service.js';
 
 export async function webhookRoutes(app: FastifyInstance) {
@@ -28,12 +28,16 @@ export async function webhookRoutes(app: FastifyInstance) {
     } else if (isProduction()) {
       return reply.code(503).send({ error: 'META_APP_SECRET no configurado' });
     }
+    let failed = 0;
     try {
-      await handleMetaWebhook(request.body as Parameters<typeof handleMetaWebhook>[0]);
+      ({ failed } = await handleMetaWebhook(request.body as Parameters<typeof handleMetaWebhook>[0]));
     } catch (err) {
+      failed = 1;
       await logError('webhook.meta.handler', err);
     }
-    // Meta reintenta si no recibe 200: respondemos 200 aunque un evento concreto falle (queda registrado).
+    // Si algo no se ha podido procesar, Meta debe reenviar el aviso (reintenta durante horas). Es seguro:
+    // los mensajes se deduplican por su id de Meta y los leads de Lead Ads por su leadgen_id.
+    if (failed > 0) return reply.code(500).send({ ok: false, error: 'processing_failed' });
     return { ok: true };
   });
 
@@ -76,6 +80,11 @@ export async function webhookRoutes(app: FastifyInstance) {
     const data = parse(ExternalLeadSchema, request.body);
     if (data.website) return { ok: true }; // trampa anti-bots: se ignora en silencio
     if (!data.phone && !data.email) return reply.code(400).send({ error: 'Indica un teléfono o un email.' });
+    if (await publicFormQuotaExceeded(business.id)) {
+      return reply
+        .code(429)
+        .send({ error: 'rate_limited', message: 'Ahora mismo no podemos recibir más solicitudes desde este formulario. Inténtalo de nuevo más tarde.' });
+    }
     await ingestFromForm(business, { ...data, source: 'landing' }, 'landing');
     return { ok: true };
   });

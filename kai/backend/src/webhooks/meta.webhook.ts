@@ -7,14 +7,15 @@
  * Documentación: https://developers.facebook.com/docs/graph-api/webhooks
  * URL a configurar en el panel de Meta: {API_URL}/api/webhooks/meta
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, or, sql } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { businesses, conversations, messages, webhookEvents } from '../database/schema.js';
 import { errorMessage } from '../lib/errors.js';
 import { logError } from '../audit/audit.service.js';
 import { connectionCredentials, findConnectionByExternalId, getActiveConnection, touchConnection, type ChannelConnection } from '../integrations/connections.service.js';
-import { graphRequest } from '../integrations/meta/graph.js';
-import { insertMessage } from '../crm/conversations.service.js';
+import { friendlyMetaCode, friendlyMetaError, graphRequest } from '../integrations/meta/graph.js';
+import { insertMessage, markHandoffAttended } from '../crm/conversations.service.js';
+import { createAlert } from '../crm/alerts.service.js';
 import { findExistingLead } from '../crm/leads.service.js';
 import { toWhatsAppId } from '../integrations/channels/phone.js';
 import { ingestExternalLead, receiveInboundMessage } from './inbound.service.js';
@@ -33,7 +34,7 @@ interface WaMessage {
 interface WaStatus {
   id: string;
   status: 'sent' | 'delivered' | 'read' | 'failed';
-  errors?: { title?: string; message?: string }[];
+  errors?: { code?: number; title?: string; message?: string }[];
 }
 interface WaValue {
   metadata?: { phone_number_id: string };
@@ -56,8 +57,14 @@ interface MetaPayload {
   }[];
 }
 
-export async function handleMetaWebhook(payload: MetaPayload): Promise<{ processed: number }> {
+/**
+ * Procesa un aviso de Meta. `failed` cuenta las entradas que no se han podido procesar: la ruta responde
+ * entonces con error para que Meta vuelva a enviar el aviso (todo el procesamiento es idempotente:
+ * mensajes por su id de Meta y leads de Lead Ads por su leadgen_id).
+ */
+export async function handleMetaWebhook(payload: MetaPayload): Promise<{ processed: number; failed: number }> {
   let processed = 0;
+  let failed = 0;
   for (const entry of payload.entry ?? []) {
     try {
       if (payload.object === 'whatsapp_business_account') {
@@ -68,10 +75,11 @@ export async function handleMetaWebhook(payload: MetaPayload): Promise<{ process
         for (const change of entry.changes ?? []) if (change.field === 'leadgen') processed += await handleLeadgen(change.value as LeadgenValue);
       }
     } catch (err) {
+      failed++;
       await logError('webhook.meta', err, { object: payload.object, entryId: entry.id });
     }
   }
-  return { processed };
+  return { processed, failed };
 }
 
 // ───────────── WhatsApp ─────────────
@@ -107,7 +115,15 @@ async function handleWhatsApp(value: WaValue): Promise<number> {
     n++;
   }
   for (const st of value.statuses ?? []) {
-    const error = st.status === 'failed' ? (st.errors?.[0]?.message ?? st.errors?.[0]?.title ?? 'Error de entrega') : null;
+    const metaError = st.errors?.[0];
+    // Motivo en español para el entrenador; el texto original de Meta queda en error_logs.
+    const error =
+      st.status === 'failed'
+        ? (friendlyMetaCode(metaError?.code, undefined, 'WhatsApp') ??
+          `WhatsApp no ha podido entregar el mensaje${metaError?.code !== undefined ? ` (código ${metaError.code})` : ''}.`)
+        : null;
+    if (st.status === 'failed')
+      await logError('webhook.whatsapp_status', new Error(metaError?.message ?? metaError?.title ?? 'Error de entrega'), { messageId: st.id, code: metaError?.code }, connection.businessId, 'warn');
     await getDb()
       .update(messages)
       .set({ status: st.status, ...(error ? { error } : {}) })
@@ -194,6 +210,8 @@ async function handleInstagramEcho(connection: ChannelConnection, ev: IgMessagin
     createdAt: new Date(ev.timestamp),
   });
   await db.update(conversations).set({ aiEnabled: false, updatedAt: new Date() }).where(eq(conversations.id, conv.id));
+  // Si KAI había escalado la conversación, la respuesta del entrenador la deja atendida.
+  await markHandoffAttended(connection.businessId, conv.id, { type: 'integration' });
 }
 
 // ───────────── Lead Ads ─────────────
@@ -235,47 +253,105 @@ export function mapLeadFields(fields: { name: string; values: string[] }[]) {
   return { name, email, phone, goal, extra };
 }
 
+/**
+ * Reclama un aviso de Lead Ads para procesarlo. Devuelve false si ya se procesó (o se está procesando).
+ * Un aviso que falló antes (Meta caída, token caducado un momento…) se puede volver a reclamar: así,
+ * cuando Meta reenvía el aviso o se reintenta desde el mantenimiento, el lead no se pierde.
+ */
+async function claimLeadgenEvent(businessId: string, value: LeadgenValue): Promise<boolean> {
+  const rows = await getDb()
+    .insert(webhookEvents)
+    .values({ provider: 'meta_leadgen', externalId: value.leadgen_id, businessId, payload: value })
+    .onConflictDoUpdate({
+      target: [webhookEvents.provider, webhookEvents.externalId],
+      set: { status: 'received', error: null },
+      // También se recupera uno que se quedó a medias (proceso reiniciado mientras lo descargaba).
+      setWhere: or(
+        eq(webhookEvents.status, 'failed'),
+        sql`${webhookEvents.status} = 'received' and ${webhookEvents.createdAt} < now() - interval '15 minutes'`,
+      ),
+    })
+    .returning({ id: webhookEvents.id });
+  return rows.length > 0;
+}
+
+async function setLeadgenStatus(leadgenId: string, status: 'processed' | 'failed', error: string | null = null) {
+  await getDb()
+    .update(webhookEvents)
+    .set({ status, error })
+    .where(and(eq(webhookEvents.provider, 'meta_leadgen'), eq(webhookEvents.externalId, leadgenId)));
+}
+
 async function handleLeadgen(value: LeadgenValue): Promise<number> {
   const connection = await findConnectionByExternalId('meta_lead_ads', value.page_id);
   if (!connection) return 0;
   if (connection.config.formIds?.length && value.form_id && !connection.config.formIds.includes(value.form_id)) return 0;
-  const db = getDb();
-  const inserted = await db
-    .insert(webhookEvents)
-    .values({ provider: 'meta_leadgen', externalId: value.leadgen_id, businessId: connection.businessId, payload: value })
-    .onConflictDoNothing()
-    .returning();
-  if (inserted.length === 0) return 0; // ya procesado
+  if (!(await claimLeadgenEvent(connection.businessId, value))) return 0; // ya procesado
   try {
-    const creds = connectionCredentials(connection);
-    if (!creds) throw new Error('Credenciales de Lead Ads no válidas.');
-    const data = await graphRequest<LeadData>('graph.facebook.com', value.leadgen_id, creds.accessToken, { query: { fields: 'id,created_time,ad_name,campaign_name,form_id,field_data' } });
-    const mapped = mapLeadFields(data.field_data ?? []);
-    const [biz] = await db.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, connection.businessId)).limit(1);
-    const whatsapp = await getActiveConnection(connection.businessId, 'whatsapp');
-    const wantsWhatsApp = (connection.config.firstContactChannel ?? 'whatsapp') === 'whatsapp' && Boolean(whatsapp);
-    const waId = toWhatsAppId(mapped.phone, biz?.timezone ?? 'Europe/Madrid');
-    await ingestExternalLead({
-      businessId: connection.businessId,
-      source: 'meta_ads',
-      sourceDetail: [data.campaign_name, data.ad_name].filter(Boolean).join(' · ') || `Formulario ${value.form_id ?? ''}`.trim(),
-      name: mapped.name,
-      email: mapped.email,
-      phone: waId ? `+${waId}` : mapped.phone,
-      goal: mapped.goal,
-      extra: mapped.extra,
-      firstContactChannel: wantsWhatsApp && waId ? 'whatsapp' : 'none',
-      whatsappConnectionId: whatsapp?.id ?? null,
-    });
-    await db.update(webhookEvents).set({ status: 'processed' }).where(and(eq(webhookEvents.provider, 'meta_leadgen'), eq(webhookEvents.externalId, value.leadgen_id)));
+    await ingestLeadgen(connection, value);
+    await setLeadgenStatus(value.leadgen_id, 'processed');
     await touchConnection(connection.id);
     return 1;
   } catch (err) {
-    await db
-      .update(webhookEvents)
-      .set({ status: 'failed', error: errorMessage(err).slice(0, 500) })
-      .where(and(eq(webhookEvents.provider, 'meta_leadgen'), eq(webhookEvents.externalId, value.leadgen_id)));
+    await setLeadgenStatus(value.leadgen_id, 'failed', errorMessage(err).slice(0, 500));
+    await createAlert({
+      businessId: connection.businessId,
+      type: 'integration_error',
+      severity: 'critical',
+      title: 'No se ha podido recibir un lead de Meta Lead Ads',
+      body:
+        `Meta avisó de un lead nuevo (ID ${value.leadgen_id}), pero no hemos podido descargar sus datos: ${friendlyMetaError(err, 'Meta Lead Ads')} ` +
+        'KAI lo reintentará automáticamente. Si no aparece en unas horas, revisa la conexión de Lead Ads en Integraciones o descárgalo desde Meta Business Suite.',
+      dedupeByTitle: true,
+    });
     throw err;
   }
 }
 
+/** Descarga de Meta los datos del lead y lo da de alta en el CRM. */
+async function ingestLeadgen(connection: ChannelConnection, value: LeadgenValue) {
+  const db = getDb();
+  const creds = connectionCredentials(connection);
+  if (!creds) throw new Error('Credenciales de Lead Ads no válidas.');
+  const data = await graphRequest<LeadData>('graph.facebook.com', value.leadgen_id, creds.accessToken, { query: { fields: 'id,created_time,ad_name,campaign_name,form_id,field_data' } });
+  const mapped = mapLeadFields(data.field_data ?? []);
+  const [biz] = await db.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, connection.businessId)).limit(1);
+  const whatsapp = await getActiveConnection(connection.businessId, 'whatsapp');
+  const wantsWhatsApp = (connection.config.firstContactChannel ?? 'whatsapp') === 'whatsapp' && Boolean(whatsapp);
+  const waId = toWhatsAppId(mapped.phone, biz?.timezone ?? 'Europe/Madrid');
+  await ingestExternalLead({
+    businessId: connection.businessId,
+    source: 'meta_ads',
+    sourceDetail: [data.campaign_name, data.ad_name].filter(Boolean).join(' · ') || `Formulario ${value.form_id ?? ''}`.trim(),
+    name: mapped.name,
+    email: mapped.email,
+    phone: waId ? `+${waId}` : mapped.phone,
+    goal: mapped.goal,
+    extra: mapped.extra,
+    firstContactChannel: wantsWhatsApp && waId ? 'whatsapp' : 'none',
+    whatsappConnectionId: whatsapp?.id ?? null,
+  });
+}
+
+/**
+ * Reintenta los avisos de Lead Ads que fallaron en los últimos días (pensado para el mantenimiento
+ * periódico). Devuelve cuántos leads se han recuperado.
+ */
+export async function retryFailedLeadgenEvents(opts: { maxAgeDays?: number; limit?: number } = {}): Promise<{ retried: number; recovered: number }> {
+  const since = new Date(Date.now() - (opts.maxAgeDays ?? 7) * 86_400_000);
+  const failed = await getDb()
+    .select({ payload: webhookEvents.payload })
+    .from(webhookEvents)
+    .where(and(eq(webhookEvents.provider, 'meta_leadgen'), eq(webhookEvents.status, 'failed'), gte(webhookEvents.createdAt, since)))
+    .orderBy(webhookEvents.createdAt)
+    .limit(opts.limit ?? 20);
+  let recovered = 0;
+  for (const row of failed) {
+    try {
+      recovered += await handleLeadgen(row.payload as LeadgenValue);
+    } catch (err) {
+      await logError('webhook.meta.leadgen_retry', err, { leadgenId: (row.payload as LeadgenValue).leadgen_id });
+    }
+  }
+  return { retried: failed.length, recovered };
+}

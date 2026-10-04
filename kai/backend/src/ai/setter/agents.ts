@@ -6,12 +6,13 @@
  */
 import { firstName, pick, hashString } from '../../lib/text.js';
 import { BILLING_PERIOD_LABELS, formatMoney, type ConversationState } from '../../lib/domain.js';
+import { humanSlotLabel } from '../../lib/time.js';
 import type { ChatBlock, ChatMessage, LLMProvider, ToolResultBlock } from '../providers/types.js';
 import { textOf } from '../providers/types.js';
 import type { BusinessContext, ConversationContext, LeadContext } from '../context/context.js';
 import { buildSetterStablePrompt, buildSetterTurnContext } from '../prompts/setter.prompt.js';
 import type { SetterToolbox } from '../tools/setter-tools.js';
-import type { Directive } from './strategy.js';
+import type { Directive, SetterState } from './strategy.js';
 import { env } from '../../config/env.js';
 
 export type AgentMode = 'reply' | 'follow_up' | 'first_contact';
@@ -194,6 +195,27 @@ export function joinLabels(labels: string[]): string {
   return `${labels.slice(0, -1).join(', ')} o ${labels[labels.length - 1]}`;
 }
 
+/**
+ * Presentación como asistente virtual para el PRIMER mensaje de KAI (transparencia, disclosureMode = first_message).
+ * Vacía si el entrenador ha elegido no presentarse salvo que pregunten.
+ */
+export function disclosureIntro(biz: BusinessContext): string {
+  const s = biz.settings;
+  if (s.disclosureMode !== 'first_message') return '';
+  const trainer = biz.trainer.displayName || 'el entrenador';
+  const assistant = s.assistantName || 'KAI';
+  return s.persona === 'trainer' ? `Te escribe ${assistant}, el asistente virtual de ${trainer}.` : `Soy ${assistant}, el asistente virtual del equipo de ${trainer}.`;
+}
+
+/** Saludo del primer mensaje de KAI: “¡Hola Laura! Soy KAI, el asistente virtual del equipo de Álex.” */
+export function firstMessageGreeting(biz: BusinessContext, leadName: string | null | undefined): string {
+  const t = biz.settings.tone;
+  const greeting = t.formality <= 2 && t.energy >= 4 ? '¡Ey' : '¡Hola';
+  const name = firstName(leadName);
+  const intro = disclosureIntro(biz);
+  return `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''}`;
+}
+
 export class RuleBasedSetterAgent implements SetterAgent {
   name = 'rules';
 
@@ -220,21 +242,26 @@ export class RuleBasedSetterAgent implements SetterAgent {
             : null;
     const ack = eventAck ?? pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed);
     const greeting = s.tone.formality <= 2 && s.tone.energy >= 4 ? '¡Ey' : '¡Hola';
-    const intro =
-      s.disclosureMode === 'first_message'
-        ? s.persona === 'trainer'
-          ? `Te escribe ${assistant}, el asistente virtual de ${trainer}.`
-          : `Soy ${assistant}, el asistente virtual del equipo de ${trainer}.`
-        : '';
-    const botNote = input.extraNote?.includes('si eres un bot') ? `Te soy sincero: soy el asistente automatizado del equipo de ${trainer}, y si prefieres hablar directamente con ${trainer} te lo paso. ` : '';
+    const intro = disclosureIntro(biz);
+    const setterState = state as SetterState;
+    const callDeclined = Boolean(setterState.callDeclinedAt);
+    const botNote = input.extraNote?.includes('si eres un bot') ? `Te soy sincero: soy ${assistant}, el asistente automatizado del equipo de ${trainer}, y si prefieres hablar directamente con ${trainer} te lo paso.` : '';
 
     if (input.mode === 'follow_up' && input.followUp) {
       const goal = lead.goalSummary || lead.qualification.goal?.value;
       const event = leadCtx.memories.find((m) => m.kind === 'event')?.content;
       const lastQuestion = directive.question;
+      // Si el lead nunca ha contestado (formulario, anuncio), no hay “lo que me contaste”: se retoma el primer mensaje.
+      const leadHasWritten = input.convCtx.history.some((m) => m.direction === 'inbound');
+      const hello = name ? `Hola ${name}, ` : 'Hola, ';
+      const firstStep = leadHasWritten
+        ? `${hello}me quedé pensando en lo que me contaste${goal ? ` de ${lowerFirst(trimGoal(goal))}` : ''}. ${lastQuestion ?? '¿Seguimos con ello?'}`
+        : goal
+          ? `${hello}te escribo de nuevo por lo de ${lowerFirst(trimGoal(goal))}, que nos indicaste al dejar tus datos. ${lastQuestion ?? '¿Sigues con ganas de ponerte con ello?'}`
+          : `${hello}te escribo de nuevo por si se te pasó mi mensaje. ${lastQuestion ?? '¿Qué te gustaría conseguir?'}`;
       const steps: string[] = [
-        `${name ? `Hola ${name}, ` : 'Hola, '}me quedé pensando en lo que me contaste${goal ? ` de ${lowerFirst(trimGoal(goal))}` : ''}. ${lastQuestion ?? '¿Seguimos con ello?'}`,
-        `${name ? `${name}, ` : ''}${event ? `teniendo en cuenta lo que me comentaste (${lowerFirst(event)}), ` : ''}sigo por aquí por si quieres retomarlo${goal ? ` y ver cómo plantear lo de ${lowerFirst(trimGoal(goal))}` : ''}. ¿Te viene bien que lo hablemos esta semana?`,
+        firstStep,
+        `${name ? `${name}, ` : ''}${event ? `teniendo en cuenta lo que me comentaste (${lowerFirst(event)}), ` : ''}sigo por aquí por si quieres retomarlo${goal ? ` y ver cómo plantear lo de ${lowerFirst(trimGoal(goal))}` : ''}. ${callDeclined ? '¿Te apetece que lo sigamos viendo por aquí?' : '¿Te viene bien que lo hablemos esta semana?'}`,
         `${name ? `${name}, ` : ''}no quiero ser pesado${emoji('🙂')} Si en algún momento quieres retomar${goal ? ` lo de ${lowerFirst(trimGoal(goal))}` : ' la conversación'}, aquí estaré. ¡Mucho ánimo!`,
       ];
       return { text: steps[Math.min(input.followUp.step, steps.length) - 1], meta: { agent: this.name } };
@@ -251,10 +278,10 @@ export class RuleBasedSetterAgent implements SetterAgent {
         }
         break;
       case 'greet_and_ask':
-        text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} Gracias por escribir${emoji('👋')} ${botNote}${q || '¿Qué te gustaría conseguir exactamente?'}`;
+        text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} Gracias por escribir${emoji('👋')} ${q || '¿Qué te gustaría conseguir exactamente?'}`;
         break;
       case 'ask_qualification':
-        text = `${botNote}${ack} ${q}`;
+        text = `${ack} ${q}`;
         break;
       case 'handle_objection':
         text = directive.objection?.exampleResponse || 'Te entiendo perfectamente. ¿Qué es lo que más te frena ahora mismo?';
@@ -264,22 +291,28 @@ export class RuleBasedSetterAgent implements SetterAgent {
         break;
       case 'share_price': {
         const svc = biz.services[0];
+        const booked = Boolean(leadCtx.upcomingAppointment);
         if (!svc || svc.priceCents <= 0) {
-          text = `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. ¿Te parece si lo veis en una ${s.callLabel} de ${s.callDurationMinutes} minutos?`;
+          text = booked
+            ? `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Lo veréis en detalle en la ${s.callLabel}.`
+            : callDeclined
+              ? `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Si quieres, cuéntame qué buscas y te oriento por aquí.`
+              : `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. ¿Te parece si lo veis en una ${s.callLabel} de ${s.callDurationMinutes} minutos?`;
         } else {
           const items = svc.includes.slice(0, 3).map((i) => lowerFirst(i));
           const includes = items.length ? ` Incluye ${items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}` : items[0]}.` : '';
           const price = `${formatMoney(svc.priceCents, svc.currency)} ${BILLING_PERIOD_LABELS[svc.billingPeriod] ?? ''}`.trim();
-          text = state.priceShared
-            ? `Como te comentaba, ${svc.name} son ${price}. ¿Qué duda te queda para ver si encaja contigo?`
-            : `Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`;
+          if (booked) text = `Claro. ${svc.name} cuesta ${price}.${includes} En la ${s.callLabel} lo veréis en detalle con ${trainer}.`;
+          else if (state.priceShared) text = `Como te comentaba, ${svc.name} son ${price}. ¿Qué duda te queda para ver si encaja contigo?`;
+          else if (callDeclined) text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Qué te parece?`;
+          else text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`;
         }
         break;
       }
       case 'propose_call': {
         const event = leadCtx.memories.find((m) => m.kind === 'event')?.content;
         const lead_in = event ? `Teniendo en cuenta lo que me comentaste (${lowerFirst(event)}), ` : 'Por lo que me cuentas, ';
-        text = `${botNote}${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para valorar tu caso. ¿Te encaja?`;
+        text = `${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para valorar tu caso. ¿Te encaja?`;
         break;
       }
       case 'offer_slots':
@@ -309,7 +342,11 @@ export class RuleBasedSetterAgent implements SetterAgent {
         break;
       case 'clarify_slot': {
         const ids = state.lastOfferIds ?? [];
-        const labels = ids.map((id) => (state.offeredSlots ?? []).find((x) => x.id === id)?.label).filter((l): l is string => Boolean(l));
+        // Etiquetas recalculadas ahora (la oferta pudo hacerse ayer: su “mañana” hoy es “hoy”).
+        const labels = ids
+          .map((id) => (state.offeredSlots ?? []).find((x) => x.id === id))
+          .filter((x): x is NonNullable<typeof x> => Boolean(x))
+          .map((x) => humanSlotLabel(x.start, biz.business.timezone, input.now));
         if (!labels.length) {
           text = '¿Qué día y franja te vendría mejor para la llamada?';
           break;
@@ -348,14 +385,43 @@ export class RuleBasedSetterAgent implements SetterAgent {
           : 'Perfecto, cualquier cosa me dices.';
         break;
       }
+      case 'cancel_booking': {
+        if (!input.toolbox) throw new Error('Sin acceso a la agenda.');
+        const r = await input.toolbox.run('cancel_call', { reason: 'El lead pidió cancelar la llamada por mensaje.' });
+        const data = JSON.parse(r.content) as { cancelled?: boolean; note?: string };
+        if (data.cancelled) {
+          text = `Hecho, he cancelado la ${s.callLabel}. Si más adelante quieres retomarlo, escríbeme por aquí sin problema.`;
+        } else if (!r.isError && data.note) {
+          text = `Puedes cancelarla en un clic desde el enlace del email de confirmación que te llegó. Si más adelante quieres retomarlo, escríbeme por aquí.`;
+        } else {
+          await input.toolbox.run('request_human', { reason: 'technical_issue', detail: 'El lead pidió cancelar su llamada y no se pudo cancelar automáticamente.' });
+          text = `Vaya, no he podido cancelarla ahora mismo. Se lo paso a ${trainer} para que lo revise y te confirme.`;
+        }
+        break;
+      }
       case 'disqualify_kindly':
         text = 'Gracias por contármelo con tanta sinceridad. Por lo que me cuentas, ahora mismo creo que esto no sería lo más adecuado para ti, y prefiero ser honesto contigo. Te deseo mucho ánimo.';
         break;
       case 'continue_without_call':
-        text = q ? `Sin problema, lo vamos hablando por aquí. ${q}` : 'Sin problema, lo vamos hablando por aquí. Cualquier duda, me dices.';
+        if (directive.justDeclined) {
+          text = q ? `Sin problema, lo vamos hablando por aquí. ${q}` : 'Sin problema, lo vamos hablando por aquí. Cualquier duda, me dices.';
+        } else {
+          text = pick(
+            [
+              'Perfecto. Si te surge cualquier duda sobre cómo trabajamos, pregúntame por aquí.',
+              'Genial. Cualquier cosa que quieras saber, me la preguntas por aquí sin problema.',
+              'Vale. Aquí me tienes para lo que necesites.',
+            ],
+            seed,
+          );
+        }
         break;
       default:
         text = q || 'Perfecto, cuéntame.';
+    }
+    // Si pregunta si es un bot, se le responde con transparencia en cualquier tipo de mensaje (no solo al cualificar).
+    if (botNote && directive.kind !== 'first_contact') {
+      text = directive.kind === 'greet_and_ask' ? text.replace(`Gracias por escribir${emoji('👋')} `, `Gracias por escribir${emoji('👋')} ${botNote} `) : `${botNote} ${text}`;
     }
     if (input.firstMessage && directive.kind !== 'greet_and_ask' && directive.kind !== 'first_contact') {
       text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} ${text}`;

@@ -14,6 +14,8 @@ export interface CreateAlertInput {
   leadId?: string | null;
   conversationId?: string | null;
   appointmentId?: string | null;
+  /** Avisos sin lead ni cita: no crear otro si ya hay uno abierto del mismo tipo y con el mismo título. */
+  dedupeByTitle?: boolean;
 }
 
 /** Crea un aviso para el entrenador. Evita duplicados abiertos del mismo tipo para el mismo lead/cita. */
@@ -27,7 +29,8 @@ export async function createAlert(input: CreateAlertInput) {
   const conds = [eq(alerts.businessId, input.businessId), eq(alerts.type, input.type), eq(alerts.status, 'open')];
   if (input.leadId) conds.push(eq(alerts.leadId, input.leadId));
   if (input.appointmentId) conds.push(eq(alerts.appointmentId, input.appointmentId));
-  if (input.leadId || input.appointmentId) {
+  if (!input.leadId && !input.appointmentId && input.dedupeByTitle) conds.push(eq(alerts.title, input.title));
+  if (input.leadId || input.appointmentId || input.dedupeByTitle) {
     const [existing] = await db.select().from(alerts).where(and(...conds)).limit(1);
     if (existing) return existing;
   }

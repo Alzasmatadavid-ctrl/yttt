@@ -21,8 +21,8 @@ import { saveLeadMemories } from '../memory/lead-memory.js';
 import { getLLMProvider } from '../providers/index.js';
 import { SetterToolbox } from '../tools/setter-tools.js';
 import { judgeReply, validateReply, type ValidationContext } from '../validation/output-validator.js';
-import { createSetterAgent, RuleBasedSetterAgent, type AgentMode, type SetterAgent } from './agents.js';
-import { decideDirective, type Directive } from './strategy.js';
+import { createSetterAgent, disclosureIntro, firstMessageGreeting, RuleBasedSetterAgent, type AgentMode, type SetterAgent } from './agents.js';
+import { decideDirective, oneQuestion, type Directive, type SetterState } from './strategy.js';
 import { applyPipelineEvent, markOptedOut, mergeQualification } from '../../crm/leads.service.js';
 import { updateConversationState } from '../../crm/conversations.service.js';
 import { triggerHandoff } from '../../crm/handoff.service.js';
@@ -71,10 +71,12 @@ export function buildValidationContext(biz: BusinessContext, toolbox: SetterTool
     timezone: biz.business.timezone,
     allowedTimes: toolbox?.allowedTimes() ?? [],
     allowedPricesCents: biz.services.filter((s) => s.priceCents > 0).map((s) => s.priceCents),
+    currencies: [...new Set([biz.business.currency, ...biz.services.map((s) => s.currency)].filter(Boolean))],
     allowedUrls: toolbox?.allowedUrls() ?? [],
     factsText: [t.credentials, t.methodDescription, t.transformation, t.idealClient, ...biz.services.map((s) => `${s.description} ${s.includes.join(' ')}`)].join('\n'),
     isFollowUp: opts.isFollowUp,
     assistantName: biz.settings.assistantName,
+    now: new Date(),
   };
 }
 
@@ -171,6 +173,50 @@ async function sendKai(
   return sendMessage({ businessId: biz.business.id, conversationId, text, sender: { type: 'kai' }, purpose, metadata });
 }
 
+/**
+ * Mensajes fijos (baja, aviso de salud, traspaso) cuando son el PRIMER mensaje de KAI: se antepone el saludo y la
+ * presentación como asistente virtual (transparencia), igual que en cualquier otro primer mensaje.
+ */
+function withIntroIfFirst(biz: BusinessContext, convCtx: ConversationContext, leadName: string | null, text: string, opts: { greet?: boolean } = {}): string {
+  if (convCtx.kaiHasSpoken || biz.settings.disclosureMode !== 'first_message') return text;
+  return `${opts.greet === false ? disclosureIntro(biz) : firstMessageGreeting(biz, leadName)} ${text}`;
+}
+
+/** Motivo por el que KAI no debe escribir por iniciativa propia (cuenta desactivada o límites del plan), o null. */
+async function proactiveBlock(biz: BusinessContext, lead: LeadContext['lead']): Promise<{ reason: 'business_suspended' | 'limit_reached'; note: string } | null> {
+  if (biz.business.status !== 'active') return { reason: 'business_suspended', note: 'La cuenta está desactivada: KAI no envía mensajes.' };
+  if (lead.tags.includes(OVER_LIMIT_TAG)) return { reason: 'limit_reached', note: 'El lead entró con el límite de leads del plan superado: KAI no le escribe automáticamente.' };
+  const usage = await checkUsageLimit(biz.business.id, 'ai_messages');
+  if (!usage.allowed) return { reason: 'limit_reached', note: `Se ha alcanzado el límite de mensajes de KAI del plan este mes (${usage.used} de ${usage.limit}).` };
+  return null;
+}
+
+/**
+ * Resumen en lenguaje claro de por qué KAI no encontró una respuesta segura (para el aviso al entrenador).
+ * Los motivos técnicos del control de calidad (pensados para la IA) se guardan en el registro de errores.
+ */
+export function qualityIssueSummary(issues: string[]): string {
+  const reasons = new Set<string>();
+  for (const i of issues) {
+    if (/^Error al generar/.test(i)) reasons.add('la IA no respondió por un problema técnico temporal');
+    else if (/horario|ese día no hay/.test(i)) reasons.add('la respuesta mencionaba un horario que no está en tu agenda');
+    else if (/importe|moneda/.test(i)) reasons.add('la respuesta mencionaba un precio que no coincide con tus servicios');
+    else if (/enlace/.test(i)) reasons.add('la respuesta incluía un enlace que no has configurado');
+    else if (/garantiza resultados/.test(i)) reasons.add('la respuesta prometía resultados');
+    else if (/médico/.test(i)) reasons.add('la respuesta podía parecer un consejo médico');
+    else if (/[Pp]resiona/.test(i)) reasons.add('la respuesta presionaba al lead');
+    else if (/preguntas/.test(i)) reasons.add('la respuesta hacía varias preguntas a la vez');
+    else if (/largo/.test(i)) reasons.add('la respuesta era demasiado larga');
+    else if (/perfil del entrenador/.test(i)) reasons.add('la respuesta incluía datos que no están en tu perfil');
+    else if (/palabra prohibida/.test(i)) reasons.add('la respuesta usaba una palabra que has prohibido');
+    else if (/emojis/.test(i)) reasons.add('la respuesta no respetaba tu uso de emojis');
+    else if (/[Rr]epite/.test(i)) reasons.add('la respuesta repetía un mensaje anterior');
+    else reasons.add('la respuesta no superó el control de calidad');
+  }
+  const list = [...reasons].slice(0, 2);
+  return list.length ? `KAI no ha encontrado una respuesta segura: ${list.join(' y ')}.` : 'KAI no ha encontrado una respuesta segura.';
+}
+
 /** Ejecuta un turno de respuesta de KAI en una conversación. */
 export async function runSetterReply(businessId: string, conversationId: string, opts: { force?: boolean } = {}): Promise<SetterRunResult> {
   const biz = await loadBusinessContext(businessId);
@@ -191,16 +237,19 @@ export async function runSetterReply(businessId: string, conversationId: string,
     await triggerHandoff(businessId, conversationId, 'limit_reached', 'El lead entró con el límite de leads del plan superado.');
     return { status: 'handoff', reason: 'limit_reached' };
   }
+  // El límite de mensajes de IA también se aplica al simulador: cada respuesta usa el modelo igual que en producción.
   const usage = await checkUsageLimit(businessId, 'ai_messages');
-  if (!usage.allowed && !lead.isTest) {
+  if (!usage.allowed) {
     await createAlert({
       businessId,
       type: 'limit_reached',
       severity: 'critical',
       title: 'Límite de mensajes de KAI alcanzado',
       body: `Has usado ${usage.used} de ${usage.limit} mensajes este mes. KAI ha dejado de responder automáticamente.`,
+      leadId: lead.id,
+      conversationId,
     });
-    await triggerHandoff(businessId, conversationId, 'limit_reached');
+    await triggerHandoff(businessId, conversationId, 'limit_reached', `Has usado ${usage.used} de ${usage.limit} mensajes de KAI este mes.`);
     return { status: 'handoff', reason: 'limit_reached' };
   }
 
@@ -224,9 +273,12 @@ export async function runSetterReply(businessId: string, conversationId: string,
       .update(messages)
       .set({ metadata: { ...(lastPending?.metadata ?? {}), analysis: { engine: analysis.engine, summary: analysis.summary, flags: analysis.flags, objectionKey: analysis.objectionKey, qualificationKeys: Object.keys(analysis.qualification) } } })
       .where(and(eq(messages.businessId, businessId), eq(messages.id, lastPending.id)));
-    const statePatch: Partial<ConversationState> = { lastAnalysisAt: new Date().toISOString() };
+    const statePatch: Partial<SetterState> = { lastAnalysisAt: new Date().toISOString() };
     if (analysis.flags.asksPrice) statePatch.priceAskedCount = (conv.state.priceAskedCount ?? 0) + 1;
     if (analysis.flags.medical) statePatch.medicalFlag = true;
+    // Si rechaza la llamada, se recuerda para no volver a proponérsela; si después la pide, se olvida el rechazo.
+    if (analysis.flags.declinesCall) statePatch.callDeclinedAt = new Date().toISOString();
+    else if (analysis.flags.wantsCall && (conv.state as SetterState).callDeclinedAt) statePatch.callDeclinedAt = undefined;
     conv.state = await updateConversationState(businessId, conversationId, statePatch);
     leadCtx = await loadLeadContext(businessId, lead.id);
   }
@@ -240,7 +292,7 @@ export async function runSetterReply(businessId: string, conversationId: string,
   const lastText = convCtx.pendingInbound.map((m) => m.content).join(' ').slice(0, 200);
   const handoffDetail = lastText ? `Último mensaje: “${lastText}”` : '';
   if (analysis?.flags.optOut) {
-    const bye = 'Entendido, no te escribiremos más. ¡Mucho ánimo!';
+    const bye = withIntroIfFirst(biz, convCtx, lead.name, 'Entendido, no te escribiremos más. ¡Mucho ánimo!', { greet: false });
     const res = await sendKai(biz, conversationId, bye, 'reply', { kind: 'opt_out_ack' });
     await markOptedOut(businessId, lead.id);
     await audit({ businessId, actorType: 'kai', action: 'lead.opted_out', entityType: 'lead', entityId: lead.id });
@@ -254,25 +306,46 @@ export async function runSetterReply(businessId: string, conversationId: string,
     [Boolean(analysis?.flags.outOfScope && rules.outOfScope), 'out_of_scope'],
   ];
   if (analysis?.flags.medical && rules.medical) {
-    const res = await sendKai(biz, conversationId, MEDICAL_MESSAGE, 'reply', { kind: 'medical_redirect' });
+    const text = withIntroIfFirst(biz, convCtx, lead.name, MEDICAL_MESSAGE);
+    const res = await sendKai(biz, conversationId, text, 'reply', { kind: 'medical_redirect' });
     await triggerHandoff(businessId, conversationId, 'medical', handoffDetail);
-    return { status: 'handoff', reason: 'medical', messageId: res.message.id, text: MEDICAL_MESSAGE, analysis: analysisSummary };
+    return { status: 'handoff', reason: 'medical', messageId: res.message.id, text, analysis: analysisSummary };
   }
   for (const [hit, reason] of handoffChecks) {
     if (!hit) continue;
     let msg = rules.handoffMessage?.trim() || defaultHandoffMessage(reason, trainer);
     if (msg && analysis?.flags.asksIfBot) msg = `Te soy sincero: soy ${biz.settings.assistantName || 'KAI'}, el asistente automatizado del equipo de ${trainer}. ${msg}`;
+    else if (msg) msg = withIntroIfFirst(biz, convCtx, lead.name, msg);
     let messageId: string | undefined;
     if (msg && reason !== 'angry') messageId = (await sendKai(biz, conversationId, msg, 'handoff', { kind: 'handoff', reason })).message.id;
     await triggerHandoff(businessId, conversationId, reason, handoffDetail);
     return { status: 'handoff', reason, messageId, text: msg ?? undefined, analysis: analysisSummary };
   }
 
+  // Tema de salud con el escalado médico desactivado: KAI sigue la conversación, pero el aviso sanitario
+  // (sección 17) se envía SIEMPRE, de forma literal y determinista, antes de su respuesta (una vez por conversación).
+  const medicalNoticeSent = convCtx.history.some((m) => m.direction === 'outbound' && (m.metadata.kind === 'medical_notice' || m.metadata.kind === 'medical_redirect'));
+  let medicalNoticeNow = false;
+  if (analysis?.flags.medical && !rules.medical && !medicalNoticeSent) {
+    const notice = await sendKai(biz, conversationId, withIntroIfFirst(biz, convCtx, lead.name, MEDICAL_MESSAGE), 'reply', { kind: 'medical_notice' });
+    if (notice.delivered) {
+      medicalNoticeNow = true;
+      // La respuesta que sigue ya no es el primer mensaje de KAI (no debe volver a saludar ni presentarse).
+      convCtx = { ...convCtx, history: [...convCtx.history, notice.message], kaiHasSpoken: true };
+    }
+  }
+
   // 4) Estrategia + redacción.
   const directive = decideDirective({ biz, leadCtx, state: conv.state, analysis, kaiHasSpoken: convCtx.kaiHasSpoken });
   const notes: string[] = [];
   if (analysis?.flags.asksIfBot) notes.push(`El lead pregunta si eres un bot: responde con honestidad que eres el asistente automatizado del equipo de ${trainer} y ofrece pasarle con ${trainer} si lo prefiere.`);
-  if (analysis?.flags.medical && !rules.medical) notes.push(`Ha mencionado un tema de salud: incluye con naturalidad esta idea: “${MEDICAL_MESSAGE}”`);
+  if (analysis?.flags.medical && !rules.medical) {
+    notes.push(
+      medicalNoticeNow
+        ? `Ha mencionado un tema de salud y acabas de enviarle este aviso en un mensaje aparte: “${MEDICAL_MESSAGE}”. No lo repitas: sigue la conversación sin dar consejos médicos.`
+        : 'Ha mencionado un tema de salud (ya le recomendaste revisarlo con un profesional sanitario): no des consejos médicos ni diagnósticos.',
+    );
+  }
   const toolbox = new SetterToolbox(biz, leadCtx, conv);
   const agent = createSetterAgent(provider);
   let gen = await generateValidatedMessage({ agent, biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: true });
@@ -281,7 +354,9 @@ export async function runSetterReply(businessId: string, conversationId: string,
     gen = await generateValidatedMessage({ agent: new RuleBasedSetterAgent(), biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: false });
   }
   if (!gen.text) {
-    await triggerHandoff(businessId, conversationId, 'quality_check_failed', gen.issues.join(' · '));
+    // Al entrenador, un resumen claro; los motivos técnicos (para la IA) quedan en el registro de errores.
+    await logError('ai.setter.quality_check', new Error(gen.issues.join(' · ') || 'Sin motivo'), { conversationId, directive: directive.kind, attempts: gen.attempts }, businessId, 'warn');
+    await triggerHandoff(businessId, conversationId, 'quality_check_failed', [qualityIssueSummary(gen.issues), handoffDetail].filter(Boolean).join(' '));
     return { status: 'handoff', reason: 'quality_check_failed', directive: directive.kind, attempts: gen.attempts, analysis: analysisSummary };
   }
 
@@ -301,9 +376,12 @@ export async function runSetterReply(businessId: string, conversationId: string,
     toolCalls: toolbox.records,
     ...gen.meta,
   });
-  const statePatch: Partial<ConversationState> = {};
+  const statePatch: Partial<SetterState> = {};
   if (directive.questionKey && gen.text.includes('?')) statePatch.lastAskedKey = directive.questionKey;
   else if (!gen.text.includes('?')) statePatch.lastAskedKey = undefined;
+  if (directive.kind === 'reassure_call') statePatch.callReassuredAt = new Date().toISOString();
+  // Canceló la llamada: no se le vuelve a proponer otra salvo que la pida.
+  if (toolbox.cancelled) statePatch.callDeclinedAt = new Date().toISOString();
   if (directive.kind === 'propose_call') {
     statePatch.callProposedAt = new Date().toISOString();
     if (sent.delivered) await applyPipelineEvent(businessId, lead.id, 'call_proposed');
@@ -350,6 +428,21 @@ export async function runFirstContact(businessId: string, conversationId: string
   const leadCtx = await loadLeadContext(businessId, convCtx.conversation.leadId);
   if (!biz.settings.autopilotEnabled || !convCtx.conversation.aiEnabled || leadCtx.lead.optedOut) return { status: 'skipped', reason: 'disabled' };
   if (convCtx.history.length > 0) return { status: 'skipped', reason: 'conversation_started' };
+  // Cuenta desactivada o límites del plan: KAI no escribe primero (el lead queda guardado para contacto manual).
+  const block = await proactiveBlock(biz, leadCtx.lead);
+  if (block) {
+    if (block.reason === 'limit_reached' && !leadCtx.lead.tags.includes(OVER_LIMIT_TAG)) {
+      await createAlert({
+        businessId,
+        type: 'new_lead_manual',
+        title: 'Nuevo lead: contacto manual necesario',
+        body: `${leadCtx.lead.name || 'Un lead'} (${leadCtx.lead.source}) no se ha contactado automáticamente: ${block.note}`,
+        leadId: leadCtx.lead.id,
+        conversationId,
+      });
+    }
+    return { status: 'skipped', reason: block.reason };
+  }
   const directive = decideDirective({ biz, leadCtx, state: convCtx.conversation.state, analysis: null, kaiHasSpoken: false, isFirstContact: true });
   const provider = getLLMProvider();
 
@@ -362,7 +455,11 @@ export async function runFirstContact(businessId: string, conversationId: string
     text = (await new RuleBasedSetterAgent().respond({ biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, now: new Date(), feedback: [], toolbox: null, mode: 'first_contact' })).text;
   }
   const sent = await sendKai(biz, conversationId, text, 'first_contact', { directive: directive.kind });
-  if (directive.questionKey && text.includes('?')) await updateConversationState(businessId, conversationId, { lastAskedKey: directive.questionKey });
+  // Solo se apunta como preguntada si el lead ha visto ESA pregunta: con una plantilla de WhatsApp (o si el envío
+  // se bloquea) lo que recibe es otro texto, y su respuesta no contesta a esta variable.
+  if (sent.delivered && sent.message.contentType !== 'template' && directive.questionKey && text.includes('?')) {
+    await updateConversationState(businessId, conversationId, { lastAskedKey: directive.questionKey });
+  }
   if (!sent.delivered) {
     await createAlert({
       businessId,
@@ -378,28 +475,43 @@ export async function runFirstContact(businessId: string, conversationId: string
   return { status: sent.delivered ? 'sent' : 'blocked', reason: sent.blockedReason, messageId: sent.message.id, text, directive: directive.kind };
 }
 
+export interface ComposedFollowUp {
+  text: string | null;
+  issues: string[];
+  meta: Record<string, unknown>;
+  /** KAI no debe enviar este seguimiento (cuenta desactivada, límites del plan): no es un fallo de calidad. */
+  skipped?: { reason: 'business_suspended' | 'limit_reached'; note: string };
+}
+
 /** Redacta un seguimiento contextual (usado por la automatización de seguimientos). */
 export async function composeFollowUp(
   businessId: string,
   conversationId: string,
   followUp: { step: number; totalSteps: number; angle: string; hoursSilent: number },
-): Promise<{ text: string | null; issues: string[]; meta: Record<string, unknown> }> {
+): Promise<ComposedFollowUp> {
   const biz = await loadBusinessContext(businessId);
   const convCtx = await loadConversationContext(businessId, conversationId);
   const leadCtx = await loadLeadContext(businessId, convCtx.conversation.leadId);
-  const st = convCtx.conversation.state;
+  const block = await proactiveBlock(biz, leadCtx.lead);
+  if (block) return { text: null, issues: [block.note], meta: {}, skipped: block };
+  const st = convCtx.conversation.state as SetterState;
   const rule = biz.rules.find((r) => r.key === st.lastAskedKey);
-  const question = st.callProposedAt
-    ? `¿Te viene bien que lo veáis en una ${biz.settings.callLabel} esta semana?`
-    : rule?.question;
+  // Si rechazó la llamada (o la canceló), el seguimiento no vuelve a proponerla.
+  const askCall = Boolean(st.callProposedAt) && !st.callDeclinedAt;
+  const question = askCall ? `¿Te viene bien que lo veáis en una ${biz.settings.callLabel} esta semana?` : rule?.question ? oneQuestion(rule.question) : undefined;
+  const leadHasWritten = convCtx.history.some((m) => m.direction === 'inbound');
   const directive: Directive = {
     kind: 'ask_qualification',
-    questionKey: st.callProposedAt ? undefined : rule?.key,
+    questionKey: askCall ? undefined : rule?.key,
     question,
-    instruction: `Escribe un mensaje de seguimiento (paso ${followUp.step} de ${followUp.totalSteps}). Enfoque: ${followUp.angle}. Usa algo CONCRETO de la conversación o de la memoria del lead (su objetivo, su motivo, un evento). Prohibido el típico “solo hago seguimiento”. Breve, cercano, sin presión${followUp.step < followUp.totalSteps ? ' y terminando con UNA pregunta fácil de responder' : ', dejando la puerta abierta (sin pregunta obligatoria)'}.`,
+    instruction: `Escribe un mensaje de seguimiento (paso ${followUp.step} de ${followUp.totalSteps}). Enfoque: ${followUp.angle}. Usa algo CONCRETO de la conversación o de la memoria del lead (su objetivo, su motivo, un evento). Prohibido el típico “solo hago seguimiento”. Breve, cercano, sin presión${followUp.step < followUp.totalSteps ? ' y terminando con UNA pregunta fácil de responder' : ', dejando la puerta abierta (sin pregunta obligatoria)'}.${
+      leadHasWritten
+        ? ''
+        : ' El lead todavía NO ha respondido a ningún mensaje: no des por hecho que te ha contado nada (nada de “lo que me contaste”); usa solo lo que indicó al dejar sus datos, si lo hay.'
+    }${st.callDeclinedAt ? ' Prefirió no hacer la llamada: no se la vuelvas a proponer.' : ''}`,
   };
   const provider = getLLMProvider();
-  const gen = await generateValidatedMessage({
+  let gen = await generateValidatedMessage({
     agent: createSetterAgent(provider),
     biz,
     leadCtx,
@@ -411,8 +523,13 @@ export async function composeFollowUp(
     followUp,
     useJudge: true,
   });
-  if (gen.text || !provider) return gen;
-  return generateValidatedMessage({ agent: new RuleBasedSetterAgent(), biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, toolbox: null, mode: 'follow_up', followUp, useJudge: false });
+  if (!gen.text && provider) {
+    gen = await generateValidatedMessage({ agent: new RuleBasedSetterAgent(), biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, toolbox: null, mode: 'follow_up', followUp, useJudge: false });
+  }
+  if (gen.text) return gen;
+  // El motivo que se guarda en el seguimiento lo lee el entrenador: resumen claro; el técnico, al registro de errores.
+  await logError('ai.followup.quality_check', new Error(gen.issues.join(' · ') || 'Sin motivo'), { conversationId, step: followUp.step }, businessId, 'warn');
+  return { ...gen, issues: [qualityIssueSummary(gen.issues)] };
 }
 
 export async function leadDisplayName(businessId: string, leadId: string) {

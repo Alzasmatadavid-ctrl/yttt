@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { consoleEmail } from '../../src/integrations/email/email.service.js';
+import { settleBackgroundTasks } from '../../src/lib/background.js';
 import { ApiClient, DEFAULT_PASSWORD, registerTrainer, setPlan, setupTestApp, teardownTestApp, uniqueEmail } from './helpers.js';
 
 let app: FastifyInstance;
@@ -168,6 +169,8 @@ describe('recuperación de contraseña', () => {
     const res = await anon.post('/api/auth/forgot-password', { email: t.email });
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
+    // El email se envía después de responder (misma respuesta y mismo tiempo exista o no la cuenta).
+    await settleBackgroundTasks();
     expect(consoleEmail.outbox.length).toBeGreaterThan(before);
     const mail = lastEmailTo(t.email);
     expect(mail).not.toBeNull();
@@ -200,11 +203,13 @@ describe('recuperación de contraseña', () => {
     const t = await registerTrainer(app);
     const anon = new ApiClient(app);
     const known = await anon.post('/api/auth/forgot-password', { email: t.email });
+    await settleBackgroundTasks();
     const ghost = uniqueEmail('fantasma');
     const before = consoleEmail.outbox.length;
     const unknown = await anon.post('/api/auth/forgot-password', { email: ghost });
     expect(unknown.statusCode).toBe(200);
     expect(unknown.json()).toEqual(known.json());
+    await settleBackgroundTasks();
     expect(consoleEmail.outbox.length).toBe(before);
     expect(lastEmailTo(ghost)).toBeNull();
   });

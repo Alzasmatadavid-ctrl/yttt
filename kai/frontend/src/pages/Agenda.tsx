@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Plus, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Lock, Plus, RotateCw, Save, Trash2 } from 'lucide-react';
 import { WEEKDAY_LABELS, type AvailabilityWeek } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime } from '../lib/format';
-import { Button, Card, Field, Input, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
+import { useCan } from '../lib/business';
+import { Button, Callout, Card, EmptyState, Field, Input, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
 import { OutcomeModal } from '../components/lead-actions';
 import type { Appointment, AvailabilityConfig, CalendarConnection } from '../lib/types';
 
@@ -152,71 +153,82 @@ function AvailabilityEditor({ config, connections }: { config: AvailabilityConfi
   const setRange = (day: keyof AvailabilityWeek, i: number, key: 'start' | 'end', value: string) =>
     setWeekly((w) => ({ ...w, [day]: w[day].map((r, idx) => (idx === i ? { ...r, [key]: value } : r)) }));
   const calendly = connections.find((c) => c.provider === 'calendly');
+  // Cambiar la disponibilidad es configuración del negocio: el servidor solo se lo permite a la persona titular.
+  const canEdit = useCan('settings:write');
 
   return (
-    <Card title="Disponibilidad para llamadas" icon={Clock} actions={<Button variant="primary" size="sm" icon={Save} loading={save.isPending} onClick={() => save.mutate()}>Guardar</Button>}>
+    <Card title="Disponibilidad para llamadas" icon={Clock} actions={canEdit ? <Button variant="primary" size="sm" icon={Save} loading={save.isPending} onClick={() => save.mutate()}>Guardar</Button> : undefined}>
+      {!canEdit && (
+        <div style={{ marginBottom: 12 }}>
+          <Callout tone="info" icon={Lock}>
+            Puedes consultar el horario, pero solo la persona titular del negocio (rol Entrenador) puede cambiarlo.
+          </Callout>
+        </div>
+      )}
       {calendly && <p className="callout callout-info small" style={{ marginBottom: 12 }}>Tienes Calendly conectado: los huecos reales salen de tu Calendly. Este horario se usa solo si lo desconectas.</p>}
-      <p className="muted small" style={{ marginBottom: 14 }}>
-        KAI solo ofrecerá huecos dentro de este horario, descontando tus citas{connections.some((c) => c.provider === 'google') ? ' y lo que tengas ocupado en Google Calendar' : ''}. Zona horaria: <strong>{config.timezone}</strong>.
-      </p>
-      <div className="col" style={{ gap: 10 }}>
-        {(Object.keys(WEEKDAY_LABELS) as (keyof AvailabilityWeek)[]).map((day) => (
-          <div key={day} className="row wrap" style={{ alignItems: 'flex-start', gap: 10, paddingBottom: 10, borderBottom: '1px dashed var(--border)' }}>
-            <strong style={{ width: 90, paddingTop: 8 }}>{WEEKDAY_LABELS[day]}</strong>
-            <div className="col grow" style={{ gap: 6 }}>
-              {weekly[day].length === 0 && <span className="subtle small" style={{ paddingTop: 8 }}>No disponible</span>}
-              {weekly[day].map((r, i) => (
-                <div key={i} className="row" style={{ gap: 6 }}>
-                  <Input type="time" value={r.start} onChange={(e) => setRange(day, i, 'start', e.target.value)} style={{ width: 120 }} aria-label="Desde" />
-                  <span className="subtle">–</span>
-                  <Input type="time" value={r.end} onChange={(e) => setRange(day, i, 'end', e.target.value)} style={{ width: 120 }} aria-label="Hasta" />
-                  <Button variant="ghost" size="sm" iconOnly icon={Trash2} onClick={() => setWeekly((w) => ({ ...w, [day]: w[day].filter((_, idx) => idx !== i) }))}>
-                    Quitar franja
-                  </Button>
-                </div>
-              ))}
+      <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <p className="muted small" style={{ marginBottom: 14 }}>
+          KAI solo ofrecerá huecos dentro de este horario, descontando tus citas{connections.some((c) => c.provider === 'google') ? ' y lo que tengas ocupado en Google Calendar' : ''}. Zona horaria: <strong>{config.timezone}</strong>.
+        </p>
+        <div className="col" style={{ gap: 10 }}>
+          {(Object.keys(WEEKDAY_LABELS) as (keyof AvailabilityWeek)[]).map((day) => (
+            <div key={day} className="row wrap" style={{ alignItems: 'flex-start', gap: 10, paddingBottom: 10, borderBottom: '1px dashed var(--border)' }}>
+              <strong style={{ width: 90, paddingTop: 8 }}>{WEEKDAY_LABELS[day]}</strong>
+              <div className="col grow" style={{ gap: 6 }}>
+                {weekly[day].length === 0 && <span className="subtle small" style={{ paddingTop: 8 }}>No disponible</span>}
+                {weekly[day].map((r, i) => (
+                  <div key={i} className="row" style={{ gap: 6 }}>
+                    <Input type="time" value={r.start} onChange={(e) => setRange(day, i, 'start', e.target.value)} style={{ width: 120 }} aria-label="Desde" />
+                    <span className="subtle">–</span>
+                    <Input type="time" value={r.end} onChange={(e) => setRange(day, i, 'end', e.target.value)} style={{ width: 120 }} aria-label="Hasta" />
+                    <Button variant="ghost" size="sm" iconOnly icon={Trash2} onClick={() => setWeekly((w) => ({ ...w, [day]: w[day].filter((_, idx) => idx !== i) }))}>
+                      Quitar franja
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="ghost" icon={Plus} onClick={() => setWeekly((w) => ({ ...w, [day]: [...w[day], { start: '17:00', end: '20:00' }] }))}>
+                Franja
+              </Button>
             </div>
-            <Button size="sm" variant="ghost" icon={Plus} onClick={() => setWeekly((w) => ({ ...w, [day]: [...w[day], { start: '17:00', end: '20:00' }] }))}>
-              Franja
-            </Button>
-          </div>
-        ))}
-      </div>
-      <div className="grid-4 mt-16" style={{ gap: 12 }}>
-        <Field label="Duración de la llamada" hint="Se configura en Setter IA → Llamada">
-          <Input value={`${config.callDurationMinutes} min`} disabled />
-        </Field>
-        <Field label="Intervalo entre huecos (min)">
-          <Input type="number" min={10} max={240} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} />
-        </Field>
-        <Field label="Margen entre citas (min)">
-          <Input type="number" min={0} max={120} value={bufferMinutes} onChange={(e) => setBufferMinutes(Number(e.target.value))} />
-        </Field>
-        <Field label="Antelación mínima (horas)">
-          <Input type="number" min={0} max={168} value={minNoticeHours} onChange={(e) => setMinNoticeHours(Number(e.target.value))} />
-        </Field>
-        <Field label="Agendar hasta (días vista)">
-          <Input type="number" min={1} max={90} value={maxDaysAhead} onChange={(e) => setMaxDaysAhead(Number(e.target.value))} />
-        </Field>
-      </div>
-      <div className="mt-16">
-        <Field label="Días bloqueados (vacaciones, festivos…)">
-          <div className="row wrap" style={{ gap: 6 }}>
-            {blackout.map((d) => (
-              <span key={d} className="badge" style={{ height: 26 }}>
-                {d}
-                <button onClick={() => setBlackout((b) => b.filter((x) => x !== d))} style={{ border: 0, background: 'none', cursor: 'pointer', color: 'inherit' }} aria-label={`Quitar ${d}`}>
-                  ×
-                </button>
-              </span>
-            ))}
-            <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} style={{ width: 170 }} />
-            <Button size="sm" disabled={!newDate} onClick={() => { setBlackout((b) => [...new Set([...b, newDate])].sort()); setNewDate(''); }}>
-              Bloquear día
-            </Button>
-          </div>
-        </Field>
-      </div>
+          ))}
+        </div>
+        <div className="grid-4 mt-16" style={{ gap: 12 }}>
+          <Field label="Duración de la llamada" hint="Se configura en Setter IA → Llamada">
+            <Input value={`${config.callDurationMinutes} min`} disabled />
+          </Field>
+          <Field label="Intervalo entre huecos (min)">
+            <Input type="number" min={10} max={240} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} />
+          </Field>
+          <Field label="Margen entre citas (min)">
+            <Input type="number" min={0} max={120} value={bufferMinutes} onChange={(e) => setBufferMinutes(Number(e.target.value))} />
+          </Field>
+          <Field label="Antelación mínima (horas)">
+            <Input type="number" min={0} max={168} value={minNoticeHours} onChange={(e) => setMinNoticeHours(Number(e.target.value))} />
+          </Field>
+          <Field label="Agendar hasta (días vista)">
+            <Input type="number" min={1} max={90} value={maxDaysAhead} onChange={(e) => setMaxDaysAhead(Number(e.target.value))} />
+          </Field>
+        </div>
+        <div className="mt-16">
+          <Field label="Días bloqueados (vacaciones, festivos…)">
+            <div className="row wrap" style={{ gap: 6 }}>
+              {blackout.map((d) => (
+                <span key={d} className="badge" style={{ height: 26 }}>
+                  {d}
+                  <button type="button" onClick={() => setBlackout((b) => b.filter((x) => x !== d))} style={{ border: 0, background: 'none', cursor: 'pointer', color: 'inherit' }} aria-label={`Quitar ${d}`}>
+                    ×
+                  </button>
+                </span>
+              ))}
+              <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} style={{ width: 170 }} aria-label="Día que quieres bloquear" />
+              <Button size="sm" disabled={!newDate} onClick={() => { setBlackout((b) => [...new Set([...b, newDate])].sort()); setNewDate(''); }}>
+                Bloquear día
+              </Button>
+            </div>
+          </Field>
+        </div>
+      </fieldset>
     </Card>
   );
 }
@@ -230,7 +242,23 @@ export default function Agenda() {
   const availability = useQuery({ queryKey: ['availability'], queryFn: () => api.get<{ config: AvailabilityConfig; connections: CalendarConnection[] }>('/agenda/availability') });
   const pastRange = useMemo(() => ({ from: new Date(Date.now() - 14 * 86_400_000).toISOString(), to: new Date().toISOString() }), []);
   const pending = useQuery({ queryKey: ['appointments', 'past'], queryFn: () => api.get<{ appointments: ApptRow[] }>('/agenda/appointments', pastRange) });
-  if (availability.isLoading || !availability.data) return <PageLoading />;
+  if (availability.isLoading) return <PageLoading />;
+  if (!availability.data) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon={AlertTriangle}
+          title="No se pudo cargar la agenda"
+          description={errorText(availability.error)}
+          action={
+            <Button icon={RotateCw} loading={availability.isFetching} onClick={() => void availability.refetch()}>
+              Reintentar
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
   const tz = availability.data.config.timezone;
   const needOutcome = (pending.data?.appointments ?? []).filter((a) => a.appointment.status === 'scheduled' && new Date(a.appointment.endsAt) < new Date());
 

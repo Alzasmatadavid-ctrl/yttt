@@ -190,14 +190,18 @@ Si prefieres tu propio formulario, envía los datos desde el navegador a la **Di
 POST https://TU_DOMINIO/api/public/forms/TU_CLAVE_PUBLICA
 Content-Type: application/json
 
-{ "name": "Ana López", "phone": "+34600111222", "email": "ana@example.com", "goal": "Perder 5 kg", "website": "" }
+{ "name": "Ana López", "phone": "+34600111222", "email": "ana@example.com", "goal": "Perder 5 kg", "contact_via_whatsapp": true, "website": "" }
 ```
 
-- Campos admitidos: `name`, `phone`, `email`, `instagram`, `goal`, `message`, `source_detail` (por ejemplo, el nombre de la campaña), `contact_via_whatsapp` (`true` o `false`) y `extra` (pares clave/valor). Hace falta al menos `phone` o `email`.
+- Campos admitidos: `name`, `phone`, `email`, `instagram`, `goal`, `message`, `source_detail` (por ejemplo, el nombre de la campaña), `contact_via_whatsapp` (`true` o `false`) y `extra` (pares clave/valor, hasta 20). Hace falta al menos `phone` o `email`.
 - `website` es la trampa anti-spam: déjalo oculto y vacío. Si llega relleno, KAI ignora el envío sin avisar.
 - Pide el consentimiento de privacidad en tu formulario antes de enviar los datos.
 
-Si el entrenador tiene WhatsApp conectado y el lead deja su teléfono, KAI le escribe por WhatsApp en segundos (salvo que envíes `"contact_via_whatsapp": false`).
+Si el entrenador tiene WhatsApp conectado, el lead deja su teléfono **y** el formulario envía `"contact_via_whatsapp": true` (por ejemplo, con una casilla «Acepto que me escribáis por WhatsApp»), KAI le escribe por WhatsApp en segundos. Si no se envía, el lead se guarda igualmente pero KAI no le escribe: así nadie puede usar tu formulario para que KAI escriba a números ajenos. El formulario del generador ya lo envía cuando activas WhatsApp.
+
+Para protegerte del spam, el formulario público acepta como mucho 30 leads nuevos por hora y 200 por día en cada negocio (`PUBLIC_FORM_MAX_PER_HOUR` y `PUBLIC_FORM_MAX_PER_DAY`). Si se supera, el formulario muestra un aviso para intentarlo más tarde y KAI te avisa a ti.
+
+En el webhook de servidor (6.2), que va firmado con tu secreto, `contact_via_whatsapp` sigue siendo `true` si no se envía.
 
 ### 6.2. Webhook de servidor (Zapier, Make, Typeform, tu CRM…)
 

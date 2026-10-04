@@ -137,9 +137,12 @@ export async function getInsights(businessId: string, range: { from: Date; to: D
   }
 
   // 5. Objeciones más frecuentes.
+  // Sin los leads de prueba del simulador (no deben ensuciar las recomendaciones).
   const objectionResult = await db.execute(sql`
     select o.key as key, count(*)::int as count
-    from ${conversations} c, jsonb_array_elements_text(coalesce(c.state->'objectionsHandled', '[]'::jsonb)) as o(key)
+    from ${conversations} c
+    join ${leads} l on l.id = c.lead_id and l.is_test = false,
+    jsonb_array_elements_text(coalesce(c.state->'objectionsHandled', '[]'::jsonb)) as o(key)
     where c.business_id = ${businessId} and c.updated_at >= ${range.from} and c.updated_at < ${range.to}
     group by o.key
     order by count(*) desc
@@ -171,7 +174,10 @@ export async function getInsights(businessId: string, range: { from: Date; to: D
       revived: sql<number>`count(*) filter (where exists (select 1 from ${messages} m where m.conversation_id = ${followUps.conversationId} and m.direction = 'inbound' and m.created_at > ${followUps.sentAt}))::int`,
     })
     .from(followUps)
-    .where(and(eq(followUps.businessId, businessId), eq(followUps.status, 'sent'), gte(followUps.sentAt, range.from), lt(followUps.sentAt, range.to)));
+    .innerJoin(leads, eq(leads.id, followUps.leadId))
+    .where(
+      and(eq(followUps.businessId, businessId), eq(leads.isTest, false), eq(followUps.status, 'sent'), gte(followUps.sentAt, range.from), lt(followUps.sentAt, range.to)),
+    );
   if ((fu?.sent ?? 0) >= MIN_SAMPLE) {
     const rate = pct(fu.revived, fu.sent);
     out.push({

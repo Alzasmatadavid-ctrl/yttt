@@ -5,10 +5,22 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { aiSettings, messages } from '../database/schema.js';
-import type { ChannelKey, LeadSource } from '../lib/domain.js';
-import { createLead, applyPipelineEvent, cancelPendingAutomationsForLead, recordLeadEvent, type Lead } from '../crm/leads.service.js';
-import { getOrCreateConversation, insertMessage } from '../crm/conversations.service.js';
+import { aiSettings, businesses, messages } from '../database/schema.js';
+import { OVER_LIMIT_TAG, type ChannelKey, type LeadSource } from '../lib/domain.js';
+import { truncate } from '../lib/text.js';
+import {
+  createLead,
+  applyPipelineEvent,
+  cancelPendingAutomationsForLead,
+  isUniqueViolation,
+  markOptedOut,
+  recordLeadEvent,
+  type Lead,
+} from '../crm/leads.service.js';
+import { getOrCreateConversation, insertMessage, type Conversation, type Message } from '../crm/conversations.service.js';
+import { createAlert } from '../crm/alerts.service.js';
+import { isOptOutRequest } from '../crm/opt-out.js';
+import { checkUsageLimit } from '../plans/plans.service.js';
 import { scheduleJob, scheduleOrReschedule } from '../automation/jobs.js';
 import { audit } from '../audit/audit.service.js';
 
@@ -71,23 +83,38 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     { type: 'lead' },
   );
   const conversation = await getOrCreateConversation(input.businessId, lead.id, input.channel, input.channelConnectionId);
-  const message = await insertMessage({
-    businessId: input.businessId,
-    conversationId: conversation.id,
-    leadId: lead.id,
-    direction: 'inbound',
-    senderType: 'lead',
-    content: input.text || '(mensaje sin texto)',
-    contentType: input.contentType ?? 'text',
-    externalId: input.externalMessageId ?? null,
-    createdAt: input.sentAt,
-  });
+  let message: Message;
+  try {
+    message = await insertMessage({
+      businessId: input.businessId,
+      conversationId: conversation.id,
+      leadId: lead.id,
+      direction: 'inbound',
+      senderType: 'lead',
+      content: input.text || '(mensaje sin texto)',
+      contentType: input.contentType ?? 'text',
+      externalId: input.externalMessageId ?? null,
+      createdAt: input.sentAt,
+    });
+  } catch (err) {
+    // Meta entregó el mismo mensaje dos veces a la vez: el otro aviso ya lo ha guardado.
+    if (input.externalMessageId && isUniqueViolation(err)) return { duplicate: true as const };
+    throw err;
+  }
   // El lead respondió: se cancelan seguimientos pendientes.
   await cancelPendingAutomationsForLead(input.businessId, lead.id, ['no_reply', 'no_show', 'reactivation']);
   await recordLeadEvent(input.businessId, lead.id, 'message_in', { type: 'lead' }, { messageId: message.id, channel: input.channel });
   await applyPipelineEvent(input.businessId, lead.id, 'inbound_received', { type: 'lead' });
 
-  if (conversation.aiEnabled && !conversation.handoffActive && !lead.optedOut) {
+  // Baja pedida mientras KAI no va a contestar (entrenador al mando, piloto automático apagado…):
+  // se registra igualmente para que nadie le vuelva a escribir. Si KAI está activo, lo hace KAI al responder.
+  let optedOutNow = false;
+  if (!lead.optedOut && !input.isTest && isOptOutRequest(input.text) && !(await kaiWillHandle(input.businessId, conversation, lead))) {
+    await registerOptOutFromInbound(input.businessId, lead, conversation, message);
+    optedOutNow = true;
+  }
+
+  if (conversation.aiEnabled && !conversation.handoffActive && !lead.optedOut && !optedOutNow) {
     const delay = input.replyDelaySeconds ?? (await replyDelaySeconds(input.businessId));
     await scheduleOrReschedule({
       businessId: input.businessId,
@@ -99,6 +126,33 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     });
   }
   return { duplicate: false as const, lead, leadCreated: created, conversation, message };
+}
+
+/** ¿Va a responder KAI a este mensaje? (mismas condiciones que comprueba antes de analizarlo). */
+async function kaiWillHandle(businessId: string, conversation: Conversation, lead: Lead): Promise<boolean> {
+  if (!conversation.aiEnabled || conversation.handoffActive || lead.optedOut || lead.status === 'client' || lead.tags.includes(OVER_LIMIT_TAG)) return false;
+  const [row] = await getDb()
+    .select({ status: businesses.status, autopilot: aiSettings.autopilotEnabled })
+    .from(businesses)
+    .leftJoin(aiSettings, eq(aiSettings.businessId, businesses.id))
+    .where(eq(businesses.id, businessId))
+    .limit(1);
+  if (!row || row.status !== 'active' || !row.autopilot) return false;
+  return lead.isTest || (await checkUsageLimit(businessId, 'ai_messages')).allowed;
+}
+
+async function registerOptOutFromInbound(businessId: string, lead: Lead, conversation: Conversation, message: Message) {
+  await markOptedOut(businessId, lead.id, { type: 'lead' }, { messageId: message.id, detectedBy: 'inbound' });
+  await audit({ businessId, actorType: 'system', action: 'lead.opted_out', entityType: 'lead', entityId: lead.id, metadata: { messageId: message.id, detectedBy: 'inbound' } });
+  await createAlert({
+    businessId,
+    type: 'delivery_blocked',
+    severity: 'info',
+    title: 'Un lead ha pedido no recibir más mensajes',
+    body: `${lead.name || 'Un lead'} ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». Se ha registrado la baja: no se le enviarán más mensajes y se han cancelado sus seguimientos y recordatorios. Si ha sido un malentendido, puedes darle de alta de nuevo desde su ficha.`,
+    leadId: lead.id,
+    conversationId: conversation.id,
+  });
 }
 
 export interface ExternalLeadInput {

@@ -2,13 +2,13 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { leads } from '../database/schema.js';
 import type { TemplateRef } from '../lib/domain.js';
-import { badRequest, errorMessage } from '../lib/errors.js';
+import { badRequest } from '../lib/errors.js';
 import { firstName } from '../lib/text.js';
 import { logError } from '../audit/audit.service.js';
 import { getChannelAdapter } from '../integrations/channels/registry.js';
 import type { ChannelSendContext } from '../integrations/channels/types.js';
 import { connectionCredentials, getActiveConnection, markConnectionError } from '../integrations/connections.service.js';
-import { GraphApiError } from '../integrations/meta/graph.js';
+import { friendlyMetaError, GraphApiError } from '../integrations/meta/graph.js';
 import { incrementUsage } from '../plans/plans.service.js';
 import { createAlert } from './alerts.service.js';
 import { getConversation, insertMessage, type Message } from './conversations.service.js';
@@ -133,13 +133,15 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
       ({ externalId } = await adapter.sendText(ctx, text, { humanAgent: humanAgentTag }));
     }
     const message = await insertMessage({ ...base, content, contentType, externalId, status: 'sent', metadata });
-    if (input.sender.type === 'kai') await incrementUsage(input.businessId, 'ai_messages');
+    // Los leads del simulador no consumen el cupo mensual de mensajes de KAI.
+    if (input.sender.type === 'kai' && !lead.isTest) await incrementUsage(input.businessId, 'ai_messages');
     if (input.sender.type === 'human') await cancelPendingAutomationsForLead(input.businessId, lead.id, ['no_reply']);
     await recordLeadEvent(input.businessId, lead.id, 'message_out', { type: input.sender.type === 'human' ? 'user' : input.sender.type, userId: input.sender.userId }, { purpose: input.purpose, messageId: message.id });
     await applyPipelineEvent(input.businessId, lead.id, 'outbound_sent', { type: input.sender.type === 'human' ? 'user' : 'kai', userId: input.sender.userId });
     return { message, delivered: true };
   } catch (err) {
-    const reason = errorMessage(err);
+    // Al entrenador se le muestra un motivo comprensible en español; el error técnico de Meta queda en error_logs.
+    const reason = friendlyMetaError(err, adapter.label);
     const message = await insertMessage({ ...base, content: text, status: 'failed', error: reason.slice(0, 500), metadata: { ...input.metadata, purpose: input.purpose } });
     await logError('channel.send', err, { channel: conv.channel, conversationId: conv.id }, input.businessId);
     if (err instanceof GraphApiError && err.isAuthError && connectionId) {

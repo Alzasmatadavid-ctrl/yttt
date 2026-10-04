@@ -3,6 +3,8 @@
  * con la configuración actual. No guarda nada ni envía nada.
  */
 import { randomUUID } from 'node:crypto';
+import { limitReached } from '../../lib/errors.js';
+import { checkUsageLimit, incrementUsage } from '../../plans/plans.service.js';
 import { analyzeHeuristically } from '../analysis/analyzer.js';
 import { loadBusinessContext, type BusinessContext, type ConversationContext, type LeadContext, type LeadRow, type MessageRow } from '../context/context.js';
 import { getLLMProvider } from '../providers/index.js';
@@ -11,6 +13,12 @@ import { generateValidatedMessage } from './setter-engine.js';
 import { decideDirective } from './strategy.js';
 
 export async function previewSetterMessage(businessId: string, leadMessage: string, overrides?: Partial<BusinessContext['settings']>) {
+  // La vista previa usa el mismo modelo que las respuestas reales: cuenta dentro del límite de mensajes de IA del plan.
+  const provider = getLLMProvider();
+  if (provider) {
+    const usage = await checkUsageLimit(businessId, 'ai_messages');
+    if (!usage.allowed) throw limitReached('Has alcanzado el límite de mensajes de KAI de tu plan este mes, así que la vista previa no está disponible. Amplía el plan o espera al mes que viene.');
+  }
   const loaded = await loadBusinessContext(businessId);
   const biz: BusinessContext = overrides ? { ...loaded, settings: { ...loaded.settings, ...overrides } } : loaded;
   const now = new Date();
@@ -98,7 +106,6 @@ export async function previewSetterMessage(businessId: string, leadMessage: stri
   const enrichedLead: LeadRow = { ...lead, qualification: analysis.qualification, signals: analysis.signals };
   const leadCtx: LeadContext = { lead: enrichedLead, memories: analysis.memories.map((m) => ({ kind: m.kind, content: m.content })), upcomingAppointment: null };
   const directive = decideDirective({ biz, leadCtx, state: {}, analysis: { ...analysis, flags: { ...analysis.flags, wantsCall: false, asksPrice: false } }, kaiHasSpoken: false });
-  const provider = getLLMProvider();
   const gen = await generateValidatedMessage({
     agent: createSetterAgent(provider),
     biz,
@@ -110,5 +117,6 @@ export async function previewSetterMessage(businessId: string, leadMessage: stri
     mode: 'reply',
     useJudge: false,
   });
+  if (provider) await incrementUsage(businessId, 'ai_messages');
   return { leadMessage, reply: gen.text, issues: gen.issues, engine: provider ? 'llm' : 'rules' };
 }

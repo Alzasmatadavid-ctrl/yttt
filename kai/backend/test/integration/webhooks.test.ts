@@ -330,8 +330,9 @@ describe('formulario público', () => {
     expect(res.headers['access-control-allow-methods']).toContain('POST');
   });
 
-  it('con WhatsApp conectado y teléfono, programa el primer contacto por WhatsApp', async () => {
-    const res = await postForm({ name: 'Jorge Teléfono', phone: '600 555 444' });
+  it('con WhatsApp conectado, teléfono y consentimiento para WhatsApp, programa el primer contacto por WhatsApp', async () => {
+    // El formulario público solo escribe por WhatsApp si lo pide expresamente (como hace el generador de KAI).
+    const res = await postForm({ name: 'Jorge Teléfono', phone: '600 555 444', contact_via_whatsapp: true });
     expect(res.statusCode).toBe(200);
     const [lead] = await getDb().select().from(leads).where(and(eq(leads.businessId, T.businessId), eq(leads.name, 'Jorge Teléfono')));
     expect(lead.phone).toBe('+34600555444');

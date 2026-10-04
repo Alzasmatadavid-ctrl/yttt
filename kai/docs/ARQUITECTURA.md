@@ -101,11 +101,14 @@ Para añadir otro proveedor: implementa `LLMProvider` y regístralo en `ai/provi
 
 ## Seguridad
 
-- Contraseñas con scrypt; comparación en tiempo constante; protección contra enumeración de usuarios.
+- Contraseñas con scrypt; comparación en tiempo constante; protección contra enumeración de usuarios (la recuperación de contraseña responde igual y en el mismo tiempo: el email se envía en segundo plano).
+- Límite de intentos por cuenta (login, invitaciones, emails de recuperación) además del límite por IP. La IP real solo se toma de proxies de confianza (`TRUST_PROXY`), nunca de un `X-Forwarded-For` cualquiera.
+- Los enlaces de recuperación se consumen de forma atómica y todos se invalidan al cambiar o restablecer la contraseña. Los registros de peticiones no guardan tokens de la URL.
+- La cuenta de administración solo se crea al arrancar (`ADMIN_EMAIL` + `ADMIN_PASSWORD`), nunca desde el registro público.
 - Cookies `HttpOnly`, `SameSite=Lax` y `Secure` con HTTPS; protección CSRF (cabecera `X-Requested-With: kai` obligatoria en peticiones que modifican datos).
 - Tokens de integraciones cifrados con AES-256-GCM (`ENCRYPTION_KEY`).
 - Firma de webhooks: Meta (`X-Hub-Signature-256`), Calendly (`Calendly-Webhook-Signature`), leads (`X-KAI-Key` o HMAC).
-- Límites de peticiones (global y por ruta), cabeceras de seguridad (Helmet + CSP) y campo trampa en formularios públicos.
+- Límites de peticiones (global y por ruta), cabeceras de seguridad (Helmet + CSP) y campo trampa en formularios públicos, que además tienen un cupo de leads nuevos por negocio y solo escriben por WhatsApp con consentimiento expreso.
 - Auditoría de acciones sensibles (cambios de configuración, accesos de admin a conversaciones, acciones de Copilot…).
 
 ## Base de datos

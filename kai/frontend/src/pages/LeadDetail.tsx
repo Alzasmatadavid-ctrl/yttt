@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Brain, CalendarPlus, ClipboardCheck, History, MessagesSquare, Plus, Repeat, Save, Target, Trash2, UserRound, X } from 'lucide-react';
-import { leadStatusLabel, type LeadStatus } from '@shared';
+import { leadSourceLabel, leadStatusLabel, type LeadSource, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, money, timeAgo } from '../lib/format';
+import { useBusinessTimezone, useCan } from '../lib/business';
 import { Button, Card, ConfirmDialog, EmptyState, Field, Input, PageLoading, Textarea, useToast, TagInput } from '../components/ui';
 import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
 import { BookCallModal, OutcomeModal, QualificationList, StatusSelect } from '../components/lead-actions';
@@ -43,9 +44,54 @@ const ACTOR_LABELS: Record<string, string> = { kai: 'KAI', human: 'Equipo', syst
 function describeEvent(e: Profile['events'][number]) {
   if (e.type === 'status_changed') return `${leadStatusLabel(e.data.from as LeadStatus)} → ${leadStatusLabel(e.data.to as LeadStatus)}`;
   if (e.type === 'score_changed') return `${e.data.from} → ${e.data.to}`;
-  if (e.type === 'created') return `Origen: ${String(e.data.source ?? '')}`;
+  if (e.type === 'created') return e.data.source ? `Origen: ${leadSourceLabel(e.data.source as LeadSource)}` : '';
   if (e.type === 'handoff') return String(e.data.detail ?? e.data.reason ?? '');
   return '';
+}
+
+type LeadForm = { name: string; phone: string; email: string; instagramUsername: string; notes: string; tags: string[] };
+
+const EMPTY_FORM: LeadForm = { name: '', phone: '', email: '', instagramUsername: '', notes: '', tags: [] };
+
+function toForm(lead: Lead): LeadForm {
+  return { name: lead.name, phone: lead.phone ?? '', email: lead.email ?? '', instagramUsername: lead.instagramUsername ?? '', notes: lead.notes, tags: lead.tags };
+}
+
+const sameForm = (a: LeadForm, b: LeadForm) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Borrador del formulario «Datos del lead». Se resincroniza con el servidor solo si no hay cambios
+ * pendientes: cambiar la etapa, agendar o volver a la pestaña refrescan el lead, y eso no debe borrar
+ * lo que el entrenador está escribiendo y aún no ha guardado.
+ */
+function useLeadDraft(lead: Lead | undefined) {
+  const id = lead?.id ?? null;
+  const source = lead ? toForm(lead) : EMPTY_FORM;
+  const sourceKey = JSON.stringify(source);
+  const [state, setState] = useState({ id, key: sourceKey, base: source, draft: source });
+  let current = state;
+  if (state.id !== id) {
+    // Otro lead (o se está cargando): se empieza de cero, nunca se arrastra un borrador de un lead a otro.
+    current = { id, key: sourceKey, base: source, draft: source };
+    setState(current);
+  } else if (state.key !== sourceKey) {
+    const pending = !sameForm(state.draft, state.base);
+    current = { id, key: sourceKey, base: source, draft: pending ? state.draft : source };
+    setState(current);
+  }
+  return {
+    form: current.draft,
+    dirty: !sameForm(current.draft, current.base),
+    setForm: (update: (f: LeadForm) => LeadForm) => setState((s) => ({ ...s, draft: update(s.draft) })),
+    /**
+     * Tras guardar: lo guardado (normalizado por el servidor) pasa a ser la nueva base. Si mientras se guardaba
+     * se siguió escribiendo, se conserva lo escrito (sigue habiendo cambios pendientes).
+     */
+    markSaved: (saved: Lead, sent: LeadForm) => {
+      const f = toForm(saved);
+      setState((s) => ({ id: saved.id, key: JSON.stringify(f), base: f, draft: sameForm(s.draft, sent) ? f : s.draft }));
+    },
+  };
 }
 
 export default function LeadDetail() {
@@ -58,17 +104,16 @@ export default function LeadDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [newMemory, setNewMemory] = useState('');
   const { data, isLoading, error } = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.get<Profile>(`/leads/${leadId}`), enabled: Boolean(leadId) });
-  const [form, setForm] = useState({ name: '', phone: '', email: '', instagramUsername: '', notes: '', tags: [] as string[] });
-  useEffect(() => {
-    if (data?.lead)
-      setForm({ name: data.lead.name, phone: data.lead.phone ?? '', email: data.lead.email ?? '', instagramUsername: data.lead.instagramUsername ?? '', notes: data.lead.notes, tags: data.lead.tags });
-  }, [data?.lead]);
+  const { form, setForm, dirty, markSaved } = useLeadDraft(data?.lead);
+  const tz = useBusinessTimezone();
+  const canDelete = useCan('leads:delete');
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['lead', leadId] });
   const save = useMutation({
-    mutationFn: () => api.patch(`/leads/${leadId}`, { ...form, phone: form.phone || null, email: form.email || null, instagramUsername: form.instagramUsername || null }),
-    onSuccess: () => {
+    mutationFn: (f: LeadForm) => api.patch<{ lead: Lead }>(`/leads/${leadId}`, { ...f, phone: f.phone || null, email: f.email || null, instagramUsername: f.instagramUsername || null }),
+    onSuccess: (r, sent) => {
       toast('Datos guardados');
+      if (r?.lead) markSaved(r.lead, sent);
       invalidate();
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -81,7 +126,7 @@ export default function LeadDetail() {
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
-  const delMemory = useMutation({ mutationFn: (id: string) => api.del(`/leads/${leadId}/memories/${id}`), onSuccess: invalidate });
+  const delMemory = useMutation({ mutationFn: (id: string) => api.del(`/leads/${leadId}/memories/${id}`), onSuccess: invalidate, onError: (e) => toast(errorText(e), 'error') });
   const del = useMutation({
     mutationFn: () => api.del(`/leads/${leadId}`),
     onSuccess: () => {
@@ -142,9 +187,11 @@ export default function LeadDetail() {
           <div style={{ width: 190 }}>
             <StatusSelect leadId={lead.id} status={lead.status} onChanged={invalidate} />
           </div>
-          <Button variant="danger" iconOnly icon={Trash2} onClick={() => setConfirmDelete(true)}>
-            Eliminar lead
-          </Button>
+          {canDelete && (
+            <Button variant="danger" iconOnly icon={Trash2} onClick={() => setConfirmDelete(true)}>
+              Eliminar lead
+            </Button>
+          )}
         </div>
       </div>
 
@@ -192,7 +239,8 @@ export default function LeadDetail() {
               className="row mt-12"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (newMemory.trim().length >= 3) addMemory.mutate();
+                // Un solo envío a la vez (Enter dos veces seguidas guardaría el recuerdo duplicado).
+                if (newMemory.trim().length >= 3 && !addMemory.isPending) addMemory.mutate();
               }}
             >
               <Input value={newMemory} onChange={(e) => setNewMemory(e.target.value)} placeholder="Añadir algo que KAI deba recordar (ej. trabaja a turnos)" />
@@ -202,7 +250,18 @@ export default function LeadDetail() {
             </form>
           </Card>
 
-          <Card title="Datos del lead" icon={UserRound} actions={<Button size="sm" variant="primary" icon={Save} loading={save.isPending} onClick={() => save.mutate()}>Guardar</Button>}>
+          <Card
+            title="Datos del lead"
+            icon={UserRound}
+            actions={
+              <>
+                {dirty && <span className="subtle small">Cambios sin guardar</span>}
+                <Button size="sm" variant="primary" icon={Save} loading={save.isPending} onClick={() => save.mutate(form)}>
+                  Guardar
+                </Button>
+              </>
+            }
+          >
             <div className="grid-2" style={{ gap: 12 }}>
               <Field label="Nombre">
                 <Input value={form.name} onChange={set('name')} />
@@ -229,7 +288,7 @@ export default function LeadDetail() {
             </div>
             <dl className="kv mt-16">
               <dt>Entró</dt>
-              <dd>{dateTime(lead.createdAt)}</dd>
+              <dd>{dateTime(lead.createdAt, tz)}</dd>
               {lead.sourceDetail && (
                 <>
                   <dt>Campaña / detalle</dt>
@@ -263,7 +322,7 @@ export default function LeadDetail() {
                 {data.appointments.map((a) => (
                   <div key={a.id} className="attention-item" style={{ cursor: 'default' }}>
                     <div className="grow">
-                      <strong>{dateTime(a.startsAt)}</strong>
+                      <strong>{dateTime(a.startsAt, tz)}</strong>
                       <div className="subtle xs">
                         {a.bookedBy === 'kai' ? 'Agendada por KAI' : a.bookedBy === 'lead' ? 'Reservada por el lead' : 'Agendada por el equipo'} · {a.calendarProvider === 'internal' ? 'Agenda KAI' : a.calendarProvider === 'google' ? 'Google Calendar' : 'Calendly'}
                       </div>
@@ -302,7 +361,7 @@ export default function LeadDetail() {
                 {data.followUps.slice(0, 10).map(({ followUp: f }) => (
                   <div key={f.id} className="row-between small" style={{ padding: '5px 0' }}>
                     <span>
-                      Paso {f.step} · {f.status === 'scheduled' ? `programado ${dateTime(f.scheduledFor)}` : f.status === 'sent' ? `enviado ${timeAgo(f.sentAt)}` : f.note ?? f.status}
+                      Paso {f.step} · {f.status === 'scheduled' ? `programado ${dateTime(f.scheduledFor, tz)}` : f.status === 'sent' ? `enviado ${timeAgo(f.sentAt)}` : f.note ?? f.status}
                     </span>
                     <span className={`badge ${f.status === 'sent' ? 'badge-success' : f.status === 'scheduled' ? 'badge-info' : ''}`}>
                       {{ scheduled: 'Programado', sent: 'Enviado', cancelled: 'Cancelado', skipped: 'Omitido', failed: 'Fallido' }[f.status] ?? f.status}

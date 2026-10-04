@@ -49,7 +49,7 @@ export const MESSAGE_VARIABLES = [
   { key: 'hora', label: 'Hora de la llamada', example: '18:00' },
   { key: 'llamada', label: 'Cómo llamas a la llamada', example: 'llamada de valoración' },
   { key: 'entrenador', label: 'Tu nombre', example: 'Álex' },
-  { key: 'enlace', label: 'Enlace de la videollamada (si no hay, se quita esa línea)', example: 'https://meet.google.com/…' },
+  { key: 'enlace', label: 'Enlace de la videollamada (si la llamada no tiene, KAI lo quita del mensaje)', example: 'https://meet.google.com/…' },
 ] as const;
 
 const VARIABLE_KEYS: readonly string[] = MESSAGE_VARIABLES.map((v) => v.key);
@@ -117,10 +117,30 @@ function dayLabel(startsAt: Date, timezone: string, reference: Date): string {
   return `el ${start.toFormat("cccc d 'de' LLLL")}`;
 }
 
+const RX_LINK_VARIABLE = /\{\s*enlace\s*\}/i;
+
+/**
+ * La cita no tiene enlace: quita {enlace} y la etiqueta que lo presenta (“Enlace: {enlace}”,
+ * “… 🙌 Te dejo el enlace: {enlace}”). Devuelve null si la línea se queda vacía.
+ */
+function withoutLink(line: string): string | null {
+  const idx = line.search(RX_LINK_VARIABLE);
+  if (idx === -1) return line.trim() ? line : null;
+  let before = line.slice(0, idx);
+  const after = line.slice(idx).replace(RX_LINK_VARIABLE, '');
+  if (/:\s*$/.test(before)) {
+    // Etiqueta = lo que hay desde el último final de frase (., !, ?, emoji) hasta los dos puntos.
+    const m = /^(.*[.!?…\p{Extended_Pictographic}])?([^.!?…\p{Extended_Pictographic}]*):\s*$/u.exec(before);
+    const label = m?.[2] ?? before;
+    before = label.trim().length <= 40 ? (m?.[1] ?? '') : before.replace(/:\s*$/, '');
+  }
+  return withoutLink(before + after);
+}
+
 /**
  * Rellena un texto personalizado con los datos reales de la cita.
  * - Sin nombre del lead, “Hola {nombre}, …” queda “Hola, …”.
- * - Sin enlace, la línea que contiene {enlace} se quita si solo era la etiqueta (“Enlace: {enlace}”).
+ * - Sin enlace, se quita {enlace} junto con su etiqueta (“Enlace: {enlace}”); si era una línea aparte, la línea entera.
  */
 export function renderMessageTemplate(template: string, c: Partial<Ctx> & Pick<Ctx, 'leadName' | 'callLabel'>, reference: Date = new Date()): string {
   const tz = c.timezone ?? 'Europe/Madrid';
@@ -135,19 +155,14 @@ export function renderMessageTemplate(template: string, c: Partial<Ctx> & Pick<C
   const lines = template
     .trim()
     .split('\n')
-    .map((line) => {
-      const hadLink = /\{\s*enlace\s*\}/i.test(line);
-      const filled = line.replace(RX_VARIABLE, (_m, key: string) => values[key.trim().toLowerCase()] ?? '');
-      // Línea que solo era “Enlace: {enlace}” y la cita no tiene enlace → fuera.
-      if (hadLink && !values.enlace && (filled.trim() === '' || /:\s*$/.test(filled.trim()))) return null;
-      return filled;
-    })
+    .map((line) => (values.enlace || !RX_LINK_VARIABLE.test(line) ? line : withoutLink(line)))
     .filter((line): line is string => line !== null)
     .map((line) =>
       line
+        .replace(RX_VARIABLE, (_m, key: string) => values[key.trim().toLowerCase()] ?? '')
         .replace(/[ \t]{2,}/g, ' ')
-        .replace(/\s+([,.;:!?])/g, '$1')
-        .replace(/([¡¿])\s+/g, '$1')
+        .replace(/[ \t]+([,.;:!?])/g, '$1')
+        .replace(/([¡¿])[ \t]+/g, '$1')
         .replace(/^[\s,;:]+/, '')
         .trimEnd(),
     );

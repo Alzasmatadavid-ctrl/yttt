@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import { ArrowUp, Check, Sparkles, X } from 'lucide-react';
 import { api, errorText } from '../lib/api';
 import { dateTime, timeAgo } from '../lib/format';
+import { useBusinessTimezone } from '../lib/business';
 import { Button, Spinner, useToast } from './ui';
 import { LeadAvatar, ScoreBadge, StatusBadge, TemperatureBadge } from './lead-bits';
 import type { LeadStatus, LeadTemperature, LeadSource } from '@shared';
@@ -76,6 +77,8 @@ function ActionCard({ action, pending }: { action: { id: string; summary: string
 }
 
 function Cards({ data, onNavigate, pendingIds }: { data: CopilotData; onNavigate: (to: string) => void; pendingIds: Set<string> }) {
+  // Las horas de las llamadas, en la zona horaria del negocio (como en la Agenda).
+  const tz = useBusinessTimezone();
   return (
     <div className="col mt-8" style={{ gap: 8 }}>
       {data.leads && data.leads.length > 0 && (
@@ -104,7 +107,7 @@ function Cards({ data, onNavigate, pendingIds }: { data: CopilotData; onNavigate
             <button key={a.id} className="attention-item" onClick={() => onNavigate(`/app/leads/${a.leadId}`)}>
               <div className="grow">
                 <strong>{a.leadName}</strong>
-                <div className="subtle small">{dateTime(a.startsAt)}</div>
+                <div className="subtle small">{dateTime(a.startsAt, tz)}</div>
               </div>
             </button>
           ))}

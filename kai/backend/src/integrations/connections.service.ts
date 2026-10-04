@@ -57,7 +57,15 @@ export async function findConnectionByExternalId(channel: ConnectionChannel, ext
 export async function upsertConnection(
   businessId: string,
   userId: string,
-  input: { channel: ConnectionChannel; externalAccountId: string; displayName: string; accessToken: string; config: ChannelConfig },
+  input: {
+    channel: ConnectionChannel;
+    externalAccountId: string;
+    displayName: string;
+    accessToken: string;
+    config: ChannelConfig;
+    /** Conexión del mismo canal que esta sustituye (cambiar de número o de cuenta): se desconecta al guardar. */
+    replacesConnectionId?: string | null;
+  },
 ) {
   const db = getDb();
   const [taken] = await db
@@ -68,10 +76,23 @@ export async function upsertConnection(
   if (taken && taken.businessId !== businessId && taken.status !== 'disconnected')
     throw badRequest('Esta cuenta ya está conectada a otro negocio de KAI.');
 
+  let replaced: ChannelConnection | null = null;
+  if (input.replacesConnectionId && input.replacesConnectionId !== taken?.id) {
+    [replaced] = await db
+      .select()
+      .from(channelConnections)
+      .where(and(eq(channelConnections.businessId, businessId), eq(channelConnections.id, input.replacesConnectionId)))
+      .limit(1);
+    if (!replaced) throw notFound('La conexión que quieres sustituir no existe.');
+    if (replaced.channel !== input.channel) throw badRequest('Solo se puede sustituir una cuenta por otra del mismo canal.');
+  }
+
   if (!taken || taken.businessId !== businessId || taken.status === 'disconnected') {
     const limits = await getLimits(businessId);
-    if (limits.maxChannels !== null && (await countChannels(businessId)) >= limits.maxChannels)
-      throw badRequest(`Tu plan permite ${limits.maxChannels} canal(es) conectados.`);
+    // La cuenta que se sustituye deja hueco: no cuenta para el límite del plan.
+    const freed = replaced && replaced.status !== 'disconnected' ? 1 : 0;
+    if (limits.maxChannels !== null && (await countChannels(businessId)) - freed >= limits.maxChannels)
+      throw badRequest(`Tu plan permite ${limits.maxChannels} canal(es) conectados. Desconecta otro canal o mejora el plan.`);
   }
 
   const values = {
@@ -88,7 +109,16 @@ export async function upsertConnection(
   const [row] = taken
     ? await db.update(channelConnections).set(values).where(eq(channelConnections.id, taken.id)).returning()
     : await db.insert(channelConnections).values(values).returning();
-  await audit({ businessId, actorType: 'user', actorUserId: userId, action: 'integration.connected', entityType: 'channel_connection', entityId: row.id, metadata: { channel: input.channel } });
+  await audit({
+    businessId,
+    actorType: 'user',
+    actorUserId: userId,
+    action: 'integration.connected',
+    entityType: 'channel_connection',
+    entityId: row.id,
+    metadata: { channel: input.channel, ...(replaced ? { replaces: replaced.id } : {}) },
+  });
+  if (replaced && replaced.status !== 'disconnected') await disconnectConnection(businessId, userId, replaced.id);
   return publicConnection(row);
 }
 

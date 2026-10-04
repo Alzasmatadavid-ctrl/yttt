@@ -1373,6 +1373,9 @@
   justify-content: space-between;
   padding: 10px 12px;
 }
+.stage-options .option:disabled {
+  cursor: default;
+}
 @media (max-width: 720px) {
   .board-col {
     flex-basis: min(280px, 82vw);

@@ -88,7 +88,11 @@ export class SetterToolbox {
   readonly records: ToolRunRecord[] = [];
   offeredThisTurn: OfferedSlot[] = [];
   booked: Appointment | null = null;
+  /** La llamada agendada se canceló en este turno. */
+  cancelled = false;
   bookingUrl: string | null = null;
+  /** Etiqueta del horario cuyo enlace de reserva (Calendly) ya se dio en este turno. */
+  private linkLabel: string | null = null;
   handoff: { reason: HandoffReason; detail: string } | null = null;
   private offeredAll: OfferedSlot[];
 
@@ -164,12 +168,22 @@ export class SetterToolbox {
         };
       }
       case 'book_call': {
+        // Idempotente: si ya se reservó en este turno (p. ej. la IA lo reintenta o el motor de reglas toma el relevo
+        // tras un borrador fallido), se devuelve la misma reserva en vez de intentar ocupar otra vez el hueco.
+        const already = this.existingBooking();
+        if (already) return already;
+        // Una cita por lead: si ya tiene una agendada, elegir otro horario es moverla.
+        if (this.leadCtx.upcomingAppointment && !this.cancelled) {
+          const moved = (await this.dispatch('reschedule_call', input)) as Record<string, unknown>;
+          return { ...moved, rescheduled: true };
+        }
         const slot = this.findOffered(String(input.slot_id ?? ''));
         if (!slot) throw new AppError(400, 'slot_not_offered', 'Ese slot_id no se ha ofrecido en esta conversación. Consulta get_available_slots primero.');
         if (this.biz.calendarProvider === 'calendly') {
           if (!slot.bookingUrl) throw new AppError(400, 'no_link', 'No hay enlace de reserva para ese horario.');
           this.bookingUrl = slot.bookingUrl;
-          return { mode: 'link', label: slot.label, booking_url: slot.bookingUrl, instructions: 'Envía este enlace al lead para que confirme la reserva en un clic. Aún NO está confirmada.' };
+          this.linkLabel = humanSlotLabel(slot.start, business.timezone);
+          return { mode: 'link', label: this.linkLabel, booking_url: slot.bookingUrl, instructions: 'Envía este enlace al lead para que confirme la reserva en un clic. Aún NO está confirmada.' };
         }
         const appt = await bookAppointment({
           businessId: business.id,
@@ -185,13 +199,16 @@ export class SetterToolbox {
         return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone), meeting_url: appt.meetingUrl ?? null };
       }
       case 'reschedule_call': {
+        const already = this.existingBooking();
+        if (already) return already;
         const upcoming = this.leadCtx.upcomingAppointment;
         if (!upcoming) throw new AppError(400, 'no_appointment', 'El lead no tiene ninguna llamada agendada.');
         const slot = this.findOffered(String(input.slot_id ?? ''));
         if (!slot) throw new AppError(400, 'slot_not_offered', 'Ese slot_id no se ha ofrecido. Consulta get_available_slots primero.');
         if (this.biz.calendarProvider === 'calendly') {
           this.bookingUrl = slot.bookingUrl ?? null;
-          return { mode: 'link', label: slot.label, booking_url: slot.bookingUrl, instructions: 'Envíale el enlace para reservar el nuevo horario y dile que puede cancelar la anterior desde el email de Calendly.' };
+          this.linkLabel = humanSlotLabel(slot.start, business.timezone);
+          return { mode: 'link', label: this.linkLabel, booking_url: slot.bookingUrl, instructions: 'Envíale el enlace para reservar el nuevo horario y dile que puede cancelar la anterior desde el email de Calendly.' };
         }
         const appt = await rescheduleAppointment(business.id, upcoming.id, new Date(slot.start), { type: 'kai' }, 'kai');
         this.booked = appt;
@@ -199,10 +216,12 @@ export class SetterToolbox {
         return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone), meeting_url: appt.meetingUrl ?? null };
       }
       case 'cancel_call': {
+        if (this.cancelled) return { ok: true, cancelled: true, already_cancelled: true };
         const upcoming = this.leadCtx.upcomingAppointment;
         if (!upcoming) throw new AppError(400, 'no_appointment', 'El lead no tiene ninguna llamada agendada.');
         if (upcoming.calendarProvider === 'calendly') return { ok: false, note: 'Las citas de Calendly se cancelan desde el enlace del email de confirmación de Calendly.' };
         await cancelAppointment(business.id, upcoming.id, { type: 'kai' }, String(input.reason ?? ''));
+        this.cancelled = true;
         return { ok: true, cancelled: true };
       }
       case 'request_human': {
@@ -213,6 +232,18 @@ export class SetterToolbox {
       default:
         throw new AppError(400, 'unknown_tool', `Herramienta desconocida: ${name}`);
     }
+  }
+
+  /** Reserva (o enlace de reserva) ya hecha en este turno, con el mismo formato que devuelve book_call. */
+  private existingBooking(): Record<string, unknown> | null {
+    const tz = this.biz.business.timezone;
+    if (this.booked) {
+      return { ok: true, confirmed: true, already_booked: true, label: humanSlotLabel(this.booked.startsAt, tz), meeting_url: this.booked.meetingUrl ?? null };
+    }
+    if (this.bookingUrl && this.linkLabel) {
+      return { mode: 'link', already_sent: true, label: this.linkLabel, booking_url: this.bookingUrl, instructions: 'Ya tienes el enlace de reserva de este turno: envíaselo al lead. Aún NO está confirmada.' };
+    }
+    return null;
   }
 
   private findOffered(id: string): OfferedSlot | null {

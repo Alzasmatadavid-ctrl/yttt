@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import { DateTime } from 'luxon';
 import type { ConversationState, LeadQualification, LeadSignals, OfferedSlot } from '../../lib/domain.js';
+import type { SetterState } from '../setter/strategy.js';
 import { fold, normalize } from '../../lib/text.js';
 import type { LLMProvider } from '../providers/types.js';
 import type { BusinessContext, LeadRow, MessageRow } from '../context/context.js';
@@ -157,12 +158,14 @@ export async function analyzeWithLLM(provider: LLMProvider, input: AnalysisInput
     summary: result.summary.slice(0, 500),
     engine: 'llm',
   };
-  // Red de seguridad: estas señales nunca deben perderse aunque el modelo las pase por alto.
+  // Red de seguridad: estas señales nunca deben perderse aunque el modelo las pase por alto. Solo se suman
+  // patrones de alta precisión: una baja es irreversible y un escalado detiene a KAI.
+  // El horario elegido NO se completa con la heurística: reservar sin un “sí” claro es peor que volver a preguntar.
   const safety = analyzeHeuristically(input);
-  analysis.flags.optOut ||= safety.flags.optOut;
+  const n = normalize(input.pending.map((m) => m.content).join('\n'));
+  analysis.flags.optOut ||= RX_OPT_OUT_EXPLICIT.test(n);
   analysis.flags.humanRequest ||= safety.flags.humanRequest;
   analysis.flags.asksIfBot ||= safety.flags.asksIfBot;
-  analysis.selectedSlotId ||= safety.selectedSlotId;
   return analysis;
 }
 
@@ -170,23 +173,49 @@ const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n))
 
 // ───────────────────────────── Heurística en español ─────────────────────────────
 
+/**
+ * Peticiones inequívocas de no recibir más mensajes. Solo presente o imperativo (“no me escribas más”, “dame de baja”):
+ * nunca pasado ni condicional (“no me escribiste”, “si no me escribes no me entero”) ni otras cosas (“no me mandes audios”).
+ */
+const RX_OPT_OUT_EXPLICIT =
+  /^\s*(stop|baja|para ya|basta|unsubscribe)\s*[.!]*\s*$|\b(dame|dadme|darme|me doy) de baja\b|\bno me (escribas|escribais|escriba|escriban|mandes|mandeis|envies|envieis|contactes|contacteis|molestes|molesteis) (mas|nunca mas|nada mas)\b(?! tarde)|\bdeja(d|r)? de (escribirme|mandarme mensajes|enviarme mensajes|contactarme)\b|\bno quiero recibir (mas )?mensajes\b|\b(borra|borrad|elimina|eliminad) mis datos\b/;
+
 const RX = {
-  optOut: /^\s*(stop|baja|para ya|basta)\s*[.!]*\s*$|no me (escrib|mandes|envies)|deja(d)? de escribir|dame de baja|no quiero (que me escrib|recibir (mas|m[aá]s) mensajes)|borra(d)? mis datos/,
+  optOut: new RegExp(
+    [
+      RX_OPT_OUT_EXPLICIT.source,
+      // “No me escribas.” / “no me escribáis por aquí” (como petición completa, sin “más tarde”, “ahora”…).
+      String.raw`\bno me (escribas|escribais|escriban|contactes|contacteis|contacten)( por (aqui|whatsapp|instagram|insta))?\s*([.!,]|$)`,
+      String.raw`\bno me (vuelvas|volvais|vuelvan) a (escribir|contactar|mandar)\b`,
+      String.raw`\bno quiero que me (escribas|escribais|escriban|contactes|contacteis|mandes|mandeis|envies|envieis|sigas escribiendo|sigais escribiendo)\b(?! (mas )?(tarde|luego|ahora|hoy|a estas horas|por la (noche|manana)))`,
+      String.raw`\bdeja(d|r)? de (escribir|mandarme|enviarme|molestar|molestarme)\b`,
+      String.raw`\bno quiero saber nada mas\b`,
+    ].join('|'),
+  ),
   humanRequest:
-    /(hablar|habla) con (una persona|alguien|un humano|una persona real|el entrenador|tu jefe|el|ella)\b|persona real|quiero que me (llame|atienda|escriba) (el|ella|una persona|el entrenador)|me puede atender (alguien|una persona)/,
-  asksIfBot: /eres (un |una )?(bot|robot|maquina|ia|inteligencia artificial|chatbot|automatico)|hablo con (un |una )?(bot|robot|maquina|ia)|esto es automatico/,
+    /\b(hablar|habla|hablo) (directamente )?con (una persona|un humano|una persona real|alguien (real|de verdad|del equipo|de carne y hueso)|el entrenador|la entrenadora|tu jefe|tu jefa|un responsable)\b|\bpersona real\b|\b(pasame|pasadme|ponme) con (una persona|alguien|el entrenador|la entrenadora|tu jefe|tu jefa)\b|\bquiero que me (llame|atienda|escriba|conteste|responda) (el entrenador|la entrenadora|una persona|alguien|un humano)\b|\bme puede (atender|llamar|escribir) (alguien|una persona)\b/,
+  asksIfBot:
+    /\beres (un |una )?(?:(?:bot|robot|ia|inteligencia artificial|chatbot|automatic[oa])\b|(?:maquina|programa|asistente virtual)\s*\?)|\b(eres|sois) (una persona|un humano|humano|humana|real)( real)?\s*\?|\bhablo con (un |una )?(bot|robot|maquina|ia|persona real|humano)\b|\besto es automatico\b|\b(me )?(responde|contesta|escribe) (un |una )?(bot|robot|maquina|ia)\b/,
   medical:
-    /diabet|insulin|hipertens|tension alta|colesterol|tiroid|hernia|lesion|lesionad|operacion|operad[oa]|embaraz|lactancia|medicacion|medicamento|pastillas para|trastorno alimentari|anorexia|bulimia|dolor (en el|de) pecho|cardiac|corazon|asma|epilep|cancer|quimio|analitica|analisis de sangre|depresion|ansiolitic|antidepresiv/,
-  angry: /estafa|timo|pesad[oa]s?\b|me teneis harto|spam|denunci|joder|cabron|gilipollas|idiota|imbecil|que asco|vergonzoso/,
+    /diabet|insulin|hipertens|tension alta|colesterol|tiroid|hernia|lesion|lesionad|operacion(?! (bikini|biquini|verano|playa))|operad[oa]|me (operaron|han operado|van a operar|operan)\b|embaraz|lactancia|medicacion|medicamento|pastillas para|trastorno alimentari|anorexia|bulimia|dolor (en el|de) pecho|cardiac|(problemas?|enfermedad|soplo|operacion|insuficiencia|fallo) (de|del|en el) corazon|arritmia|infarto|marcapasos|asma|epilep|cancer|quimio|analitica|analisis de sangre|depresion|ansiolitic|antidepresiv/,
+  // Enfado: insultos o quejas claras dirigidas al negocio (no “me siento pesada” ni “joder, qué difícil”).
+  angry:
+    /estafa|estafador|\btimo\b|timador|me (teneis|tienes|estais) (harto|harta|frito|frita)|\b(eres|sois|estas|estais|seas|seais|que|ser|vaya|menudo|menuda|menudos|menudas) (un |unos |una |unas |muy |tan |mas )?pesad[oa]s?\b(?! me (siento|noto|veo|encuentro))|\bdeja(d)? de (molestar|dar la lata)|\bspam\b|denunci|que os jodan|a la mierda|cabron|gilipollas|idiota|imbecil|subnormal|sinverguenza|ladrones|que asco de (servicio|empresa|atencion|trato)|vergonzos[oa]|una verguenza|me estais tomando el pelo/,
   price: /cuanto (cuesta|vale|es|cobras|cobrais|sale)|precio|tarifa|que coste|coste|cuanto seria/,
   callYes: /(llamada|llamar|llamame|hablamos por telefono|videollamada|reunion|agendar|agenda|cita)\b/,
+  /** Pide la llamada de forma explícita (tras haberla rechazado, solo esto vuelve a abrir la agenda). */
+  callRequest:
+    /\b(quiero|prefiero|me gustaria|podemos|podriamos|vamos a|mejor|al final) (si )?(hacer |tener |agendar |reservar )?(la |una )?(llamada|videollamada)\b|\b(hagamos|hacemos|agendamos|reservamos|agenda|reserva) (la |una )?(llamada|videollamada|cita)\b|\bllamame\b|\bagendamos\b|\bme apunto a la (llamada|videollamada)\b/,
   affirm: /^\s*(si|sip|vale|ok|okey|okay|perfecto|genial|claro|me encaja|me parece bien|venga|dale|por supuesto|de acuerdo|guay|bien|me vale)\b/,
-  declineCall: /no (me interesa|quiero|necesito) (la |una )?llamada|prefiero (no|por escrito|seguir por aqui)|ahora no puedo hablar/,
+  // Rechazar la llamada (no “prefiero no decirlo” ni “ahora no puedo hablar”).
+  declineCall:
+    /\bno (me interesa|quiero|necesito|hace falta|me hace falta) (la |una |ninguna )?(llamada|videollamada|reunion)\b|\bprefiero (no (hacer|tener) (la |una )?(llamada|videollamada)|no hablar por telefono|por escrito|seguir por (aqui|escrito|mensaje|mensajes|whatsapp|chat)|hablarlo por aqui)\b|\bnada de llamadas\b|\bsin llamadas?\b|\bno me gustan las llamadas\b/,
   negotiation: /descuento|rebaja|mas barato|pagar a plazos|financiar|precio especial|me haces (un )?precio|me lo dejas en|regatear/,
   outOfScope: /factura|devolucion|reembolso|colabora(cion|r)|patrocin|trabajar con vosotros|empleo|curriculum|publicidad en tu/,
   technical: /no (me )?funciona el (enlace|link)|no puedo (entrar|abrir|acceder)|no carga|link roto|me da error/,
-  reschedule: /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar) (la |el )?(llamada|cita|hora|dia)|no (voy a )?(puedo|podre) (ir|asistir|conectarme|estar|a esa hora)/,
-  cancel: /(cancelar|anular) (la |el )?(llamada|cita)/,
+  reschedule:
+    /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar|cambiamos|movemos) (la |el |mi )?(llamada|cita|hora|dia|videollamada)|\b(pasar|pasamos|pasame) (la |mi )?(llamada|cita|videollamada)\b|\bno (voy a )?(puedo|podre|poder) (ir|asistir|conectarme|estar|llegar|a esa hora|ese dia|esa hora)|\bal final no (puedo|podre|voy a poder)\b|\bno voy a (poder|llegar)\b|\bno me va a dar tiempo\b|\bme (ha surgido|surgio|ha salido) (algo|un imprevisto|un problema)\b|\bimprevisto\b|\botro (dia|horario|hueco) para la (llamada|cita)\b/,
+  cancel: /\b(cancelar|cancela|cancelad|cancelame|anular|anula|anulad|anulame) (la |el |mi )?(llamada|cita|videollamada|reunion)\b|\bya no (quiero|necesito) (la )?(llamada|cita|videollamada)\b/,
   question: /\?|^(como|cuando|cuanto|que|donde|por que|quien|cual)\b/,
 };
 
@@ -259,7 +288,15 @@ export function resolvePartOfDay(n: string): 'morning' | 'afternoon' | 'evening'
 
 /** Rechaza un horario o pide otro: en ese caso no se elige ninguno (mejor preguntar que reservar mal). */
 const RX_SLOT_REJECTION =
-  /\bno (puedo|podre|podria|me (va|viene|encaja|cuadra|sirve|vendria|iria))\b|\b(imposible|ninguna|ninguno)\b|\bme (va|viene) (fatal|mal)\b|\b(otro|otra) (dia|hora|momento|hueco|franja|semana|opcion)\b/;
+  /\bno (puedo|podre|podria|me (va|viene|encaja|cuadra|sirve|vendria|iria))\b|\b(imposible|ninguna|ninguno)\b|\bme (va|viene|pilla) (fatal|mal)\b|\b(otro|otra) (dia|hora|momento|hueco|franja|semana|opcion)\b/;
+/**
+ * Dudas u obstáculos con el horario (“no sé si llego”, “a las 10:00 trabajo”, “tengo dentista”): no es una elección.
+ * “Salgo del trabajo a las 18:00” sí puede serlo (el sustantivo “trabajo” con artículo no cuenta).
+ */
+const RX_SLOT_HESITATION =
+  /\bno (se|estoy segur[oa]) si\b|\bno (llego|creo que llegue|creo que pueda)\b|\b(igual|a lo mejor|quizas?) no\b|\btengo (el |la |un |una |que ir al? |que ir a la )?(dentista|medico|medica|reunion|cita|clase|turno|entreno|partido|consulta|examen|comida|cena|evento|viaje|guardia)\b|(?<!\b(del|de|el|mi|al|tu|su|un) )\b(trabajo|curro)\b|\bestoy (trabajando|currando|ocupad[oa]|liad[oa])\b|\b(complicado|dificil|justo|justito)\b/;
+/** Preguntas que en realidad eligen (“¿puede ser a las 18:00?”, “¿me apuntas a la primera?”). */
+const RX_CHOICE_QUESTION = /\b(puede ser|podria ser|podemos (hacerla|quedar|dejarla)|me (apuntas|pones|reservas|guardas|coges)|apuntame|reservame|lo dejamos|la dejamos|quedamos)\b/;
 const ORD = '(primer[ao]|1[aªoº]|segund[ao]|2[aªoº]|tercer[ao]|3[aªoº]|ultim[ao])';
 /** Lo que puede seguir a un ordinal cuando el lead elige (“la segunda porfa”, “la primera me viene genial”). */
 const AFTER_CHOICE =
@@ -288,8 +325,11 @@ function ordinalChoice(n: string): number | null {
 /** Intenta identificar qué horario de los ofrecidos ha elegido el lead. */
 export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: string, now: Date = new Date(), lastOfferIds: string[] = []): string | null {
   if (!allOffered.length) return null;
-  // Elegir un horario reserva la cita: ante un rechazo (“el jueves no puedo”, “otro día”) no se elige nada.
-  if (RX_SLOT_REJECTION.test(n)) return null;
+  // Elegir un horario reserva la cita: ante un rechazo (“el jueves no puedo”, “otro día”), una duda u obstáculo
+  // (“a las 18:00 no sé si llego”, “mañana tengo dentista”) o una pregunta sobre el horario (“¿las 18:00 es hora
+  // de Madrid?”) no se elige nada: ante la duda, KAI pregunta cuál le viene mejor.
+  if (RX_SLOT_REJECTION.test(n) || RX_SLOT_HESITATION.test(n)) return null;
+  if (n.includes('?') && !RX_CHOICE_QUESTION.test(n)) return null;
   // Las referencias ordinales (“la primera”) apuntan a la ÚLTIMA oferta; las horas, preferentemente también.
   const latest = lastOfferIds.map((id) => allOffered.find((s) => s.id === id)).filter((s): s is OfferedSlot => Boolean(s));
   const offered = latest.length ? latest : allOffered;
@@ -323,6 +363,16 @@ export function matchOfferedSlot(n: string, allOffered: OfferedSlot[], tz: strin
   }
   if (offered.length === 1 && RX.affirm.test(n)) return offered[0].id;
   return null;
+}
+
+/** “Quiero hablar con Álex”, “pásame con Álex”: pide hablar con el entrenador por su nombre. */
+function asksForTrainer(n: string, trainerName: string): boolean {
+  const name = normalize(trainerName).split(' ')[0];
+  if (!name || name.length < 3) return false;
+  const who = escapeRegExp(name);
+  return new RegExp(
+    `\\b(quiero|puedo|podria|prefiero|preferiria|me gustaria|necesito) hablar (directamente )?con ${who}\\b|\\b(pasame|pasadme|ponme) con ${who}\\b|\\bquiero que me (llame|escriba|atienda|conteste) ${who}\\b`,
+  ).test(n);
 }
 
 export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
@@ -391,12 +441,16 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
 
   const offered = input.state.offeredSlots ?? [];
   const lastOutbound = [...input.history].reverse().find((m) => m.direction === 'outbound');
-  const callWasProposed = Boolean(input.state.callProposedAt) || /llamada/.test(normalize(lastOutbound?.content ?? ''));
+  const declinesCall = RX.declineCall.test(n);
+  // Si el lead ya rechazó la llamada, un “vale” o un “me interesa” no la reabren: solo una petición explícita.
+  const callDeclined = Boolean((input.state as SetterState).callDeclinedAt);
+  const callWasProposed = !callDeclined && (Boolean(input.state.callProposedAt) || /llamada/.test(normalize(lastOutbound?.content ?? '')));
   const positive = RX.affirm.test(n) || /quiero empezar|cuanto antes|adelante|vamos alla|me interesa|claro que si|me apunto|hagamosla|cuando quieras|me parece genial|me parece perfecto/.test(n);
   const wantsCall =
-    (RX.callYes.test(n) && !RX.declineCall.test(n)) ||
-    (callWasProposed && positive && !RX.declineCall.test(n)) ||
-    Boolean(resolvePreferredDate(n, input.now, tz) && callWasProposed);
+    !declinesCall &&
+    (callDeclined
+      ? RX.callRequest.test(n)
+      : RX.callYes.test(n) || (callWasProposed && positive) || Boolean(resolvePreferredDate(n, input.now, tz) && callWasProposed));
 
   // Una objeción es un freno a AVANZAR (llamada, precio, servicio). Si el lead está describiendo su
   // situación (responde a una pregunta de cualificación), “no tengo tiempo” es información, no objeción.
@@ -419,14 +473,14 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     signals,
     memories,
     flags: {
-      humanRequest: RX.humanRequest.test(n),
+      humanRequest: RX.humanRequest.test(n) || asksForTrainer(n, input.biz.trainer.displayName),
       asksIfBot: RX.asksIfBot.test(n),
       medical: RX.medical.test(n),
       angry,
       optOut: RX.optOut.test(n),
       asksPrice: RX.price.test(n),
       wantsCall,
-      declinesCall: RX.declineCall.test(n),
+      declinesCall,
       complexNegotiation: RX.negotiation.test(n),
       outOfScope: RX.outOfScope.test(n),
       technicalIssue: RX.technical.test(n),
