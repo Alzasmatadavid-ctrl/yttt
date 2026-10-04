@@ -205,7 +205,7 @@ export default function Dashboard() {
                   }
                 >
                   <span className="attention-icon" style={{ background: alert.severity === 'critical' ? 'var(--danger-soft)' : 'var(--surface-3)', color: alert.severity === 'critical' ? 'var(--danger)' : 'var(--text-2)' }}>
-                    {alert.type === 'call_outcome' ? <CalendarCheck /> : <AlertTriangle />}
+                    {alert.type === 'call_outcome' ? <CalendarCheck /> : alert.type === 'client_message' ? <MessagesSquare /> : <AlertTriangle />}
                   </span>
                   <div className="grow">
                     <strong>

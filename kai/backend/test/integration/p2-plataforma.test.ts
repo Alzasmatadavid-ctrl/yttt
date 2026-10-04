@@ -201,3 +201,18 @@ describe('Mensajes que KAI no va a contestar', () => {
     expect(open[0].body).toMatch(/piloto automático/);
   });
 });
+
+describe('Bandeja: «Pendientes»', () => {
+  it('un lead que pidió la baja no se queda en «Pendientes»', async () => {
+    const T = await registerTrainer(app);
+    const { lead } = await createLead(T.businessId, { name: 'Olga Baja', source: 'manual' }, { type: 'user', userId: T.userId });
+    const conv = await getOrCreateConversation(T.businessId, lead.id, 'web');
+    await getDb().update(conversations).set({ aiEnabled: false }).where(eq(conversations.id, conv.id));
+    await receiveInboundForConversation(T.businessId, conv.id, '¿Hola?');
+    const pendingIds = async () =>
+      ((await T.client.get('/api/inbox', { query: { filter: 'pending', limit: '50' } })).json().items as { conversation: { id: string } }[]).map((i) => i.conversation.id);
+    expect(await pendingIds()).toContain(conv.id);
+    await getDb().update(leads).set({ optedOut: true }).where(eq(leads.id, lead.id));
+    expect(await pendingIds()).not.toContain(conv.id);
+  });
+});

@@ -163,10 +163,12 @@ export async function autopilotEnabled(businessId: string): Promise<boolean> {
  *  - el entrenador lleva la conversación (KAI en pausa en ella),
  *  - el piloto automático del negocio está apagado, o
  *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes).
+ * Los leads que pidieron la baja no cuentan (no se les puede escribir).
  * Requiere el join con `leads` (ver `conversationLeadJoin`).
  */
 export function needsHumanReplyCondition(opts: { autopilotOn: boolean }): SQL {
-  const unanswered = sql`(${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt}))`;
+  // Quien pidió la baja no espera respuesta: no se le puede escribir (no cuenta como pendiente).
+  const unanswered = sql`(${leads.optedOut} = false and ${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt}))`;
   const kaiWontAnswer = opts.autopilotOn
     ? sql`(${conversations.aiEnabled} = false or (${leads.status} = 'client' and (${leads.wonAt} is null or ${leads.wonAt} < ${conversations.lastInboundAt})))`
     : sql`true`;
