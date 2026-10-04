@@ -27,7 +27,7 @@ const COMPARE_ROWS: { label: string; hint?: string; value: (l: PlanLimits) => nu
   { label: 'Canales conectados', hint: 'WhatsApp, Instagram, anuncios de Meta…', value: (l) => l.maxChannels, unlimited: 'Ilimitados' },
   { label: 'Negocios', hint: 'Negocios distintos que puedes gestionar con tu cuenta', value: (l) => l.maxBusinesses, unlimited: 'Ilimitados' },
   { label: 'KAI Copilot', hint: 'Asistente al que puedes preguntar por tus leads y datos', value: (l) => l.copilot },
-  { label: 'Analítica avanzada', hint: 'Recomendaciones de KAI y periodos de 90 días o a medida', value: (l) => l.advancedAnalytics },
+  { label: 'Analítica avanzada', hint: 'Recomendaciones de KAI y fechas a medida (por ejemplo, los últimos 90 días)', value: (l) => l.advancedAnalytics },
 ];
 
 function CompareCell({ value, unlimited }: { value: number | null | boolean; unlimited?: string }) {
@@ -221,7 +221,7 @@ export default function PlanTab() {
             icon={ChartColumn}
             title="Analítica avanzada"
             included={data.limits.advancedAnalytics}
-            yes="En Analítica verás las recomendaciones de KAI y podrás consultar los últimos 90 días o elegir fechas a medida."
+            yes="En Analítica verás las recomendaciones de KAI y, con «Personalizado», podrás elegir las fechas que quieras (hasta un año), por ejemplo los últimos 90 días."
             no="En Analítica verás los datos de hasta 30 días, sin las recomendaciones de KAI ni periodos a medida."
           />
           <FeatureRow icon={Building2} title="Negocios" included badge={businessesBadge} yes={businessesText} no="" />

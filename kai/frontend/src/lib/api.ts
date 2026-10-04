@@ -1,6 +1,7 @@
 /**
  * Cliente de la API de KAI.
  * - Envía siempre la cookie de sesión (mismo dominio) y la cabecera anti-CSRF.
+ * - Indica en cada petición para qué negocio es (cabecera X-KAI-Business): ver setRequestBusiness.
  * - Convierte los errores del servidor en mensajes legibles (en español).
  */
 export class ApiError extends Error {
@@ -16,6 +17,22 @@ export class ApiError extends Error {
 
 type Query = Record<string, string | number | boolean | undefined | null>;
 
+/**
+ * Negocio con el que trabaja ESTA pestaña. El negocio activo se guarda en la sesión del servidor, que comparten todas
+ * las pestañas: si en otra pestaña se cambia de negocio, esta seguiría mostrando el negocio A mientras sus peticiones
+ * (guardar ajustes, responder a un lead…) irían contra el B. Con la cabecera, el servidor usa siempre el negocio de la
+ * pestaña, o responde 403 si ya no se tiene acceso a él; nunca pasa a otro en silencio. Lo fija AuthProvider.
+ */
+let requestBusinessId: string | null = null;
+
+export function setRequestBusiness(businessId: string | null) {
+  requestBusinessId = businessId;
+}
+
+export function getRequestBusiness() {
+  return requestBusinessId;
+}
+
 function buildUrl(path: string, query?: Query) {
   const url = new URL(`/api${path}`, window.location.origin);
   if (query) for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
@@ -28,7 +45,11 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
     res = await fetch(buildUrl(path, query), {
       method,
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kai' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'kai',
+        ...(requestBusinessId ? { 'X-KAI-Business': requestBusinessId } : {}),
+      },
       body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
     });
   } catch {

@@ -114,7 +114,7 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 - [ ] App de Meta revisada y aprobada, y negocio verificado en Business Manager.
 - [ ] Pantalla de consentimiento de Google publicada (o entrenadores añadidos como usuarios de prueba).
 - [ ] Política de privacidad y condiciones de uso completadas: KAI incluye una plantilla en `/privacidad` y `/terminos` (archivo `frontend/src/pages/Legal.tsx`). Sustituye los datos entre [corchetes] y revísala con un profesional.
-- [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador). Si aun así lo haces, exige `--force`, una `DEMO_PASSWORD` propia y un `DEMO_EMAIL` que no sea el de ninguna cuenta real.
+- [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador). Si aun así lo haces, exige `npm run db:seed -- --force`, una `DEMO_PASSWORD` propia y un `DEMO_EMAIL` que no sea el de ninguna cuenta real.
 
 ## Varias instancias
 

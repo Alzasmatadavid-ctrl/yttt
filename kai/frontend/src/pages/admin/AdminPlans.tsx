@@ -59,7 +59,7 @@ const LIMIT_FIELDS: { key: LimitKey; label: string; short: string; hint: string;
 
 const FEATURE_FIELDS: { key: FeatureKey; label: string; hint: string }[] = [
   { key: 'copilot', label: 'KAI Copilot', hint: 'Asistente al que el entrenador puede preguntar por sus leads, su agenda y sus datos.' },
-  { key: 'advancedAnalytics', label: 'Analítica avanzada', hint: 'Permite analizar periodos de 90 días o fechas personalizadas y ver datos más detallados.' },
+  { key: 'advancedAnalytics', label: 'Analítica avanzada', hint: 'En Analítica, permite elegir fechas personalizadas (hasta un año; por ejemplo, los últimos 90 días) y ver las recomendaciones de KAI.' },
 ];
 
 const KEY_RE = /^[a-z][a-z0-9_-]{1,30}$/;

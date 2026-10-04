@@ -16,7 +16,7 @@ KAI responde a tus leads de Instagram, WhatsApp, anuncios y formularios; los cua
 | **Agenda** | **Agenda** (pestañas Semana y Disponibilidad) | Agenda propia de KAI, o Google Calendar o Calendly (se conectan en **Integraciones → Calendario**). KAI solo ofrece huecos libres de verdad. Recordatorios automáticos (al reservar, 24 h antes y 1 h antes) y mensajes de no-show. |
 | **Seguimientos** | **Setter IA → Seguimientos** | Si el lead deja de responder, KAI le escribe con contexto (nunca “solo hago seguimiento”), respetando horas de descanso. |
 | **Panel y analítica** | **Hoy** y **Analítica** | Leads, respuesta, cualificación, llamadas, asistencia, clientes, ingresos y ROI estimado. En Analítica eliges Hoy, 7 días, 30 días o Personalizado (fechas a medida, en los planes con analítica avanzada). |
-| **KAI Copilot** | **KAI Copilot** | Pregúntale “¿qué leads calientes no han reservado?” o pídele “escribe a Ana”. Las acciones sensibles siempre te piden confirmación. |
+| **KAI Copilot** | **KAI Copilot** | Pregúntale “¿A quién debería responder ahora?” o “¿Qué leads están más calientes?”, o pídele “Escribe un seguimiento para Marcos”. En modo simulado (sin clave de IA) entiende peticiones parecidas a estas; con la IA real puedes preguntarle con tus propias palabras. Las acciones sensibles siempre te piden confirmación. |
 | **Simulador** | **Simulador** | Habla con KAI como si fueras un lead (botón **Nueva prueba**) para ver cómo responde con tu configuración y tu agenda reales. Los mensajes de prueba no se envían a nadie: no salen por WhatsApp ni por Instagram. |
 | **Configuración visual** | **Setter IA**, **Integraciones** y **Ajustes** | **Setter IA**: Personalidad, Cualificación, Puntuación, Servicio y precio, Objeciones, Seguimientos, Escalado y Llamada, sin tocar ningún “prompt”. **Integraciones**: WhatsApp, Instagram y anuncios · Calendario · Formularios y webhooks. **Ajustes**: Negocio, Equipo, Plan y uso y Tu cuenta. |
 | **SaaS** | **Ajustes → Equipo** y **Ajustes → Plan y uso**; panel **Administración** | Multi-negocio, roles (Admin, Entrenador, Miembro del equipo), planes Starter / Pro / Agency con límites editables, panel de administración (Resumen, Negocios, Usuarios, Planes y Registros) y registro de auditoría. |
@@ -112,10 +112,10 @@ Todos se ejecutan dentro de la carpeta `kai`.
 | Comando | Para qué sirve |
 |---|---|
 | `npm run dev` | Arranca KAI en modo desarrollo (servidor en el puerto 3000 y web en el 5173). |
-| `npm run db:seed` | Crea la cuenta demo. Con `npm run db:seed -- --reset` la borra y la vuelve a crear. |
+| `npm run db:seed` | Crea la cuenta demo. Con `npm run db:seed -- --reset` la borra y la vuelve a crear (con todos sus datos de ejemplo). |
 | `npm run build` | Prepara la versión de producción (web + servidor). |
 | `npm start` | Arranca la versión compilada (después de `npm run build`). Para usarla en producción sin Docker, pon en `.env` `NODE_ENV=production` y `SERVE_FRONTEND=true` (ver `.env.example`). |
-| `npm test` | Ejecuta las pruebas automáticas. |
+| `npm test` | Ejecuta las pruebas automáticas. Para un solo archivo: `npm test -- test/unit/scoring.test.ts`. |
 | `npm run typecheck` | Comprueba que el código no tiene errores de tipos. |
 | `npm run db:migrate` | Aplica cambios de base de datos (el servidor también lo hace solo al arrancar). |
 

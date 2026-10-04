@@ -97,6 +97,7 @@ interface Draft {
   wordsToAvoid: string[];
   examplesWhatsapp: string;
   examplesInstagram: string;
+  examplesOther: string;
   assistantName: string;
 }
 
@@ -227,6 +228,17 @@ const TOTAL = STEPS.length;
 
 const DAYS: WeekdayKey[] = ['1', '2', '3', '4', '5', '6', '7'];
 const HM = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
+/** Largo máximo de cada palabra o expresión del vocabulario (el mismo que exige el servidor). */
+const MAX_WORD = 40;
+
+/**
+ * Error de una palabra o expresión demasiado larga. Dice cuál es (puede haberla añadido KAI Copilot),
+ * para que el entrenador sepa qué etiqueta quitar en vez de buscarla a ciegas.
+ */
+function longWordError(word: string): string {
+  const shown = word.length > 60 ? `${word.slice(0, 57)}…` : word;
+  return `«${shown}» tiene más de ${MAX_WORD} caracteres. Quítala con la × y, si quieres, añádela más corta.`;
+}
 
 const TIMEZONES = [
   { value: 'Europe/Madrid', label: 'España peninsular y Baleares (Madrid)' },
@@ -364,6 +376,7 @@ function buildDraft(s: SettingsResponse): Draft {
     wordsToAvoid: [...(ai?.wordsToAvoid ?? [])],
     examplesWhatsapp: ai?.examplesWhatsapp ?? '',
     examplesInstagram: ai?.examplesInstagram ?? '',
+    examplesOther: ai?.examplesOther ?? '',
     assistantName: ai?.assistantName || 'KAI',
   };
 }
@@ -464,12 +477,17 @@ function validateStep(key: StepKey, d: Draft): Errors {
     case 'tone':
       if (len(d.assistantName) < 1) e.assistantName = 'Ponle un nombre a tu asistente (por ejemplo, KAI).';
       else if (len(d.assistantName) > 40) e.assistantName = 'Máximo 40 caracteres.';
-      if (d.wordsToUse.length > 50) e.wordsToUse = 'Máximo 50 palabras o expresiones.';
-      else if (d.wordsToUse.some((w) => w.length > 40)) e.wordsToUse = 'Cada palabra o expresión puede tener como máximo 40 caracteres.';
-      if (d.wordsToAvoid.length > 100) e.wordsToAvoid = 'Máximo 100 palabras o expresiones.';
-      else if (d.wordsToAvoid.some((w) => w.length > 40)) e.wordsToAvoid = 'Cada palabra o expresión puede tener como máximo 40 caracteres.';
+      {
+        const longUse = d.wordsToUse.find((w) => w.length > MAX_WORD);
+        const longAvoid = d.wordsToAvoid.find((w) => w.length > MAX_WORD);
+        if (d.wordsToUse.length > 50) e.wordsToUse = 'Máximo 50 palabras o expresiones.';
+        else if (longUse) e.wordsToUse = longWordError(longUse);
+        if (d.wordsToAvoid.length > 100) e.wordsToAvoid = 'Máximo 100 palabras o expresiones.';
+        else if (longAvoid) e.wordsToAvoid = longWordError(longAvoid);
+      }
       if (d.examplesWhatsapp.length > 6000) e.examplesWhatsapp = 'Máximo 6000 caracteres.';
       if (d.examplesInstagram.length > 6000) e.examplesInstagram = 'Máximo 6000 caracteres.';
+      if (d.examplesOther.length > 6000) e.examplesOther = 'Máximo 6000 caracteres.';
       break;
     default:
       break;
@@ -894,6 +912,7 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
           wordsToAvoid: d.wordsToAvoid,
           examplesWhatsapp: d.examplesWhatsapp.trim(),
           examplesInstagram: d.examplesInstagram.trim(),
+          examplesOther: d.examplesOther.trim(),
           assistantName: d.assistantName.trim(),
         });
         break;
@@ -1398,43 +1417,60 @@ function Wizard({ settings }: { settings: SettingsResponse }) {
             </Card>
             <Card title="Ejemplos de cómo escribes" icon={MessageSquareText}>
               <p className="muted small" style={{ marginBottom: 12 }}>
-                Pega algunos mensajes reales que hayas enviado tú a posibles clientes. KAI los usa para imitar tu forma de escribir (no los copia tal cual).
+                Pega algunos mensajes reales que hayas enviado tú a posibles clientes. KAI los usa para imitar tu forma de escribir (no los copia tal cual). Quita los datos personales de otras personas antes de pegarlos.
               </p>
-              <div className="grid-2">
+              <div className="col gap-16">
+                <div className="grid-2">
+                  <Field
+                    label={
+                      <span className="row gap-4">
+                        <WhatsAppIcon /> Mensajes de WhatsApp
+                      </span>
+                    }
+                    htmlFor="onb-ex-wa"
+                    error={errors.examplesWhatsapp}
+                  >
+                    <Textarea
+                      id="onb-ex-wa"
+                      rows={6}
+                      value={draft.examplesWhatsapp}
+                      maxLength={6000}
+                      placeholder={'Ej.:\n¡Hola, Marta! Gracias por escribirme. Cuéntame, ¿qué te gustaría conseguir?'}
+                      onChange={(e) => edit('tone', { examplesWhatsapp: e.target.value })}
+                    />
+                  </Field>
+                  <Field
+                    label={
+                      <span className="row gap-4">
+                        <InstagramIcon /> Mensajes de Instagram
+                      </span>
+                    }
+                    htmlFor="onb-ex-ig"
+                    error={errors.examplesInstagram}
+                  >
+                    <Textarea
+                      id="onb-ex-ig"
+                      rows={6}
+                      value={draft.examplesInstagram}
+                      maxLength={6000}
+                      placeholder={'Ej.:\n¡Hola! Vi que te interesó la publicación sobre perder grasa sin pasar hambre. ¿Qué es lo que más te cuesta ahora mismo?'}
+                      onChange={(e) => edit('tone', { examplesInstagram: e.target.value })}
+                    />
+                  </Field>
+                </div>
                 <Field
-                  label={
-                    <span className="row gap-4">
-                      <WhatsAppIcon /> Mensajes de WhatsApp
-                    </span>
-                  }
-                  htmlFor="onb-ex-wa"
-                  error={errors.examplesWhatsapp}
+                  label="Otros ejemplos de conversaciones (opcional)"
+                  htmlFor="onb-ex-other"
+                  error={errors.examplesOther}
+                  hint="Conversaciones de otros canales (email, formularios, llamadas…) o respuestas tuyas que te gusten especialmente."
                 >
                   <Textarea
-                    id="onb-ex-wa"
-                    rows={6}
-                    value={draft.examplesWhatsapp}
+                    id="onb-ex-other"
+                    rows={4}
+                    value={draft.examplesOther}
                     maxLength={6000}
-                    placeholder={'Ej.:\n¡Hola, Marta! Gracias por escribirme. Cuéntame, ¿qué te gustaría conseguir?'}
-                    onChange={(e) => edit('tone', { examplesWhatsapp: e.target.value })}
-                  />
-                </Field>
-                <Field
-                  label={
-                    <span className="row gap-4">
-                      <InstagramIcon /> Mensajes de Instagram
-                    </span>
-                  }
-                  htmlFor="onb-ex-ig"
-                  error={errors.examplesInstagram}
-                >
-                  <Textarea
-                    id="onb-ex-ig"
-                    rows={6}
-                    value={draft.examplesInstagram}
-                    maxLength={6000}
-                    placeholder={'Ej.:\n¡Hola! Vi que te interesó la publicación sobre perder grasa sin pasar hambre. ¿Qué es lo que más te cuesta ahora mismo?'}
-                    onChange={(e) => edit('tone', { examplesInstagram: e.target.value })}
+                    placeholder={'Ej.:\nLead: ¿Y esto es para mí si nunca he entrenado?\nYo: Claro que sí. Empezamos desde tu punto de partida y vamos subiendo poco a poco. ¿Qué te ha frenado hasta ahora?'}
+                    onChange={(e) => edit('tone', { examplesOther: e.target.value })}
                   />
                 </Field>
               </div>
