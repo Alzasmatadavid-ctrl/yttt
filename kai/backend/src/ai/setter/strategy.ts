@@ -14,7 +14,12 @@ import { requiredCaptured } from '../../crm/scoring.js';
  *  - callDeclinedAt: el lead rechazó la llamada (o canceló la que tenía). No se le vuelve a proponer salvo que la pida.
  *  - callReassuredAt: ya se resolvieron sus dudas sobre la llamada una vez; no se le vuelve a preguntar en cada mensaje.
  */
-export type SetterState = ConversationState & { callDeclinedAt?: string; callReassuredAt?: string };
+export type SetterState = ConversationState & {
+  callDeclinedAt?: string;
+  callReassuredAt?: string;
+  /** Veces que KAI ha preguntado por cada variable: tras dos intentos sin respuesta se pasa a la siguiente. */
+  askCounts?: Record<string, number>;
+};
 
 export type DirectiveKind =
   | 'greet_and_ask'
@@ -280,7 +285,11 @@ export function decideDirective(input: StrategyInput): Directive {
     };
   }
 
-  const nextRule = nextQualificationRule(biz.rules, lead);
+  // No se insiste más de dos veces con la misma pregunta: si no la ha contestado, se sigue con otra cosa.
+  const askedEnough = Object.entries(state.askCounts ?? {})
+    .filter(([, n]) => n >= 2)
+    .map(([k]) => k);
+  const nextRule = nextQualificationRule(biz.rules, lead, askedEnough);
 
   if (flags?.declinesCall) {
     return {

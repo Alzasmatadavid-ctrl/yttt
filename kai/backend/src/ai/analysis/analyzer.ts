@@ -406,9 +406,9 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // de otra variable (“trabajo muchas horas y como fatal” cuando se le preguntó el objetivo) se guarda en esa.
   const sentences = raw.split(/(?<=[.!?\n])\s+/).map((t) => t.trim()).filter(Boolean);
   const onlyQuestion = sentences.length > 0 && sentences.every((t) => t.endsWith('?'));
-  const ownPattern = lastAsked ? QUAL_PATTERNS[lastAsked] : undefined;
-  const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== lastAsked && enabledKeys.has(k) && rx.test(n));
-  const answersLastAsked = !ownPattern || ownPattern.test(n) || !aboutOtherKey;
+  // El objetivo es lo que más pesa (resúmenes, mensajes, puntuación): solo se toma como objetivo lo que lo parece.
+  const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== 'goal' && enabledKeys.has(k) && rx.test(n));
+  const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || !aboutOtherKey;
   if (
     lastAsked &&
     enabledKeys.has(lastAsked) &&

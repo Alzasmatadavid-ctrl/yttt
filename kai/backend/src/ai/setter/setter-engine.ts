@@ -419,7 +419,11 @@ export async function runSetterReply(businessId: string, conversationId: string,
     ...gen.meta,
   });
   const statePatch: Partial<SetterState> = {};
-  if (directive.questionKey && gen.text.includes('?')) statePatch.lastAskedKey = directive.questionKey;
+  if (directive.questionKey && gen.text.includes('?')) {
+    statePatch.lastAskedKey = directive.questionKey;
+    const counts = (conv.state as SetterState).askCounts ?? {};
+    statePatch.askCounts = { ...counts, [directive.questionKey]: (counts[directive.questionKey] ?? 0) + 1 };
+  }
   else if (!gen.text.includes('?')) statePatch.lastAskedKey = undefined;
   if (directive.kind === 'reassure_call') statePatch.callReassuredAt = new Date().toISOString();
   // Canceló la llamada: no se le vuelve a proponer otra salvo que la pida.

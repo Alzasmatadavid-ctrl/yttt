@@ -240,6 +240,43 @@ describe('Motor de reglas: textos que el control de calidad acepta', () => {
   });
 });
 
+describe('Conversación natural en el modo sin IA', () => {
+  it('tras preguntar dos veces lo mismo sin respuesta, pasa a otra cosa', () => {
+    const lead = makeLead({ qualification: {} });
+    const base = { biz: makeBusinessContext(), leadCtx: makeLeadContext({ lead }), analysis: makeAnalysis(), kaiHasSpoken: true, now: NOW };
+    const first = decideDirective({ ...base, state: { lastAskedKey: 'goal', askCounts: { goal: 1 } } as SetterState });
+    expect(first.questionKey).toBe('goal');
+    const after = decideDirective({ ...base, state: { lastAskedKey: 'goal', askCounts: { goal: 2 } } as SetterState });
+    expect(after.questionKey).not.toBe('goal');
+  });
+
+  it('si el lead solo pregunta, no se le agradece «la respuesta»', async () => {
+    const pending = [inbound('¿Estoy hablando con un bot?')];
+    const out = await new RuleBasedSetterAgent().respond(
+      agentInput({
+        state: { lastAskedKey: 'goal' },
+        convCtx: { conversation: makeConversation(), history: [outbound('¡Hola! ¿Qué te gustaría conseguir?'), ...pending], pendingInbound: pending, kaiHasSpoken: true },
+        directive: { kind: 'ask_qualification', instruction: '', question: '¿Qué te gustaría conseguir exactamente?' },
+      }),
+    );
+    expect(out.text).not.toMatch(/objetivo muy claro|tiene todo el sentido|lo tengas tan claro/i);
+  });
+
+  it('«¿Qué incluye?» se responde con lo configurado antes de seguir', async () => {
+    const pending = [inbound('¿Qué incluye?')];
+    const biz = makeBusinessContext({ services: [makeService({ name: 'Método Kaizen', priceCents: 19700, includes: ['Plan de entrenamiento', 'Pautas de nutrición'] })] });
+    const out = await new RuleBasedSetterAgent().respond(
+      agentInput({
+        biz,
+        convCtx: { conversation: makeConversation(), history: [outbound('Hola'), ...pending], pendingInbound: pending, kaiHasSpoken: true },
+        directive: { kind: 'ask_qualification', instruction: '', question: '¿Qué has probado hasta ahora?' },
+      }),
+    );
+    expect(out.text).toMatch(/Método Kaizen incluye plan de entrenamiento y pautas de nutrición/);
+    expect(questionCount(out.text)).toBe(1);
+  });
+});
+
 function agentInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
   const biz = makeBusinessContext({ services: [makeService({ name: 'Programa 12 semanas', priceCents: 19700 })] });
   return {

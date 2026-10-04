@@ -244,7 +244,20 @@ export class RuleBasedSetterAgent implements SetterAgent {
           : /\b(hij[oa]s?|beb[eé])\b/.test(pendingText) && !alreadySaid('qué bonito motivo')
             ? 'Qué bonito motivo.'
             : null;
-    const ack = eventAck ?? pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed);
+    // Si el lead solo ha preguntado algo, no se “agradece la respuesta” (no ha respondido a nada).
+    const leadOnlyAsked = Boolean(pendingText.trim()) && pendingText.trim().endsWith('?');
+    const ack = eventAck ?? (leadOnlyAsked ? '' : pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed));
+    // “¿Qué incluye?”, “¿cómo funciona?”: se responde con lo que el entrenador ha configurado.
+    const svc0 = biz.services[0];
+    const asksWhatIncludes = /\b(que|qu[eé]) (incluye|trae|tiene el (programa|plan|servicio))\b|\ben que consiste\b|\bcomo funciona\b|\bcomo (es|seria) (el|tu) (programa|plan|servicio|metodo)\b/.test(normalize(pendingText));
+    const includesAnswer =
+      asksWhatIncludes && svc0
+        ? svc0.includes.length
+          ? `${svc0.name} incluye ${listEs(svc0.includes.slice(0, 3).map((i) => lowerFirst(i)))}.`
+          : svc0.description
+            ? `${svc0.name}: ${svc0.description.trim().replace(/[.!]*$/, '.')}`
+            : `Te lo explica ${trainer} en detalle según tu caso.`
+        : '';
     const greeting = s.tone.formality <= 2 && s.tone.energy >= 4 ? '¡Ey' : '¡Hola';
     const intro = disclosureIntro(biz);
     const setterState = state as SetterState;
@@ -293,7 +306,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
         text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} Gracias por escribir${emoji('👋')} ${q || '¿Qué te gustaría conseguir exactamente?'}`;
         break;
       case 'ask_qualification':
-        text = `${ack} ${q}`;
+        text = `${ack} ${q}`.trim();
         break;
       case 'handle_objection': {
         // El ejemplo del entrenador, salvo que ya se usara (o que tenga más de una pregunta).
@@ -467,6 +480,9 @@ export class RuleBasedSetterAgent implements SetterAgent {
       default:
         text = q || 'Perfecto, cuéntame.';
     }
+    if (includesAnswer && ['ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'].includes(directive.kind)) {
+      text = `${includesAnswer} ${text}`;
+    }
     // Si pregunta si es un bot, se le responde con transparencia en cualquier tipo de mensaje (no solo al cualificar).
     if (botNote && directive.kind !== 'first_contact') {
       text = directive.kind === 'greet_and_ask' ? text.replace(`Gracias por escribir${emoji('👋')} `, `Gracias por escribir${emoji('👋')} ${botNote} `) : `${botNote} ${text}`;
@@ -494,6 +510,11 @@ export function eventPhrase(memory: string | null | undefined): string | null {
   if (!memory) return null;
   const n = normalize(memory);
   return EVENT_PHRASES.find(([rx]) => rx.test(n))?.[1] ?? null;
+}
+
+/** “a, b y c” */
+function listEs(items: string[]): string {
+  return items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}` : (items[0] ?? '');
 }
 
 function lowerFirst(s: string) {
