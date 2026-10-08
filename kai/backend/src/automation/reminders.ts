@@ -1,6 +1,6 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, inArray } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { appointments, automations, businesses } from '../database/schema.js';
+import { appointments, automations, businesses, scheduledJobs } from '../database/schema.js';
 import type { AutomationConfig, AutomationType } from '../lib/domain.js';
 import { addHours, addMinutes, isWithinQuietHours, shiftOutOfQuietHours } from '../lib/time.js';
 import { cancelJobsByDedupePrefix, scheduleJob } from './jobs.js';
@@ -32,7 +32,8 @@ export function appointmentMessageEnabled(
 export async function scheduleAppointmentJobs(
   businessId: string,
   appointment: { id: string; startsAt: Date; endsAt: Date; leadId: string },
-  opts: { sendConfirmation: boolean },
+  /** `postCall: false` = no programar el aviso post-llamada (ya se hizo). */
+  opts: { sendConfirmation: boolean; postCall?: boolean },
 ) {
   const now = new Date();
   const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
@@ -63,7 +64,7 @@ export async function scheduleAppointmentJobs(
       }
     }
   }
-  if (post?.enabled !== false) {
+  if (post?.enabled !== false && opts.postCall !== false) {
     await scheduleJob({
       ...base,
       type: 'post_call',
@@ -80,14 +81,22 @@ export async function cancelAppointmentJobs(appointmentId: string) {
 /**
  * Al reactivar una cuenta suspendida: vuelve a programar los recordatorios y el aviso post-llamada de las
  * citas que siguen en pie (al suspender se cancelaron). No se reenvía la confirmación, y lo que ya se
- * envió no se repite (cada trabajo lo comprueba antes de enviar).
+ * envió no se repite: los recordatorios lo comprueban antes de enviar, y el aviso post-llamada que ya se
+ * hizo no se vuelve a programar (si no, reaparecería el aviso «Registra el resultado» ya descartado).
  */
 export async function resumeAppointmentJobs(businessId: string): Promise<number> {
+  const db = getDb();
   const since = new Date(Date.now() - 24 * 3600_000);
-  const rows = await getDb()
+  const rows = await db
     .select({ id: appointments.id, startsAt: appointments.startsAt, endsAt: appointments.endsAt, leadId: appointments.leadId })
     .from(appointments)
     .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'scheduled'), gt(appointments.endsAt, since)));
-  for (const appt of rows) await scheduleAppointmentJobs(businessId, appt, { sendConfirmation: false });
+  if (rows.length === 0) return 0;
+  const postDone = await db
+    .select({ key: scheduledJobs.dedupeKey })
+    .from(scheduledJobs)
+    .where(and(inArray(scheduledJobs.dedupeKey, rows.map((a) => `appt:${a.id}:post`)), inArray(scheduledJobs.status, ['running', 'done'])));
+  const done = new Set(postDone.map((j) => j.key));
+  for (const appt of rows) await scheduleAppointmentJobs(businessId, appt, { sendConfirmation: false, postCall: !done.has(`appt:${appt.id}:post`) });
   return rows.length;
 }

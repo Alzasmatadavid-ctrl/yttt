@@ -21,7 +21,7 @@ import {
 } from '../database/schema.js';
 import { DEFAULT_SCORE_BANDS, type LeadStatus } from '../lib/domain.js';
 import { bandMin } from '../crm/scoring.js';
-import { autopilotEnabled, conversationLeadJoin, needsHumanReplyCondition } from '../crm/conversations.service.js';
+import { autopilotEnabled, conversationLeadJoin, leadMessageUnanswered, needsHumanReplyCondition } from '../crm/conversations.service.js';
 import { getInsights } from './insights.js';
 
 export type Period = 'today' | '7d' | '30d' | '90d' | 'custom';
@@ -261,9 +261,10 @@ export async function getRoi(businessId: string, range: { from: Date; to: Date }
   const left: string[] = [];
   if (planPrice > 0 && !planIncluded) left.push(`el coste de KAI (tu plan se cobra en ${(row?.planCurrency ?? 'EUR').toUpperCase()})`);
   if (adSpend > 0 && !adIncluded) left.push(`la inversión en anuncios (está en ${(row?.businessCurrency ?? '').toUpperCase()})`);
-  const counted = [planIncluded ? 'el coste de KAI' : '', adIncluded ? 'la inversión en anuncios indicada' : ''].filter(Boolean).join(' y ');
+  // Con la preposición ya contraída: «frente al coste de KAI y a la inversión…» (nunca «frente a el»).
+  const counted = [planIncluded ? 'al coste de KAI' : '', adIncluded ? 'a la inversión en anuncios indicada' : ''].filter(Boolean).join(' y ');
   const note = costCents > 0
-    ? `Estimación: ingresos de clientes cerrados en el periodo frente a ${counted}.${left.length ? ` No incluye ${left.join(' ni ')}, porque tus importes están en ${cur} y no se mezclan monedas.` : ''}`
+    ? `Estimación: ingresos de clientes cerrados en el periodo frente ${counted}.${left.length ? ` No incluye ${left.join(' ni ')}, porque tus importes están en ${cur} y no se mezclan monedas.` : ''}`
     : left.length
       ? `No se puede estimar el ROI: ${left.join(' y ')} y tus ingresos están en ${cur}, y no se mezclan monedas.`
       : 'Estimación: ingresos de clientes cerrados en el periodo frente al coste de KAI y la inversión en anuncios indicada.';
@@ -356,9 +357,11 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     .limit(20);
 
   // Leads a punto de perderse: interesados o más (según las bandas de puntuación del negocio),
-  // sin contestar hace 48 h y sin llamada.
+  // sin contestar hace 48 h y sin llamada. Los que ya esperan respuesta de una persona (escalado o mensaje sin
+  // contestar) no se repiten aquí: salen en «Esperan tu respuesta» o como aviso, y es la misma tarea.
   const [settings] = await db.select({ scoreBands: aiSettings.scoreBands }).from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
   const interestedMin = bandMin(settings?.scoreBands ?? DEFAULT_SCORE_BANDS, 'interesado', 51);
+  const autopilotOn = await autopilotEnabled(businessId);
   const atRisk = await db
     .select({ id: leads.id, name: leads.name, score: leads.score, temperature: leads.temperature, status: leads.status, lastInboundAt: leads.lastInboundAt, lastOutboundAt: leads.lastOutboundAt, goalSummary: leads.goalSummary })
     .from(leads)
@@ -368,6 +371,7 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
         gte(leads.score, interestedMin),
         inArray(leads.status, ['conversing', 'interested', 'qualified', 'call_proposed', 'follow_up', 'no_show']),
         sql`coalesce(${leads.lastInboundAt}, ${leads.createdAt}) < now() - interval '48 hours'`,
+        sql`not exists (select 1 from ${conversations} where ${conversations.leadId} = ${leads.id} and ${conversations.businessId} = ${leads.businessId} and ${needsHumanReplyCondition({ autopilotOn })})`,
       ),
     )
     .orderBy(sql`${leads.score} desc`)
@@ -375,7 +379,6 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
 
   // Leads esperando respuesta de una persona: KAI escalado o en pausa, piloto automático apagado o un
   // cliente que ha escrito (la misma condición que «Pendientes» en la Bandeja).
-  const autopilotOn = await autopilotEnabled(businessId);
   const waiting = await db
     .select({ conversationId: conversations.id, leadId: leads.id, name: leads.name, score: leads.score, temperature: leads.temperature, preview: conversations.lastMessagePreview, lastInboundAt: conversations.lastInboundAt, handoff: conversations.handoffActive })
     .from(conversations)
@@ -387,7 +390,8 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
         eq(leads.isTest, false),
         needsHumanReplyCondition({ autopilotOn }),
         // Con un escalado sin mensaje nuevo del lead no hay nada que contestar aquí: ya sale como aviso.
-        sql`${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt})`,
+        // Los recordatorios, confirmaciones y seguimientos automáticos no cuentan como respuesta (igual que en la Bandeja).
+        leadMessageUnanswered(),
       ),
     )
     .orderBy(sql`${leads.score} desc`)

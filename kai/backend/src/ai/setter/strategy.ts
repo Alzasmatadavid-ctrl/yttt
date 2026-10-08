@@ -3,8 +3,10 @@
  * Principio: CONVERSAR → ENTENDER → CUALIFICAR → AGENDAR → HACER SEGUIMIENTO.
  * KAI nunca intenta cerrar la venta: eso lo hace el entrenador en la llamada.
  */
+import { DateTime } from 'luxon';
 import type { ConversationState } from '../../lib/domain.js';
 import { humanSlotLabel } from '../../lib/time.js';
+import { partOfDay } from '../../calendar/availability.js';
 import type { LeadAnalysis } from '../analysis/analyzer.js';
 import type { BusinessContext, LeadContext, ObjectionRow, RuleRow } from '../context/context.js';
 import { requiredCaptured } from '../../crm/scoring.js';
@@ -110,11 +112,11 @@ export function recentOffer(state: ConversationState, now: Date = new Date(), mi
     .filter((s): s is NonNullable<typeof s> => Boolean(s) && slotStillBookable(s!.start, now, minNoticeMinutes));
 }
 
-function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean): Directive {
+function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean, now: Date): Directive {
   // Etiquetas recalculadas ahora: “mañana” de ayer es “hoy”.
   return {
     kind: 'clarify_slot',
-    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${humanSlotLabel(s.start, timezone)}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
+    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${humanSlotLabel(s.start, timezone, now)}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
     answerQuestionFirst,
   };
 }
@@ -145,7 +147,7 @@ export function decideDirective(input: StrategyInput): Directive {
   // 1) Ha elegido uno de los horarios ofrecidos → reservar.
   if (analysis?.selectedSlotId && offered.some((s) => s.id === analysis.selectedSlotId)) {
     const slot = offered.find((s) => s.id === analysis.selectedSlotId)!;
-    const label = humanSlotLabel(slot.start, biz.business.timezone);
+    const label = humanSlotLabel(slot.start, biz.business.timezone, now);
     return {
       kind: 'book_slot',
       slotId: slot.id,
@@ -154,7 +156,19 @@ export function decideDirective(input: StrategyInput): Directive {
   }
 
   const offer = recentOffer(state, now, minNotice);
-  const newPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
+  const hasPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
+  // Lo que pide ya lo cumplen todos los horarios que se le acaban de ofrecer (“mejor el jueves” y los dos son el
+  // jueves): consultar otra vez la agenda devolvería los mismos y repetiría el mensaje. Se le pregunta cuál prefiere.
+  const tz = biz.business.timezone;
+  const offerFitsPreference =
+    hasPreference &&
+    offer.length > 0 &&
+    offer.every(
+      (s) =>
+        (!analysis?.preferredDate || DateTime.fromISO(s.start).setZone(tz).toISODate() === analysis.preferredDate) &&
+        (!analysis?.preferredPartOfDay || partOfDay(new Date(s.start), tz) === analysis.preferredPartOfDay),
+    );
+  const newPreference = hasPreference && !offerFitsPreference;
 
   // 2) Ya tiene una llamada agendada.
   if (leadCtx.upcomingAppointment) {
@@ -178,7 +192,7 @@ export function decideDirective(input: StrategyInput): Directive {
     // Está eligiendo otra fecha para mover la llamada (ya se le ofrecieron horarios): nueva preferencia → consultar
     // la agenda otra vez; si solo duda entre los ofrecidos → preguntarle cuál le viene mejor.
     if (offer.length && !flags?.asksPrice) {
-      if (newPreference || flags?.wantsReschedule) {
+      if (newPreference || (flags?.wantsReschedule && !offerFitsPreference)) {
         return {
           kind: 'reschedule',
           needsSlots: true,
@@ -188,7 +202,7 @@ export function decideDirective(input: StrategyInput): Directive {
           answerQuestionFirst,
         };
       }
-      return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
+      return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
     }
     if (flags?.wantsReschedule || flags?.wantsCancel) {
       return {
@@ -275,7 +289,7 @@ export function decideDirective(input: StrategyInput): Directive {
 
   // 6) Quiere la llamada / propone día → consultar agenda real (o aclarar la oferta reciente).
   if (flags?.wantsCall && !flags.declinesCall) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
+    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
     return {
       kind: 'offer_slots',
       needsSlots: true,
@@ -324,7 +338,7 @@ export function decideDirective(input: StrategyInput): Directive {
     }
     if (!nextRule) return keepTalking(answerQuestionFirst);
   } else if (readyForCall && state.callProposedAt) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst);
+    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
     return {
       kind: 'offer_slots',
       needsSlots: true,

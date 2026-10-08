@@ -32,6 +32,7 @@ import { composeFollowUp, runFirstContact, runSetterReply } from '../ai/setter/s
 import { expireOldActions } from '../ai/copilot/copilot-actions.js';
 import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp, stopBusinessAutomations } from './followups.js';
 import { sendMessage } from '../crm/messaging.service.js';
+import { autopilotEnabled } from '../crm/conversations.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { appointmentMessageEnabled, getAutomation } from './reminders.js';
 import { configuredMessage, confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
@@ -123,6 +124,8 @@ const handlers: Record<string, Handler> = {
     if (lead.lastInboundAt && lead.lastInboundAt > fu.createdAt) return markFollowUp(fu.id, 'cancelled', { note: 'El lead respondió' });
     if (CLOSED_STATUSES.includes(lead.status) || CALL_STATUSES.includes(lead.status)) return markFollowUp(fu.id, 'cancelled', { note: `Etapa ${lead.status}` });
     if (!(await conversationIsActiveForKai(businessId, fu.conversationId))) return markFollowUp(fu.id, 'skipped', { note: 'KAI pausado en la conversación' });
+    // Piloto automático en pausa: KAI no escribe a nadie por su cuenta (ni se encadena el siguiente paso).
+    if (!(await autopilotEnabled(businessId))) return markFollowUp(fu.id, 'skipped', { note: 'Piloto automático en pausa' });
     // Antes de redactar con IA: si el canal ya no deja escribir (ventana de 24 h cerrada y sin plantilla), no se envía.
     if (!(await canSendFollowUpNow(businessId, fu.conversationId))) {
       return markFollowUp(fu.id, 'skipped', { note: 'Fuera de la ventana de 24 h del canal: no se puede escribir al lead hasta que vuelva a escribir.' });
@@ -235,6 +238,11 @@ const handlers: Record<string, Handler> = {
     }
     if (ctx.lead.lastInboundAt && ctx.lead.lastInboundAt > ctx.appointment.updatedAt) return; // ya escribió
     if (!(await conversationIsActiveForKai(businessId, ctx.conversationId))) return;
+    // Es un mensaje de KAI (y arranca seguimientos): con el piloto automático en pausa no se envía.
+    if (!(await autopilotEnabled(businessId))) {
+      logger.info('no_show_message.autopilot_off', { appointmentId: ctx.appointment.id });
+      return;
+    }
     const recovery = await getAutomation(businessId, 'no_show_recovery');
     if (recovery && !recovery.enabled) return; // se desactivó después de marcar el no-show
     const sent = await sendMessage({

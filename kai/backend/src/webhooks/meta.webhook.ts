@@ -213,7 +213,7 @@ async function handleInstagramEcho(connection: ChannelConnection, ev: IgMessagin
     .where(and(eq(conversations.businessId, connection.businessId), eq(conversations.leadId, lead.id), eq(conversations.channel, 'instagram')))
     .limit(1);
   if (!conv) return;
-  await insertMessage({
+  const echo = await insertMessage({
     businessId: connection.businessId,
     conversationId: conv.id,
     leadId: lead.id,
@@ -222,12 +222,19 @@ async function handleInstagramEcho(connection: ChannelConnection, ev: IgMessagin
     content: msg.text ?? '[📎 Adjunto]',
     externalId: msg.mid,
     status: 'sent',
-    metadata: { via: 'instagram_app' },
+    // Estado de la conversación antes del eco: si al final resulta ser un envío de KAI que tardó en
+    // confirmarse, se restaura tal cual (ver recordSentMessage), sin reactivar a KAI ni reabrir nada de más.
+    metadata: { via: 'instagram_app', before: { aiEnabled: conv.aiEnabled, handoffActive: conv.handoffActive, handoffReason: conv.handoffReason } },
     createdAt: new Date(ev.timestamp),
   });
-  await db.update(conversations).set({ aiEnabled: false, updatedAt: new Date() }).where(eq(conversations.id, conv.id));
+  // Solo si el mensaje sigue siendo del entrenador (KAI no lo ha reclamado como suyo mientras tanto).
+  const stillHuman = sql`exists (select 1 from ${messages} where ${messages.id} = ${echo.id} and ${messages.senderType} = 'human')`;
+  await db
+    .update(conversations)
+    .set({ aiEnabled: false, updatedAt: new Date() })
+    .where(and(eq(conversations.id, conv.id), stillHuman));
   // Si KAI había escalado la conversación, la respuesta del entrenador la deja atendida.
-  await markHandoffAttended(connection.businessId, conv.id, { type: 'integration' });
+  await markHandoffAttended(connection.businessId, conv.id, { type: 'integration' }, stillHuman);
 }
 
 // ───────────── Lead Ads ─────────────

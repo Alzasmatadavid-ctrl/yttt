@@ -313,7 +313,9 @@ export async function runSetterReply(businessId: string, conversationId: string,
     if (analysis.flags.asksPrice) statePatch.priceAskedCount = (conv.state.priceAskedCount ?? 0) + 1;
     if (analysis.flags.medical) statePatch.medicalFlag = true;
     // Si rechaza la llamada, se recuerda para no volver a proponérsela; si después la pide, se olvida el rechazo.
-    if (analysis.flags.declinesCall) statePatch.callDeclinedAt = new Date().toISOString();
+    // Con la llamada ya agendada todavía no: se le pregunta si cancelarla o moverla, y solo cuenta si se cancela
+    // (si responde “no, déjala”, la llamada sigue en pie y no debe constar como rechazada).
+    if (analysis.flags.declinesCall && !leadCtx.upcomingAppointment) statePatch.callDeclinedAt = new Date().toISOString();
     else if (analysis.flags.wantsCall && (conv.state as SetterState).callDeclinedAt) statePatch.callDeclinedAt = undefined;
     conv.state = await updateConversationState(businessId, conversationId, statePatch);
     leadCtx = await loadLeadContext(businessId, lead.id);

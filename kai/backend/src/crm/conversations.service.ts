@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { aiSettings, appointments, channelConnections, conversations, leadMemories, leads, messages } from '../database/schema.js';
+import { aiSettings, appointments, channelConnections, conversations, leadEvents, leadMemories, leads, messages, scheduledJobs } from '../database/schema.js';
 import type { ChannelKey, ConversationState } from '../lib/domain.js';
 import { notFound } from '../lib/errors.js';
 import { truncate } from '../lib/text.js';
@@ -158,19 +158,56 @@ export async function autopilotEnabled(businessId: string): Promise<boolean> {
 }
 
 /**
+ * Mensajes automáticos que NO contestan al lead: confirmación, recordatorios y aviso de no-show de la llamada,
+ * y seguimientos. Salen aunque el entrenador lleve la conversación, así que no pueden dar por contestado
+ * un mensaje del lead que nadie ha respondido.
+ */
+export const NON_REPLY_PURPOSES = ['confirmation', 'reminder', 'no_show', 'follow_up'] as const;
+
+/**
+ * El último mensaje del lead en esta conversación sigue sin contestar: después no se le ha enviado (con éxito)
+ * ninguna respuesta del equipo o de KAI (los mensajes automáticos de `NON_REPLY_PURPOSES` no cuentan).
+ */
+export function leadMessageUnanswered(): SQL {
+  const nonReply = sql.join(
+    NON_REPLY_PURPOSES.map((p) => sql`${p}`),
+    sql`, `,
+  );
+  return sql`(${conversations.lastInboundAt} is not null and not exists (
+    select 1 from ${messages} m
+    where m.conversation_id = ${conversations.id} and m.direction = 'outbound' and m.status not in ('failed', 'skipped')
+      and m.created_at >= ${conversations.lastInboundAt}
+      and (m.sender_type = 'human' or coalesce(m.metadata->>'purpose', '') not in (${nonReply}))
+  ))`;
+}
+
+/**
+ * ¿Tiene KAI una respuesta programada o en marcha para esta conversación? (trabajo `kai_reply`, clave `reply:<id>`).
+ * Dos `exists` para que cada uno use su índice (el único parcial de pendientes y el de estado).
+ */
+function kaiReplyInFlight(): SQL {
+  const key = sql`'reply:' || ${conversations.id}::text`;
+  return sql`(exists (select 1 from ${scheduledJobs} j where j.dedupe_key = ${key} and j.status = 'pending')
+    or exists (select 1 from ${scheduledJobs} j where j.dedupe_key = ${key} and j.status = 'running'))`;
+}
+
+/**
  * «Necesita respuesta humana»: hay un escalado abierto, o el último mensaje del lead está sin contestar y
  * KAI no lo va a contestar porque:
  *  - el entrenador lleva la conversación (KAI en pausa en ella),
- *  - el piloto automático del negocio está apagado, o
- *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes).
- * Los leads que pidieron la baja no cuentan (no se les puede escribir).
+ *  - el piloto automático del negocio está apagado,
+ *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes), o
+ *  - KAI no tiene ninguna respuesta en marcha (p. ej. el mensaje llegó con KAI en pausa y luego se reactivó).
+ * Los leads que pidieron la baja no cuentan (no se les puede escribir), salvo que hayan vuelto a escribir
+ * después de pedirla: entonces el entrenador tiene que verlo (puede volver a permitir mensajes desde su ficha).
  * Requiere el join con `leads` (ver `conversationLeadJoin`).
  */
 export function needsHumanReplyCondition(opts: { autopilotOn: boolean }): SQL {
-  // Quien pidió la baja no espera respuesta: no se le puede escribir (no cuenta como pendiente).
-  const unanswered = sql`(${leads.optedOut} = false and ${conversations.lastInboundAt} is not null and (${leads.lastOutboundAt} is null or ${leads.lastOutboundAt} < ${conversations.lastInboundAt}))`;
+  const optedOutAt = sql`(select max(e.created_at) from ${leadEvents} e where e.lead_id = ${leads.id} and e.type = 'opted_out')`;
+  const notOptedOut = sql`(${leads.optedOut} = false or ${conversations.lastInboundAt} > ${optedOutAt})`;
+  const unanswered = sql`(${notOptedOut} and ${leadMessageUnanswered()})`;
   const kaiWontAnswer = opts.autopilotOn
-    ? sql`(${conversations.aiEnabled} = false or (${leads.status} = 'client' and (${leads.wonAt} is null or ${leads.wonAt} < ${conversations.lastInboundAt})))`
+    ? sql`(${conversations.aiEnabled} = false or (${leads.status} = 'client' and (${leads.wonAt} is null or ${leads.wonAt} < ${conversations.lastInboundAt})) or not ${kaiReplyInFlight()})`
     : sql`true`;
   return sql`(${conversations.handoffActive} = true or (${unanswered} and ${kaiWontAnswer}))`;
 }
@@ -295,7 +332,15 @@ export async function getConversationDetail(businessId: string, conversationId: 
           .then((r) => r[0] ?? null)
       : Promise.resolve(null),
   ]);
-  return { conversation, lead, messages: msgs, memories, appointments: appts, connection };
+  // Igual que en la Bandeja: el último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar).
+  const autopilotOn = await autopilotEnabled(businessId);
+  const [pending] = await db
+    .select({ v: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })}, false)` })
+    .from(conversations)
+    .innerJoin(leads, conversationLeadJoin)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)))
+    .limit(1);
+  return { conversation, lead, messages: msgs, memories, appointments: appts, connection, needsHumanReply: Boolean(pending?.v) };
 }
 
 export async function markConversationRead(businessId: string, conversationId: string) {
@@ -324,11 +369,13 @@ export async function markHandoffAttended(
   businessId: string,
   conversationId: string,
   actor: { type: 'user'; userId: string } | { type: 'integration' },
+  /** Condición extra que se comprueba en la misma actualización (p. ej. que el eco de Instagram siga siendo del entrenador). */
+  onlyIf?: SQL,
 ): Promise<boolean> {
   const [conv] = await getDb()
     .update(conversations)
     .set({ handoffActive: false, aiEnabled: false, updatedAt: new Date() })
-    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId), eq(conversations.handoffActive, true)))
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId), eq(conversations.handoffActive, true), onlyIf))
     .returning();
   if (!conv) return false;
   await resolveAlertsFor(businessId, { leadId: conv.leadId, type: 'handoff' });

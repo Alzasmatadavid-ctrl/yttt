@@ -72,6 +72,8 @@ Puedes dejarlo tal cual para probar. Para activar la IA real, abre `.env` con cu
 npm run db:seed
 ```
 
+Hazlo **antes de arrancar KAI** (paso 7). Si ya lo tienes arrancado, páralo primero con `Ctrl + C`, ejecuta el comando y vuelve a arrancarlo con `npm run dev`: mientras KAI está en marcha, la base de datos de tu ordenador no se puede usar desde otra terminal (el comando te avisará y no hará nada).
+
 Crea un negocio de ejemplo (“Demo · David Alzas Coach”, método Kaizen) con leads en todas las etapas, conversaciones y citas. Te mostrará el acceso:
 
 - Email: `demo@kai.local`
@@ -112,12 +114,12 @@ Todos se ejecutan dentro de la carpeta `kai`.
 | Comando | Para qué sirve |
 |---|---|
 | `npm run dev` | Arranca KAI en modo desarrollo (servidor en el puerto 3000 y web en el 5173). |
-| `npm run db:seed` | Crea la cuenta demo. Con `npm run db:seed -- --reset` la borra y la vuelve a crear (con todos sus datos de ejemplo). |
+| `npm run db:seed` | Crea la cuenta demo. Con `npm run db:seed -- --reset` la borra y la vuelve a crear (con todos sus datos de ejemplo). Ejecútalo con KAI parado (`Ctrl + C`) y vuelve a arrancarlo después con `npm run dev`. |
 | `npm run build` | Prepara la versión de producción (web + servidor). |
 | `npm start` | Arranca la versión compilada (después de `npm run build`). Para usarla en producción sin Docker, pon en `.env` `NODE_ENV=production` y `SERVE_FRONTEND=true` (ver `.env.example`). |
 | `npm test` | Ejecuta las pruebas automáticas. Para un solo archivo: `npm test -- test/unit/scoring.test.ts`. |
 | `npm run typecheck` | Comprueba que el código no tiene errores de tipos. |
-| `npm run db:migrate` | Aplica cambios de base de datos (el servidor también lo hace solo al arrancar). |
+| `npm run db:migrate` | Aplica cambios de base de datos (el servidor también lo hace solo al arrancar). Si lo ejecutas tú, hazlo con KAI parado (`Ctrl + C`). |
 
 ---
 
@@ -172,4 +174,6 @@ kai/
 | La web dice que no conecta con el servidor | Mira la terminal: el servidor (`[servidor]`) debe decir `✔ KAI escuchando en el puerto 3000`. Si muestra un error de configuración, revisa tu `.env`. |
 | KAI responde de forma muy básica | Estás en modo simulado. Añade `ANTHROPIC_API_KEY` en `.env` y reinicia (`Ctrl + C` y `npm run dev`). |
 | No llegan los mensajes de WhatsApp/Instagram | El webhook de Meta necesita una dirección pública (no funciona con `localhost`). Ver [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md). |
+| `npm run db:seed` dice `✖ KAI está arrancado y está usando la base de datos de tu ordenador` | Para KAI con `Ctrl + C`, vuelve a ejecutar el comando y arráncalo otra vez con `npm run dev`. |
+| La cuenta demo no funciona (“contraseña incorrecta”) o ha desaparecido al reiniciar | Se creó con KAI arrancado y se perdió. Para KAI (`Ctrl + C`), ejecuta `npm run db:seed -- --reset` y vuelve a arrancarlo con `npm run dev`. |
 | Quiero empezar de cero en local | Para KAI y borra la carpeta `backend/.data`. Se creará una base de datos nueva al arrancar. |

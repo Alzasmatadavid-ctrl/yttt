@@ -9,6 +9,7 @@ import { AUTOMATION_LABELS, MAX_VOCAB_WORD_LENGTH, isLeadStatus, leadStatusLabel
 import { badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit } from '../../audit/audit.service.js';
 import type { TenantContext } from '../../auth/guards.js';
+import { releaseConversation } from '../../crm/conversations.service.js';
 import { deleteLead, getLead, setLeadStatus } from '../../crm/leads.service.js';
 import { sendMessage } from '../../crm/messaging.service.js';
 import { firstName } from '../../lib/text.js';
@@ -337,14 +338,26 @@ export async function confirmPendingAction(ctx: TenantContext, id: string) {
           .where(and(eq(automations.businessId, ctx.businessId), eq(automations.type, p.automation as AutomationType)));
         result = { ok: true };
         break;
-      case 'toggle_kai_conversation':
+      case 'toggle_kai_conversation': {
         if (typeof p.enabled !== 'boolean') throw badRequest('La acción no indica si pausar o reactivar a KAI.');
-        await db
-          .update(conversations)
-          .set({ aiEnabled: p.enabled, ...(p.enabled ? { handoffActive: false } : {}), updatedAt: new Date() })
-          .where(and(eq(conversations.businessId, ctx.businessId), eq(conversations.leadId, String(p.leadId))));
+        const leadId = String(p.leadId);
+        if (p.enabled) {
+          // Igual que «Devolver a KAI»: además de reactivarlo, cierra el escalado (motivo y aviso
+          // «KAI necesita tu intervención»), para que no quede un aviso de algo que ya lleva KAI.
+          const convs = await db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(and(eq(conversations.businessId, ctx.businessId), eq(conversations.leadId, leadId)));
+          for (const c of convs) await releaseConversation(ctx.businessId, c.id, ctx.userId);
+        } else {
+          await db
+            .update(conversations)
+            .set({ aiEnabled: false, updatedAt: new Date() })
+            .where(and(eq(conversations.businessId, ctx.businessId), eq(conversations.leadId, leadId)));
+        }
         result = { ok: true };
         break;
+      }
       case 'toggle_autopilot':
         if (typeof p.enabled !== 'boolean') throw badRequest('La acción no indica si activar o pausar el piloto automático.');
         await db.update(aiSettings).set({ autopilotEnabled: p.enabled, updatedAt: new Date() }).where(eq(aiSettings.businessId, ctx.businessId));

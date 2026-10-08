@@ -4,6 +4,7 @@
  *  - RuleBasedSetterAgent: motor de reglas (modo simulación, sin API key). Útil para probar
  *    todo el sistema de punta a punta y como referencia de comportamiento.
  */
+import { DateTime } from 'luxon';
 import { firstName, hashString, normalize, pick } from '../../lib/text.js';
 import { BILLING_PERIOD_LABELS, formatMoney, questionCount, type ConversationState } from '../../lib/domain.js';
 import { humanSlotLabel } from '../../lib/time.js';
@@ -11,6 +12,7 @@ import type { ChatBlock, ChatMessage, LLMProvider, ToolResultBlock } from '../pr
 import { textOf } from '../providers/types.js';
 import type { BusinessContext, ConversationContext, LeadContext } from '../context/context.js';
 import { buildSetterStablePrompt, buildSetterTurnContext } from '../prompts/setter.prompt.js';
+import { maxCharsFor } from '../prompts/tone.js';
 import type { SetterToolbox } from '../tools/setter-tools.js';
 import { slotStillBookable, type Directive, type SetterState } from './strategy.js';
 import { env } from '../../config/env.js';
@@ -192,6 +194,42 @@ export function joinLabels(labels: string[]): string {
   return `${labels.slice(0, -1).join(', ')} o ${labels[labels.length - 1]}`;
 }
 
+/** Parte de un mensaje del motor de reglas: la primera opción es la completa; las siguientes, cada vez más cortas ('' = se omite). */
+export interface MessagePart {
+  key: string;
+  options: string[];
+}
+
+/**
+ * Une las partes de un mensaje y, si no cabe en el máximo de caracteres del tono, va acortando las opcionales en el
+ * orden indicado (de la menos a la más importante) hasta que quepa. Así un mensaje compuesto (saludo, transparencia,
+ * “qué incluye” y respuesta) no supera el límite: el control de calidad lo rechazaría siempre igual y se escalaría.
+ * Cada paso es la clave de una parte (se acorta hasta su última opción) o [clave, nivel] (solo hasta ese nivel).
+ */
+export function fitParts(parts: MessagePart[], shortenOrder: (string | [string, number])[], maxChars: number): string {
+  const level = parts.map(() => 0);
+  const join = () =>
+    parts
+      .map((p, i) => p.options[level[i]] ?? '')
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  let text = join();
+  for (const step of shortenOrder) {
+    if (text.length <= maxChars) break;
+    const [key, upTo] = typeof step === 'string' ? [step, Infinity] : step;
+    const i = parts.findIndex((p) => p.key === key);
+    if (i < 0) continue;
+    const last = Math.min(upTo, parts[i].options.length - 1);
+    while (text.length > maxChars && level[i] < last) {
+      level[i]++;
+      text = join();
+    }
+  }
+  return text;
+}
+
 /**
  * Presentación como asistente virtual para el PRIMER mensaje de KAI (transparencia, disclosureMode = first_message).
  * Vacía si el entrenador ha elegido no presentarse salvo que pregunten.
@@ -229,11 +267,15 @@ export class RuleBasedSetterAgent implements SetterAgent {
     // Felicitar o reconocer un acontecimiento solo la primera vez: repetirlo en cada mensaje suena a robot.
     const previousOut = input.convCtx.history.filter((m) => m.direction === 'outbound').map((m) => m.content.toLowerCase());
     const alreadySaid = (phrase: string) => previousOut.some((t) => t.includes(phrase));
-    // Variantes: se evita repetir literalmente un mensaje anterior (el control de calidad lo rechazaría).
+    // Variantes: se evita repetir literalmente un mensaje anterior (el control de calidad lo rechazaría). Si ya se
+    // usaron todas, al menos una que no esté entre los últimos mensajes (los que compara el control de calidad).
     const said = new Set(previousOut.map((t) => normalize(t)));
+    const recent = new Set(previousOut.slice(-4).map((t) => normalize(t)));
     const fresh = (variants: string[]) => {
-      const unused = variants.filter((v) => !said.has(normalize(v.replace(/\s+/g, ' ').trim())));
-      return pick(unused.length ? unused : variants, seed);
+      const key = (v: string) => normalize(v.replace(/\s+/g, ' ').trim());
+      const unused = variants.filter((v) => !said.has(key(v)));
+      const notRecent = variants.filter((v) => !recent.has(key(v)));
+      return pick(unused.length ? unused : notRecent.length ? notRecent : variants, seed);
     };
     const event = eventPhrase(leadCtx.memories.find((m) => m.kind === 'event')?.content);
     const eventAck =
@@ -246,23 +288,41 @@ export class RuleBasedSetterAgent implements SetterAgent {
             : null;
     // Si el lead solo ha preguntado algo, no se “agradece la respuesta” (no ha respondido a nada).
     const leadOnlyAsked = Boolean(pendingText.trim()) && pendingText.trim().endsWith('?');
-    const ack = eventAck ?? (leadOnlyAsked ? '' : pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed));
+    // Si solo da las gracias (p. ej. tras confirmarle algo), se le contesta a eso y no con un “Entiendo.”.
+    const onlyThanks = /^\s*(?:(?:vale|ok|genial|perfecto)[,.!]?\s+)?(?:muchas )?gracias\b[\s,.!]*(?:a ti|por todo)?[\s.!]*$/.test(normalize(pendingText));
+    const ack = eventAck ?? (leadOnlyAsked ? '' : onlyThanks ? 'Gracias a ti.' : pick(ACKS[state.lastAskedKey ?? 'default'] ?? ACKS.default, seed));
     // “¿Qué incluye?”, “¿cómo funciona?”: se responde con lo que el entrenador ha configurado.
     const svc0 = biz.services[0];
     const asksWhatIncludes = /\b(que|qu[eé]) (incluye|trae|tiene el (programa|plan|servicio))\b|\ben que consiste\b|\bcomo funciona\b|\bcomo (es|seria) (el|tu) (programa|plan|servicio|metodo)\b/.test(normalize(pendingText));
-    const includesAnswer =
+    // De más a menos completa: si el mensaje no cabe, se citan menos elementos de lo que incluye.
+    const includedItems = (svc0?.includes ?? []).slice(0, 3).map((i) => lowerFirst(i));
+    const includesAnswers =
       asksWhatIncludes && svc0
-        ? svc0.includes.length
-          ? `${svc0.name} incluye ${listEs(svc0.includes.slice(0, 3).map((i) => lowerFirst(i)))}.`
-          : svc0.description
-            ? `${svc0.name}: ${svc0.description.trim().replace(/[.!]*$/, '.')}`
-            : `Te lo explica ${trainer} en detalle según tu caso.`
-        : '';
+        ? includedItems.length
+          ? includedItems.map((_, k) => `${svc0.name} incluye ${listEs(includedItems.slice(0, includedItems.length - k))}.`)
+          : [svc0.description ? `${svc0.name}: ${svc0.description.trim().replace(/[.!]*$/, '.')}` : `Te lo explica ${trainer} en detalle según tu caso.`]
+        : [];
     const greeting = s.tone.formality <= 2 && s.tone.energy >= 4 ? '¡Ey' : '¡Hola';
     const intro = disclosureIntro(biz);
     const setterState = state as SetterState;
     const callDeclined = Boolean(setterState.callDeclinedAt);
-    const botNote = input.extraNote?.includes('si eres un bot') ? `Te soy sincero: soy ${assistant}, el asistente automatizado del equipo de ${trainer}, y si prefieres hablar directamente con ${trainer} te lo paso.` : '';
+    // Pregunta si es un bot: transparencia. Si este mensaje ya lleva la presentación (primer mensaje), no se repite
+    // “soy KAI, el asistente…”. Las opciones siguientes, más cortas, se usan si el mensaje no cabe.
+    const trainerFirst = firstName(biz.trainer.displayName) || trainer;
+    const presentsNow = Boolean(intro) && (directive.kind === 'greet_and_ask' || Boolean(input.firstMessage));
+    const botNotes = !input.extraNote?.includes('si eres un bot')
+      ? []
+      : presentsNow
+        ? [
+            `Y sí, te soy sincero: soy un asistente automatizado, y si prefieres hablar directamente con ${trainer} te lo paso.`,
+            `Y sí, soy un asistente automatizado; si lo prefieres, te paso con ${trainerFirst}.`,
+            'Y sí, soy un asistente automatizado.',
+          ]
+        : [
+            `Te soy sincero: soy ${assistant}, el asistente automatizado del equipo de ${trainer}, y si prefieres hablar directamente con ${trainer} te lo paso.`,
+            `Te soy sincero: soy ${assistant}, el asistente automatizado del equipo de ${trainer}; si lo prefieres, te paso con ${trainerFirst}.`,
+            `Te soy sincero: soy ${assistant}, el asistente automatizado del equipo de ${trainer}.`,
+          ];
 
     if (input.mode === 'follow_up' && input.followUp) {
       const goal = lead.goalSummary || lead.qualification.goal?.value;
@@ -294,6 +354,8 @@ export class RuleBasedSetterAgent implements SetterAgent {
 
     const q = directive.question ? cap(directive.question) : '';
     let text: string;
+    /** Versiones más cortas del texto principal (de más a menos completa), por si el mensaje compuesto no cabe. */
+    let shorter: string[] = [];
     switch (directive.kind) {
       case 'first_contact':
         {
@@ -303,54 +365,95 @@ export class RuleBasedSetterAgent implements SetterAgent {
         }
         break;
       case 'greet_and_ask':
-        text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} Gracias por escribir${emoji('👋')} ${q || '¿Qué te gustaría conseguir exactamente?'}`;
+        // El saludo, la presentación y el “Gracias por escribir” se añaden al final (ver fitParts).
+        text = q || '¿Qué te gustaría conseguir exactamente?';
         break;
       case 'ask_qualification':
         text = `${ack} ${q}`.trim();
+        if (ack && q) shorter = [q];
         break;
       case 'handle_objection': {
         // El ejemplo del entrenador, salvo que ya se usara (o que tenga más de una pregunta).
         const example = directive.objection?.exampleResponse?.trim();
-        text =
-          example && questionCount(example) <= 1 && !said.has(normalize(example))
-            ? example
-            : fresh([
-                'Te entiendo perfectamente. ¿Qué es lo que más te frena ahora mismo?',
-                'Tiene todo el sentido que te lo plantees. ¿Qué necesitarías para verlo más claro?',
-                'Es normal tener dudas con esto. ¿Qué te gustaría saber antes de decidir nada?',
-              ]);
+        const generic = fresh([
+          'Te entiendo perfectamente. ¿Qué es lo que más te frena ahora mismo?',
+          'Tiene todo el sentido que te lo plantees. ¿Qué necesitarías para verlo más claro?',
+          'Es normal tener dudas con esto. ¿Qué te gustaría saber antes de decidir nada?',
+        ]);
+        if (example && questionCount(example) <= 1 && !said.has(normalize(example))) {
+          text = example;
+          shorter = [generic];
+        } else text = generic;
         break;
       }
       case 'price_contextualize':
         text = `Claro. Antes de decirte qué opción tendría sentido para ti, quiero entender un poco tu situación para no recomendarte algo que no encaje. ${q || '¿Qué te gustaría conseguir exactamente?'}`;
+        shorter = [`Claro. Para no recomendarte algo que no encaje, antes quiero entender tu situación. ${q || '¿Qué te gustaría conseguir exactamente?'}`];
         break;
       case 'share_price': {
         const svc = biz.services[0];
         const booked = Boolean(leadCtx.upcomingAppointment);
+        // Si ya se le dio el precio y vuelve a preguntar, se le recuerda con otras palabras: repetir el mismo texto
+        // haría que el control de calidad lo rechazara (y la conversación se escalaría sin responderle).
+        const again = Boolean(state.priceShared);
         if (directive.withoutCall) {
           // No encaja: se le da el precio con honestidad, sin proponer la llamada.
           const price = svc && svc.priceCents > 0 ? `${formatMoney(svc.priceCents, svc.currency)} ${BILLING_PERIOD_LABELS[svc.billingPeriod] ?? ''}`.trim() : null;
-          text = price
-            ? `Claro, te lo digo: ${svc!.name} cuesta ${price}. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero que tengas la información.`
-            : `El precio lo concreta ${trainer} según el caso de cada persona. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero ser sincero contigo.`;
+          const variants = price
+            ? [
+                `Claro, te lo digo: ${svc!.name} cuesta ${price}. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero que tengas la información.`,
+                `Como te decía, ${svc!.name} son ${price}. Aun así, por lo que me cuentas, ahora mismo no creo que sea lo más adecuado para ti.`,
+                `Te lo confirmo: son ${price}. Siendo sincero, por lo que me has contado, ahora mismo no creo que sea lo que más te conviene.`,
+              ]
+            : [
+                `El precio lo concreta ${trainer} según el caso de cada persona. Por lo que me cuentas, igual ahora no es lo que más te encaja, pero prefiero ser sincero contigo.`,
+                `Como te decía, el precio lo concreta ${trainer} según cada caso. Siendo sincero, por lo que me cuentas, ahora mismo no creo que sea lo más adecuado para ti.`,
+              ];
+          text = again ? fresh([...variants.slice(1), variants[0]]) : variants[0];
         } else if (!svc || svc.priceCents <= 0) {
           text = booked
-            ? `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Lo veréis en detalle en la ${s.callLabel}.`
+            ? again
+              ? fresh([
+                  `Como te decía, el precio lo concreta ${trainer} según tu caso; en la ${s.callLabel} lo veréis en detalle.`,
+                  `El importe depende de lo que necesites, así que te lo concreta ${trainer} en la ${s.callLabel}.`,
+                ])
+              : `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Lo veréis en detalle en la ${s.callLabel}.`
             : callDeclined
-              ? `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Si quieres, cuéntame qué buscas y te oriento por aquí.`
-              : `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. ¿Te parece si lo veis en una ${s.callLabel} de ${s.callDurationMinutes} minutos?`;
+              ? again
+                ? fresh([
+                    `Como te decía, el precio depende de lo que necesites y lo concreta ${trainer}. Cuéntame qué buscas y te oriento por aquí.`,
+                    `El importe lo concreta ${trainer} según cada caso. Si me cuentas qué buscas, te oriento por aquí.`,
+                  ])
+                : `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. Si quieres, cuéntame qué buscas y te oriento por aquí.`
+              : again
+                ? fresh([
+                    `Como te comentaba, el precio lo concreta ${trainer} según lo que necesites. ¿Quieres que lo veáis en la ${s.callLabel}?`,
+                    `El importe depende de tu caso y te lo concreta ${trainer}. ¿Te parece si lo veis en una ${s.callLabel} de ${s.callDurationMinutes} minutos?`,
+                  ])
+                : `El precio lo concreta ${trainer} según tu caso, porque depende de lo que necesites. ¿Te parece si lo veis en una ${s.callLabel} de ${s.callDurationMinutes} minutos?`;
         } else {
           const items = svc.includes.slice(0, 3).map((i) => lowerFirst(i));
           const includes = items.length ? ` Incluye ${items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}` : items[0]}.` : '';
           const price = `${formatMoney(svc.priceCents, svc.currency)} ${BILLING_PERIOD_LABELS[svc.billingPeriod] ?? ''}`.trim();
-          if (booked) text = `Claro. ${svc.name} cuesta ${price}.${includes} En la ${s.callLabel} lo veréis en detalle con ${trainer}.`;
+          // Sin la lista de lo que incluye, por si el mensaje no cabe.
+          const withIncludes = (t: string) => {
+            if (includes) shorter = [t.replace(includes, '')];
+            return t;
+          };
+          if (booked)
+            text = again
+              ? fresh([
+                  `Como te comentaba, ${svc.name} son ${price}. En la ${s.callLabel} lo veréis en detalle con ${trainer}.`,
+                  `Te lo confirmo: ${svc.name} son ${price}. ${cap(trainer)} te lo explica todo en la ${s.callLabel}.`,
+                ])
+              : withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} En la ${s.callLabel} lo veréis en detalle con ${trainer}.`);
           else if (state.priceShared)
             text = fresh([
               `Como te comentaba, ${svc.name} son ${price}. ¿Qué duda te queda para ver si encaja contigo?`,
               `Te lo confirmo: ${svc.name} son ${price}. ¿Hay algo de lo que incluye que quieras que te aclare?`,
             ]);
-          else if (callDeclined) text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Qué te parece?`;
-          else text = `Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`;
+          else if (callDeclined) text = withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} ¿Qué te parece?`);
+          else text = withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`);
         }
         break;
       }
@@ -358,14 +461,23 @@ export class RuleBasedSetterAgent implements SetterAgent {
         // La memoria guarda la frase del lead: se menciona el acontecimiento, no se cita literalmente.
         const lead_in = event ? `Teniendo en cuenta ${event}, ` : 'Por lo que me cuentas, ';
         text = `${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para valorar tu caso. ¿Te encaja?`;
+        shorter = [`Creo que tendría sentido verlo en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer}. ¿Te encaja?`];
         break;
       }
       case 'offer_slots':
       case 'reschedule': {
         if (!input.toolbox) throw new Error('Sin acceso a la agenda.');
+        // Al mover la llamada «una hora más tarde» o «un poco antes»: horarios posteriores (o anteriores) a la que
+        // tiene, empezando por ese mismo día. Ofrecerle uno anterior cuando pide más tarde no tendría sentido.
+        const current = directive.kind === 'reschedule' ? leadCtx.upcomingAppointment : null;
+        const pn = normalize(pendingText);
+        const shift = !current ? null : /\bmas tarde\b|\bhoras? despues\b/.test(pn) ? 'later' : /\bmas (?:pronto|temprano)\b|\b(?:horas?|poco) antes\b/.test(pn) ? 'earlier' : null;
+        const sameDay = current && shift ? DateTime.fromJSDate(current.startsAt).setZone(biz.business.timezone).toISODate() : null;
         const r = await input.toolbox.run('get_available_slots', {
-          date: directive.slotQuery?.date ?? null,
+          date: directive.slotQuery?.date ?? sameDay ?? null,
           part_of_day: directive.slotQuery?.partOfDay ?? 'any',
+          ...(current && shift === 'later' ? { later_than: current.startsAt.toISOString() } : {}),
+          ...(current && shift === 'earlier' ? { earlier_than: current.startsAt.toISOString() } : {}),
         });
         const data = JSON.parse(r.content) as { slots?: { label: string }[]; note?: string };
         const labels = (data.slots ?? []).map((x) => x.label);
@@ -375,7 +487,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
           const options = labels.length === 1 ? `tengo ${labels[0]}. ¿Te viene bien?` : `tengo ${joinLabels(labels)}. ¿Cuál te viene mejor?`;
           text =
             directive.kind === 'reschedule'
-              ? `Sin problema, lo movemos. ${cap(options)}`
+              ? `Sin problema, lo movemos. ${data.note ? `Ese día no me quedan huecos, pero ${options}` : cap(options)}`
               : data.note
                 ? `Ese día no me quedan huecos, pero ${options}`
                 : `Perfecto. ${cap(options)}`;
@@ -383,7 +495,18 @@ export class RuleBasedSetterAgent implements SetterAgent {
         break;
       }
       case 'reassure_call':
+        // Solo ha preguntado si es un bot: no hay ninguna duda que calmar. Tras la nota de transparencia se le
+        // vuelve a preguntar, sin presión, si le encaja la llamada.
+        if (botNotes.length && questionCount(pendingText) <= 1) {
+          text = `Y sobre la ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainerFirst}, ¿te encaja?`;
+          shorter = [`¿Te encaja la ${s.callLabel} con ${trainerFirst}?`];
+          break;
+        }
         text = `Claro, sin ninguna prisa. La ${s.callLabel} es simplemente para que ${trainer} conozca tu caso y veáis si tiene sentido trabajar juntos. ¿Qué duda te gustaría resolver antes?`;
+        shorter = [
+          `Claro, sin prisa. La ${s.callLabel} es para que ${trainer} conozca tu caso y veáis si encaja. ¿Qué duda te gustaría resolver antes?`,
+          `Claro, sin prisa. ¿Qué duda te gustaría resolver antes de la ${s.callLabel}?`,
+        ];
         break;
       case 'clarify_slot': {
         const ids = state.lastOfferIds ?? [];
@@ -430,18 +553,25 @@ export class RuleBasedSetterAgent implements SetterAgent {
         const appt = leadCtx.upcomingAppointment;
         const when = appt ? humanSlotLabel(appt.startsAt, biz.business.timezone, input.now) : null;
         text = when
-          ? fresh([
-              `Entendido. Si te surge algo y necesitas mover la ${s.callLabel} (${when}), dímelo sin problema.`,
-              `Aquí estoy para lo que necesites. La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
-              `Gracias por escribir. Cualquier duda antes de la ${s.callLabel} (${when}), me la preguntas por aquí.`,
-            ])
+          ? botNotes.length
+            ? `La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`
+            : fresh([
+                `Entendido. Si te surge algo y necesitas mover la ${s.callLabel} (${when}), dímelo sin problema.`,
+                `Aquí estoy para lo que necesites. La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
+                `Gracias por escribir. Cualquier duda antes de la ${s.callLabel} (${when}), me la preguntas por aquí.`,
+              ])
           : fresh(['Vale, cualquier cosa me dices.', 'Entendido. Aquí me tienes para lo que necesites.']);
+        shorter = ['Cualquier otra duda, me dices.'];
         break;
       }
       case 'confirm_cancel': {
         const appt = leadCtx.upcomingAppointment;
         const when = appt ? ` de ${humanSlotLabel(appt.startsAt, biz.business.timezone, input.now)}` : '';
-        text = `Sin problema. ¿Quieres que cancele la ${s.callLabel}${when} o prefieres que la movamos a otro día?`;
+        // Dos variantes: si vuelve a decir que no la quiere más adelante, no se repite el mismo mensaje.
+        text = fresh([
+          `Sin problema. ¿Quieres que cancele la ${s.callLabel}${when} o prefieres que la movamos a otro día?`,
+          `Entendido. ¿Prefieres que cancele la ${s.callLabel}${when} o que busquemos otro día?`,
+        ]);
         break;
       }
       case 'cancel_booking': {
@@ -465,10 +595,15 @@ export class RuleBasedSetterAgent implements SetterAgent {
           'Gracias a ti. Si en algún momento cambia tu situación, aquí estaré para ayudarte.',
           'Entendido. Te deseo lo mejor, y si más adelante encaja, aquí me tienes.',
         ]);
+        {
+          const brief = 'Gracias por contármelo. Siendo sincero, ahora mismo creo que esto no sería lo más adecuado para ti. Mucho ánimo.';
+          if (text.length > brief.length) shorter = [brief];
+        }
         break;
       case 'continue_without_call':
         if (directive.justDeclined) {
           text = q ? `Sin problema, lo vamos hablando por aquí. ${q}` : 'Sin problema, lo vamos hablando por aquí. Cualquier duda, me dices.';
+          if (q) shorter = [`Sin problema. ${q}`];
         } else {
           text = fresh([
             'Perfecto. Si te surge cualquier duda sobre cómo trabajamos, pregúntame por aquí.',
@@ -480,17 +615,21 @@ export class RuleBasedSetterAgent implements SetterAgent {
       default:
         text = q || 'Perfecto, cuéntame.';
     }
-    if (includesAnswer && ['ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'].includes(directive.kind)) {
-      text = `${includesAnswer} ${text}`;
-    }
-    // Si pregunta si es un bot, se le responde con transparencia en cualquier tipo de mensaje (no solo al cualificar).
-    if (botNote && directive.kind !== 'first_contact') {
-      text = directive.kind === 'greet_and_ask' ? text.replace(`Gracias por escribir${emoji('👋')} `, `Gracias por escribir${emoji('👋')} ${botNote} `) : `${botNote} ${text}`;
-    }
-    if (input.firstMessage && directive.kind !== 'greet_and_ask' && directive.kind !== 'first_contact') {
-      text = `${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''} ${text}`;
-    }
-    return { text: text.replace(/\s+/g, ' ').trim(), meta: { agent: this.name } };
+    if (directive.kind === 'first_contact') return { text: text.replace(/\s+/g, ' ').trim(), meta: { agent: this.name } };
+    // Mensaje compuesto: [saludo y presentación] [gracias por escribir] [transparencia si pregunta si es un bot]
+    // [qué incluye] [respuesta]. Si no cabe en el máximo del tono, se acortan las partes opcionales.
+    const greets = directive.kind === 'greet_and_ask' || Boolean(input.firstMessage);
+    const answersIncludes = ['ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'].includes(directive.kind);
+    const parts: MessagePart[] = [
+      { key: 'hello', options: greets ? [`${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''}`] : [] },
+      { key: 'thanks', options: directive.kind === 'greet_and_ask' ? [`Gracias por escribir${emoji('👋')}`, ''] : [] },
+      // Si pregunta si es un bot, se le responde con transparencia en cualquier tipo de mensaje (no solo al cualificar).
+      { key: 'bot', options: botNotes },
+      { key: 'includes', options: answersIncludes ? includesAnswers : [] },
+      { key: 'main', options: [text, ...shorter] },
+    ];
+    // La oferta de pasarle con el entrenador es lo último que se quita de la nota de transparencia.
+    return { text: fitParts(parts, ['thanks', ['bot', 1], 'includes', 'main', 'bot'], maxCharsFor(s.tone)), meta: { agent: this.name } };
   }
 }
 

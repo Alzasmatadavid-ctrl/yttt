@@ -122,6 +122,12 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     await registerOptOutFromInbound(input.businessId, lead, conversation, message);
     optedOutNow = true;
   }
+  // Ya estaba dado de baja y vuelve a escribir: KAI no le contesta, pero el entrenador tiene que enterarse
+  // (sale en «Pendientes» y con un aviso). Si solo repite que no le escriban, se renueva la baja y nada más.
+  if (lead.optedOut && !input.isTest) {
+    if (isOptOutRequest(input.text)) await markOptedOut(input.businessId, lead.id, { type: 'lead' }, { messageId: message.id, detectedBy: 'inbound', repeated: true });
+    else await alertOptedOutLeadWrote(input.businessId, lead, conversation, message);
+  }
 
   if (conversation.aiEnabled && !conversation.handoffActive && !lead.optedOut && !optedOutNow && (await businessIsActive(input.businessId))) {
     const delay = input.replyDelaySeconds ?? (await replyDelaySeconds(input.businessId));
@@ -159,6 +165,17 @@ async function registerOptOutFromInbound(businessId: string, lead: Lead, convers
     severity: 'info',
     title: 'Un lead ha pedido no recibir más mensajes',
     body: `${lead.name || 'Un lead'} ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». Se ha registrado la baja: no se le enviarán más mensajes y se han cancelado sus seguimientos y recordatorios. Si ha sido un malentendido, puedes darle de alta de nuevo desde su ficha.`,
+    leadId: lead.id,
+    conversationId: conversation.id,
+  });
+}
+
+async function alertOptedOutLeadWrote(businessId: string, lead: Lead, conversation: Conversation, message: Message) {
+  await createAlert({
+    businessId,
+    type: 'client_message',
+    title: 'Un lead dado de baja te ha vuelto a escribir',
+    body: `${lead.name || 'Un lead'} pidió no recibir más mensajes y ahora ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». KAI no le contesta. Si quiere volver a hablar contigo, pulsa «Volver a permitir mensajes» en su ficha y respóndele.`,
     leadId: lead.id,
     conversationId: conversation.id,
   });
@@ -204,6 +221,8 @@ export async function ingestExternalLead(input: ExternalLeadInput): Promise<{ le
       isTest: input.isTest,
     },
     { type: 'integration' },
+    // Formularios, Lead Ads y webhooks: cualquiera puede escribir el email o el teléfono de otra persona.
+    { unverifiedContact: true },
   );
   await audit({ businessId: input.businessId, actorType: 'integration', action: 'lead.ingested', entityType: 'lead', entityId: lead.id, metadata: { source: input.source, created } });
 

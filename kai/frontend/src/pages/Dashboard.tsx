@@ -27,6 +27,7 @@ import { Button, Callout, Card, EmptyState, PageHeader, PageLoading, Stat } from
 import { ScoreBadge } from '../components/lead-bits';
 import { Funnel } from '../components/charts';
 import { InsightsCard, type Insight } from '../components/Insights';
+import { attentionItems } from '../lib/attention';
 import type { Alert, Appointment } from '../lib/types';
 import type { LeadStatus, LeadTemperature } from '@shared';
 import { leadStatusLabel } from '@shared';
@@ -93,12 +94,9 @@ export default function Dashboard() {
   // La hora del saludo, en la zona horaria del negocio (la misma que la fecha de al lado).
   const hour = businessHour(data.timezone);
   const greeting = hour < 6 ? 'Buenas noches' : hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
-  const { attention } = data;
-  const handoffs = attention.alerts.filter((a) => a.alert.type === 'handoff');
-  const otherAlerts = attention.alerts.filter((a) => a.alert.type !== 'handoff');
-  // Las conversaciones en espera que ya tienen aviso de escalado se muestran una sola vez (como aviso): el contador cuenta lo mismo que se pinta.
-  const waiting = attention.waiting.filter((w) => !handoffs.some((h) => h.alert.conversationId === w.conversationId));
-  const attentionCount = handoffs.length + waiting.length + attention.atRisk.length + otherAlerts.length;
+  // Cada asunto se muestra una sola vez (p. ej. un cliente que escribe sale como aviso, no también como «espera tu
+  // respuesta») y el contador cuenta lo mismo que se pinta.
+  const { handoffs, waiting, atRisk, otherAlerts, count: attentionCount } = attentionItems(data.attention);
   const noLeadsYet = data.funnel30d.leads === 0 && data.leads.active === 0;
 
   return (
@@ -170,7 +168,7 @@ export default function Dashboard() {
                   <ScoreBadge score={w.score} />
                 </button>
               ))}
-              {attention.atRisk.map((l) => (
+              {atRisk.map((l) => (
                 <button key={l.id} className="attention-item" onClick={() => navigate(`/app/leads/${l.id}`)}>
                   <span className="attention-icon" style={{ background: 'var(--hot-soft)', color: 'var(--hot)' }}>
                     <Flame />

@@ -128,7 +128,7 @@ export async function getFreeSlots(
 export async function getOfferableSlots(
   businessId: string,
   lead: { id: string; name: string; email: string | null; isTest?: boolean },
-  opts: { date?: string; partOfDay?: PartOfDay; count?: number } = {},
+  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date } = {},
 ): Promise<{ offered: OfferedSlot[]; timezone: string; provider: string }> {
   const { slots, config, provider } = await getFreeSlots(businessId, undefined, { includeTestLeads: Boolean(lead.isTest) });
   const picked = pickOfferSlots(slots, config.timezone, opts) as SlotWithUrl[];

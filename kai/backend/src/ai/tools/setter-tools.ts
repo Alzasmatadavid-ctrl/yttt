@@ -145,10 +145,13 @@ export class SetterToolbox {
         const date = typeof input.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : undefined;
         const pod = input.part_of_day;
         const partOfDay = pod === 'morning' || pod === 'afternoon' || pod === 'evening' ? pod : 'any';
-        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2 });
+        // Solo los usa el motor de reglas al mover la llamada (“una hora más tarde”, “un poco antes”).
+        const instant = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v) : undefined);
+        const shift = { after: instant(input.later_than), before: instant(input.earlier_than) };
+        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2, ...shift });
         let note: string | undefined;
         if (offered.length === 0 && date) {
-          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2 }));
+          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2, ...shift }));
           note = 'No hay huecos ese día; estas son las alternativas más cercanas.';
         }
         if (offered.length === 0) return { slots: [], note: 'No hay huecos libres en los próximos días. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios.' };

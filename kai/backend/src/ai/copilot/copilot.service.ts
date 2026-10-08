@@ -27,7 +27,8 @@ import { normalize } from '../../lib/text.js';
 import { audit, logError } from '../../audit/audit.service.js';
 import type { TenantContext } from '../../auth/guards.js';
 import { checkUsageLimit, getLimits, incrementUsage } from '../../plans/plans.service.js';
-import { listLeads, type LeadFilters } from '../../crm/leads.service.js';
+import { getConversation } from '../../crm/conversations.service.js';
+import { getLead, listLeads, type LeadFilters } from '../../crm/leads.service.js';
 import { getAnalytics, getDashboard, periodRange } from '../../analytics/analytics.service.js';
 import { getLLMProvider } from '../providers/index.js';
 import type { ChatBlock, ChatMessage, ToolDefinition, ToolResultBlock } from '../providers/types.js';
@@ -47,6 +48,34 @@ export interface CopilotCard {
 export interface CopilotAnswer {
   text: string;
   data: CopilotCard;
+}
+
+/** Lo que el panel indica que el entrenador tiene abierto detrás (ficha del lead o conversación). */
+export interface CopilotScreenContext {
+  leadId?: string;
+  conversationId?: string;
+}
+
+/** Lead abierto en pantalla, ya comprobado que es de este negocio: es «este lead» en las peticiones. */
+export interface CopilotFocus {
+  leadId: string;
+  name: string;
+}
+
+/**
+ * Resuelve el lead del contexto de pantalla SOLO dentro del negocio activo. Si no existe (borrado mientras el
+ * panel seguía abierto) o es de otro negocio, se ignora: el contexto es una ayuda y no debe bloquear la pregunta.
+ */
+async function resolveFocus(businessId: string, context?: CopilotScreenContext): Promise<CopilotFocus | null> {
+  if (!context?.leadId && !context?.conversationId) return null;
+  try {
+    const leadId = context.conversationId ? (await getConversation(businessId, context.conversationId)).leadId : String(context.leadId);
+    const lead = await getLead(businessId, leadId);
+    return { leadId: lead.id, name: lead.name?.trim() || 'Sin nombre' };
+  } catch (err) {
+    if (err instanceof AppError && err.statusCode === 404) return null;
+    throw err;
+  }
 }
 
 // ───────────── Herramientas (lectura + propuestas) ─────────────
@@ -104,7 +133,8 @@ export const COPILOT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_attention_items',
-    description: 'Qué necesita atención ahora: avisos, leads esperando respuesta humana, leads a punto de perderse y llamadas de hoy.',
+    description:
+      'Qué necesita atención ahora: avisos, leads esperando respuesta humana, leads a punto de perderse y llamadas de hoy. Un aviso con `lead` (p. ej. “KAI necesita tu intervención”) es una persona que necesita al entrenador aunque no salga en waitingForHuman: menciónala por su nombre.',
     inputSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   },
   {
@@ -256,9 +286,10 @@ class CopilotTools {
         const d = await getDashboard(b);
         this.card.metrics = { ...this.card.metrics, activity: d.activity };
         return {
-          alerts: d.attention.alerts.map((x) => ({ title: x.alert.title, body: x.alert.body, lead: x.leadName })),
-          waitingForHuman: d.attention.waiting.map((w) => ({ lead: w.name, score: w.score, lastMessage: w.preview })),
-          atRisk: d.attention.atRisk.map((l) => ({ lead: l.name, score: l.score, status: leadStatusLabel(l.status) })),
+          // `lead` solo si el aviso es de un lead concreto (null = aviso general del negocio).
+          alerts: d.attention.alerts.map((x) => ({ title: x.alert.title, body: x.alert.body, lead: x.alert.leadId ? x.leadName || 'Sin nombre' : null, lead_id: x.alert.leadId ?? null })),
+          waitingForHuman: d.attention.waiting.map((w) => ({ lead: w.name, lead_id: w.leadId, score: w.score, lastMessage: w.preview })),
+          atRisk: d.attention.atRisk.map((l) => ({ lead: l.name, lead_id: l.id, score: l.score, status: leadStatusLabel(l.status) })),
           callsToday: d.callsToday.map((c) => ({ lead: c.leadName, at: DateTime.fromJSDate(c.appointment.startsAt).setZone(this.timezone).toFormat('HH:mm') })),
           activity: d.activity,
         };
@@ -307,10 +338,14 @@ class CopilotTools {
   }
 }
 
-function copilotSystemPrompt(ctx: { businessName: string; timezone: string; userName: string }) {
+function copilotSystemPrompt(ctx: { businessName: string; timezone: string; userName: string; focus?: CopilotFocus | null }) {
   const now = DateTime.now().setZone(ctx.timezone).setLocale('es');
+  // El nombre del lead es un dato, no una instrucción: en una sola línea y acotado.
+  const focus = ctx.focus
+    ? `\nAhora mismo ${ctx.userName} tiene abierta la ficha o la conversación de “${ctx.focus.name.replace(/\s+/g, ' ').slice(0, 80)}” (lead_id: ${ctx.focus.leadId}). Si habla de “este lead”, “él” o “ella”, o pide algo sobre un lead sin decir cuál, se refiere a esa persona: usa ese lead_id.`
+    : '';
   return `Eres KAI Copilot, el asistente del entrenador dentro de KAI (setter IA + CRM + agenda).
-Hablas con ${ctx.userName} sobre su negocio “${ctx.businessName}”. Fecha y hora: ${now.toFormat("cccc d 'de' LLLL yyyy, HH:mm")} (${ctx.timezone}). Hoy es ${now.toISODate()}, mañana es ${now.plus({ days: 1 }).toISODate()}.
+Hablas con ${ctx.userName} sobre su negocio “${ctx.businessName}”. Fecha y hora: ${now.toFormat("cccc d 'de' LLLL yyyy, HH:mm")} (${ctx.timezone}). Hoy es ${now.toISODate()}, mañana es ${now.plus({ days: 1 }).toISODate()}.${focus}
 
 Reglas:
 - Usa SIEMPRE las herramientas para obtener datos reales. Nunca inventes leads, cifras ni citas.
@@ -322,7 +357,12 @@ Reglas:
 
 // ───────────── Copilot con IA ─────────────
 
-async function answerWithLLM(ctx: TenantContext, question: string, history: ChatMessage[], meta: { businessName: string; timezone: string; userName: string }): Promise<CopilotAnswer> {
+async function answerWithLLM(
+  ctx: TenantContext,
+  question: string,
+  history: ChatMessage[],
+  meta: { businessName: string; timezone: string; userName: string; focus: CopilotFocus | null },
+): Promise<CopilotAnswer> {
   const provider = getLLMProvider()!;
   const tools = new CopilotTools(ctx, meta.timezone);
   const messages: ChatMessage[] = [...history, { role: 'user', content: question }];
@@ -390,17 +430,38 @@ export async function findLeadsByName(businessId: string, text: string): Promise
   return matches;
 }
 
-async function answerWithRules(ctx: TenantContext, question: string, timezone: string): Promise<CopilotAnswer> {
+async function answerWithRules(ctx: TenantContext, question: string, timezone: string, focus: CopilotFocus | null = null): Promise<CopilotAnswer> {
   const tools = new CopilotTools(ctx, timezone);
   const n = normalize(question);
   const now = DateTime.now().setZone(timezone);
 
   if (/a quien (deberia|debo|tengo que) (responder|contestar|escribir)|que (hago|reviso) (ahora|primero)|necesita(n)? (atencion|respuesta)|prioridad/.test(n)) {
-    const items = (await tools.run('get_attention_items', {})) as { waitingForHuman: { lead: string }[]; alerts: { title: string; lead: string | null }[]; atRisk: { lead: string }[]; callsToday: unknown[] };
+    const items = (await tools.run('get_attention_items', {})) as {
+      waitingForHuman: { lead: string; lead_id: string }[];
+      alerts: { title: string; lead: string | null; lead_id: string | null }[];
+      atRisk: { lead: string }[];
+      callsToday: unknown[];
+    };
     await tools.run('search_leads', { temperatures: ['caliente', 'muy_cualificado'], statuses: null, sources: null, no_reply_hours: null, created_within_days: null, text: null, sort: 'score', limit: 5 });
+    // Avisos de un lead concreto (p. ej. un escalado en el que KAI ya envió su mensaje): no salen como «esperando
+    // respuesta», pero esa persona también te necesita. Van primero (ya vienen ordenados por gravedad), agrupados por lead.
+    // Se agrupa por lead_id (no por nombre: dos leads pueden llamarse igual).
+    const byLead = new Map<string, { name: string; titles: string[] }>();
+    for (const a of items.alerts) {
+      if (!a.lead || !a.lead_id) continue;
+      const entry = byLead.get(a.lead_id) ?? { name: a.lead, titles: [] };
+      if (!entry.titles.includes(a.title)) entry.titles.push(a.title);
+      byLead.set(a.lead_id, entry);
+    }
+    const needYou = [...byLead.values()].map(({ name, titles }) => `${name} (${titles.join('; ')})`);
+    const waiting = items.waitingForHuman.filter((w) => !byLead.has(w.lead_id)).map((w) => w.lead || 'sin nombre');
+    const general = items.alerts.filter((a) => !a.lead_id);
+    const list = (names: string[]) => (names.length > 5 ? `${names.slice(0, 5).join(', ')} y ${names.length - 5} más` : names.join(', '));
     const parts = [
-      items.waitingForHuman.length ? `Esperan tu respuesta: ${items.waitingForHuman.map((w) => w.lead || 'sin nombre').join(', ')}.` : 'Ningún lead está esperando respuesta humana ahora mismo.',
-      items.alerts.length ? `Tienes ${items.alerts.length} aviso(s) abiertos (el primero: “${items.alerts[0].title}”).` : '',
+      needYou.length ? `Te necesitan: ${list(needYou)}.` : '',
+      waiting.length ? `${needYou.length ? 'También esperan' : 'Esperan'} tu respuesta: ${list(waiting)}.` : '',
+      needYou.length || waiting.length ? '' : 'Ningún lead está esperando respuesta humana ahora mismo.',
+      general.length ? `Tienes ${general.length === 1 ? 'un aviso general' : `${general.length} avisos generales`} en Hoy (${general.length === 1 ? '' : 'el primero: '}“${general[0].title}”).` : '',
       items.atRisk.length ? `A punto de perderse: ${items.atRisk.map((a) => a.lead || 'sin nombre').join(', ')}.` : '',
     ].filter(Boolean);
     return { text: `${parts.join(' ')} Abajo tienes tus leads más calientes ordenados por puntuación.`, data: tools.card };
@@ -473,8 +534,24 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
   }
   if (/(escribe|redacta|prepara|haz).*(seguimiento|mensaje)/.test(n)) {
     const found = await findLeadsByName(ctx.businessId, question);
-    if (found.length === 0) return { text: 'Dime el nombre del lead para el que quieres el seguimiento (o ábrelo desde la bandeja y pídemelo ahí).', data: {} };
-    if (found.length > 1) {
+    // Con un lead abierto detrás del panel: «para este lead», «para él», «escríbele…» o una petición que no nombra
+    // a nadie se refieren a ese lead; y si varios encajan con el nombre y uno es el abierto, es ese.
+    const pointsToFocus = /\b(para|a) (este|esta|ese|esa)\b|\b(para|a|al) (el )?lead\b|\b(para|a) (el|ella)\s*[.,!?]*$|\b(escribe|redacta|prepara|manda|envia)le\b/.test(n);
+    const namesNobody = !/\b(para|a) [a-z]/.test(n);
+    let lead: { id: string; name: string | null } | undefined;
+    if (focus && pointsToFocus) lead = { id: focus.leadId, name: focus.name };
+    else if (found.length === 1) lead = found[0];
+    else if (focus && found.some((l) => l.id === focus.leadId)) lead = { id: focus.leadId, name: focus.name };
+    else if (focus && found.length === 0 && namesNobody) lead = { id: focus.leadId, name: focus.name };
+    if (!lead && found.length === 0) {
+      return {
+        text: focus
+          ? `No encuentro a ningún lead con ese nombre. Si el seguimiento es para ${focus.name}, pídemelo así: «Escribe un seguimiento para este lead».`
+          : 'Dime el nombre del lead para el que quieres el seguimiento (o ábrelo desde la bandeja y pídemelo ahí).',
+        data: {},
+      };
+    }
+    if (!lead) {
       // Varios leads con ese nombre: se muestran para que el entrenador elija, sin preparar nada todavía.
       const shown = found.slice(0, 5);
       const convs = await conversationIdsFor(ctx.businessId, shown.map((l) => l.id));
@@ -483,12 +560,12 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
         data: { leads: shown.map((l) => leadCard(l, convs.get(l.id))) },
       };
     }
-    const lead = found[0];
+    const who = lead.name || 'este lead';
     const r = (await tools.run('draft_follow_up', { lead_id: lead.id })) as { draft?: string; error?: string };
     if (!r.draft) return { text: r.error ?? 'No he podido redactar el seguimiento.', data: tools.card };
-    const proposed = (await tools.run('propose_action', { type: 'send_message', lead_id: lead.id, text: r.draft, status: null, tone: null, automation: null, enabled: null, summary: `Enviar seguimiento a ${lead.name}` })) as { error?: string };
-    if (proposed.error) return { text: `Este es el seguimiento que propongo para ${lead.name}: “${r.draft}”. ${proposed.error}`, data: tools.card };
-    return { text: `Este es el seguimiento que propongo para ${lead.name}. Si te encaja, confírmalo y se envía.`, data: tools.card };
+    const proposed = (await tools.run('propose_action', { type: 'send_message', lead_id: lead.id, text: r.draft, status: null, tone: null, automation: null, enabled: null, summary: `Enviar seguimiento a ${who}` })) as { error?: string };
+    if (proposed.error) return { text: `Este es el seguimiento que propongo para ${who}: “${r.draft}”. ${proposed.error}`, data: tools.card };
+    return { text: `Este es el seguimiento que propongo para ${who}. Si te encaja, confírmalo y se envía.`, data: tools.card };
   }
   if (/metricas|resumen|como vamos|estadisticas|conversion/.test(n)) {
     const m = (await tools.run('get_metrics', { period: /mes|30/.test(n) ? '30d' : '7d' })) as { leads: number; qualified: number; booked: number; clients: number; rates: { conversion: number } };
@@ -502,14 +579,15 @@ async function answerWithRules(ctx: TenantContext, question: string, timezone: s
 
 // ───────────── Entrada pública ─────────────
 
-export async function askCopilot(ctx: TenantContext, question: string, userName: string): Promise<CopilotAnswer & { id: string }> {
+export async function askCopilot(ctx: TenantContext, question: string, userName: string, context?: CopilotScreenContext): Promise<CopilotAnswer & { id: string }> {
   const db = getDb();
   const limits = await getLimits(ctx.businessId);
   if (!limits.copilot) throw limitReached('Tu plan no incluye KAI Copilot.');
   const usage = await checkUsageLimit(ctx.businessId, 'copilot_queries');
   if (!usage.allowed) throw limitReached('Has alcanzado el límite de uso de IA de tu plan este mes.');
   const [biz] = await db.select().from(businesses).where(eq(businesses.id, ctx.businessId)).limit(1);
-  const meta = { businessName: biz?.name ?? '', timezone: biz?.timezone ?? 'Europe/Madrid', userName };
+  const focus = await resolveFocus(ctx.businessId, context);
+  const meta = { businessName: biz?.name ?? '', timezone: biz?.timezone ?? 'Europe/Madrid', userName, focus };
 
   await db.insert(copilotMessages).values({ businessId: ctx.businessId, userId: ctx.userId, role: 'user', content: question.slice(0, 2000) });
   const previous = await db
@@ -526,10 +604,10 @@ export async function askCopilot(ctx: TenantContext, question: string, userName:
 
   let answer: CopilotAnswer;
   try {
-    answer = getLLMProvider() ? await answerWithLLM(ctx, question, history, meta) : await answerWithRules(ctx, question, meta.timezone);
+    answer = getLLMProvider() ? await answerWithLLM(ctx, question, history, meta) : await answerWithRules(ctx, question, meta.timezone, focus);
   } catch (err) {
     await logError('ai.copilot', err, {}, ctx.businessId);
-    answer = await answerWithRules(ctx, question, meta.timezone).catch(() => ({ text: 'Ahora mismo no puedo responder. Inténtalo de nuevo en un momento.', data: {} }));
+    answer = await answerWithRules(ctx, question, meta.timezone, focus).catch(() => ({ text: 'Ahora mismo no puedo responder. Inténtalo de nuevo en un momento.', data: {} }));
   }
   const [saved] = await db
     .insert(copilotMessages)

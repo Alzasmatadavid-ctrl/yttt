@@ -8,8 +8,19 @@ import { cancelPendingAction, confirmPendingAction, listPendingActions } from '.
 export async function copilotRoutes(app: FastifyInstance) {
   app.post('/copilot/ask', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request) => {
     const ctx = await requireTenant(request, 'copilot:use');
-    const body = parse(z.object({ question: z.string().trim().min(1, 'Escribe una pregunta').max(2000) }), request.body);
-    return askCopilot(ctx, body.question, request.authUser?.name ?? 'el entrenador');
+    const body = parse(
+      z.object({
+        question: z.string().trim().min(1, 'Escribe una pregunta').max(2000),
+        // Lead o conversación abiertos detrás del panel («este lead»). Es solo una ayuda: un identificador mal
+        // formado se ignora, y askCopilot comprueba que pertenece al negocio activo.
+        context: z
+          .object({ leadId: z.string().uuid().optional().catch(undefined), conversationId: z.string().uuid().optional().catch(undefined) })
+          .optional()
+          .catch(undefined),
+      }),
+      request.body,
+    );
+    return askCopilot(ctx, body.question, request.authUser?.name ?? 'el entrenador', body.context);
   });
 
   app.get('/copilot/history', async (request) => {

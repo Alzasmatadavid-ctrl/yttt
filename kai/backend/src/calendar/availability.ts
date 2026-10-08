@@ -123,11 +123,14 @@ export function partOfDay(d: Date, tz: string): Exclude<PartOfDay, 'any'> {
 export function pickOfferSlots(
   slots: Slot[],
   tz: string,
-  opts: { date?: string; partOfDay?: PartOfDay; count?: number } = {},
+  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date } = {},
 ): Slot[] {
   const count = Math.min(Math.max(opts.count ?? 2, 1), 5);
   let pool = slots;
   if (opts.date) pool = pool.filter((s) => DateTime.fromJSDate(s.start).setZone(tz).toISODate() === opts.date);
+  // «Una hora más tarde» / «un poco antes» que la llamada que ya tiene: solo horarios posteriores (o anteriores).
+  if (opts.after) pool = pool.filter((s) => s.start.getTime() > opts.after!.getTime());
+  if (opts.before) pool = pool.filter((s) => s.start.getTime() < opts.before!.getTime());
   if (opts.partOfDay && opts.partOfDay !== 'any') {
     const filtered = pool.filter((s) => partOfDay(s.start, tz) === opts.partOfDay);
     if (filtered.length) pool = filtered;

@@ -12,6 +12,7 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { closeDatabase, getDb, initDatabase } from './client.js';
+import { localDbInUseBy, localDbInUseMessage } from './local-lock.js';
 import { bootstrapData } from './bootstrap.js';
 import {
   aiSettings,
@@ -518,6 +519,13 @@ async function removeExistingDemo(): Promise<boolean> {
 }
 
 async function seed() {
+  // Con KAI arrancado, la base local está en uso (ver local-lock.ts): la demo creada aquí se perdería.
+  const lock = localDbInUseBy();
+  if (lock) {
+    console.error(localDbInUseMessage(lock));
+    process.exitCode = 1;
+    return;
+  }
   const problem = seedEnvironmentProblem({
     production: isProduction() || isRemoteDatabaseUrl(env.DATABASE_URL),
     force,

@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { conversations, leads, messages } from '../database/schema.js';
+import { alerts, conversations, leads, messages } from '../database/schema.js';
 import type { TemplateRef } from '../lib/domain.js';
 import { badRequest } from '../lib/errors.js';
 import { firstName } from '../lib/text.js';
@@ -168,7 +168,8 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
 /**
  * Guarda un mensaje ya enviado. Si el eco de Instagram llegó antes y lo registró como escrito por el
  * entrenador desde la app (mismo id de Meta), se corrige esa fila en vez de dar el envío por fallido,
- * y si lo envió KAI se deshace la pausa que el eco puso en la conversación.
+ * y la conversación vuelve a quedar como estaba antes del eco: ni se queda KAI en pausa por su propio
+ * mensaje, ni se reactiva en una conversación que llevaba el entrenador, ni se da por atendido un escalado.
  */
 async function recordSentMessage(input: Parameters<typeof insertMessage>[0]): Promise<Message> {
   try {
@@ -187,8 +188,31 @@ async function recordSentMessage(input: Parameters<typeof insertMessage>[0]): Pr
       .set({ senderType: input.senderType, senderUserId: input.senderUserId ?? null, content: input.content, contentType: input.contentType ?? 'text', metadata: input.metadata ?? {} })
       .where(eq(messages.id, echo.id))
       .returning();
-    if (input.senderType === 'kai')
+    const before = echo.metadata.before as { aiEnabled: boolean; handoffActive: boolean; handoffReason: string | null } | undefined;
+    const wasEcho = echo.senderType === 'human' && echo.metadata.via === 'instagram_app';
+    if (wasEcho && before) {
+      await db
+        .update(conversations)
+        .set({ aiEnabled: before.aiEnabled, handoffActive: before.handoffActive, handoffReason: before.handoffReason, updatedAt: new Date() })
+        .where(eq(conversations.id, input.conversationId));
+      // El eco cerró el aviso del escalado al darlo por atendido: se vuelve a abrir.
+      if (before.handoffActive)
+        await db
+          .update(alerts)
+          .set({ status: 'open', resolvedAt: null })
+          .where(
+            and(
+              eq(alerts.businessId, input.businessId),
+              eq(alerts.leadId, input.leadId),
+              eq(alerts.type, 'handoff'),
+              eq(alerts.status, 'resolved'),
+              gte(alerts.resolvedAt, echo.createdAt),
+            ),
+          );
+    } else if (wasEcho && input.senderType === 'kai') {
+      // Eco guardado sin el estado previo (versión anterior): se deshace al menos la pausa que puso.
       await db.update(conversations).set({ aiEnabled: true, updatedAt: new Date() }).where(eq(conversations.id, input.conversationId));
+    }
     return fixed;
   }
 }

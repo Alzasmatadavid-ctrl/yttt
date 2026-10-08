@@ -89,15 +89,55 @@ export async function findExistingLead(businessId: string, input: Partial<Create
   return row ?? null;
 }
 
+export interface CreateLeadOptions {
+  /**
+   * Datos de contacto que nadie ha verificado (formularios, Lead Ads, webhooks externos): cualquiera puede escribir
+   * el email o el teléfono de otra persona. Si el lead ya existe, NO se le añaden email, teléfono, WhatsApp ni
+   * Instagram (si no, otro podría quedarse con sus mensajes y con lo que KAI sabe de él); se avisa al entrenador.
+   * Los mensajes reales de WhatsApp o Instagram (webhook firmado por Meta) sí completan la ficha.
+   */
+  unverifiedContact?: boolean;
+}
+
+const phoneDigits = (p: string) => p.replace(/\D/g, '');
+/** Mismo número, con o sin prefijo de país (el mismo criterio que `findExistingLead`). */
+const samePhone = (a: string, b: string) => phoneDigits(a).slice(-9) === phoneDigits(b).slice(-9);
+
+/** Datos de contacto sin verificar que no coinciden con la ficha: no se guardan y se avisa al entrenador. */
+async function reportUnverifiedContact(businessId: string, existing: Lead, input: CreateLeadInput) {
+  const differs: string[] = [];
+  const email = input.email?.trim().toLowerCase();
+  if (email && email !== existing.email) differs.push(`email ${email}`);
+  const phone = normalizePhone(input.phone);
+  if (phone && !(existing.phone && samePhone(existing.phone, phone))) differs.push(`teléfono ${phone}`);
+  const instagram = input.instagramUsername?.trim().replace(/^@/, '');
+  if (instagram && instagram.toLowerCase() !== existing.instagramUsername?.toLowerCase()) differs.push(`Instagram @${instagram}`);
+  if (differs.length === 0) return;
+  await createAlert({
+    businessId,
+    type: 'delivery_blocked',
+    title: 'Datos de contacto sin confirmar',
+    body:
+      `Ha llegado un formulario con datos de ${existing.name || 'un lead que ya tienes'} y otros datos de contacto (${differs.join(', ')}). ` +
+      'Por seguridad no se han añadido a su ficha y KAI no escribirá a esos datos: cualquiera puede poner en un formulario el email o el teléfono de otra persona. ' +
+      'Si confirmas que son suyos, añádelos tú desde su ficha.',
+    leadId: existing.id,
+  });
+}
+
 /** Completa en un lead existente los datos que le falten, sin sobrescribir los que ya tiene. */
-async function completeExistingLead(businessId: string, existing: Lead, input: CreateLeadInput): Promise<Lead> {
+async function completeExistingLead(businessId: string, existing: Lead, input: CreateLeadInput, opts: CreateLeadOptions = {}): Promise<Lead> {
   const patch: Partial<Lead> = {};
   if (!existing.name && input.name) patch.name = input.name;
-  if (!existing.email && input.email) patch.email = input.email.trim().toLowerCase();
-  if (!existing.phone && input.phone) patch.phone = normalizePhone(input.phone);
-  if (!existing.whatsappId && input.whatsappId) patch.whatsappId = input.whatsappId;
-  if (!existing.instagramUserId && input.instagramUserId) patch.instagramUserId = input.instagramUserId;
-  if (!existing.instagramUsername && input.instagramUsername) patch.instagramUsername = input.instagramUsername;
+  if (opts.unverifiedContact) {
+    await reportUnverifiedContact(businessId, existing, input);
+  } else {
+    if (!existing.email && input.email) patch.email = input.email.trim().toLowerCase();
+    if (!existing.phone && input.phone) patch.phone = normalizePhone(input.phone);
+    if (!existing.whatsappId && input.whatsappId) patch.whatsappId = input.whatsappId;
+    if (!existing.instagramUserId && input.instagramUserId) patch.instagramUserId = input.instagramUserId;
+    if (!existing.instagramUsername && input.instagramUsername) patch.instagramUsername = input.instagramUsername;
+  }
   if (!existing.avatarUrl && input.avatarUrl) patch.avatarUrl = input.avatarUrl;
   if (Object.keys(patch).length === 0) return existing;
   try {
@@ -122,9 +162,14 @@ export function isUniqueViolation(err: unknown): boolean {
   return false;
 }
 
-export async function createLead(businessId: string, input: CreateLeadInput, actor: Actor): Promise<{ lead: Lead; created: boolean }> {
+export async function createLead(
+  businessId: string,
+  input: CreateLeadInput,
+  actor: Actor,
+  opts: CreateLeadOptions = {},
+): Promise<{ lead: Lead; created: boolean }> {
   const existing = await findExistingLead(businessId, input);
-  if (existing) return { lead: await completeExistingLead(businessId, existing, input), created: false };
+  if (existing) return { lead: await completeExistingLead(businessId, existing, input, opts), created: false };
 
   const usage = await checkUsageLimit(businessId, 'leads');
   const qualification: LeadQualification = {};
@@ -156,7 +201,7 @@ export async function createLead(businessId: string, input: CreateLeadInput, act
   if (!lead) {
     const winner = await findExistingLead(businessId, input);
     if (!winner) throw new Error('No se pudo crear ni encontrar el lead tras un conflicto de duplicados.');
-    return { lead: await completeExistingLead(businessId, winner, input), created: false };
+    return { lead: await completeExistingLead(businessId, winner, input, opts), created: false };
   }
   if (!input.isTest) await incrementUsage(businessId, 'leads');
   await recordLeadEvent(businessId, lead.id, 'created', actor, { source: input.source, sourceDetail: input.sourceDetail });

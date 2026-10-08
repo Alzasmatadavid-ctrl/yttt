@@ -51,13 +51,13 @@ Instrucciones:
 - signals: urgencia (high si hay fecha/evento cercano o quiere empezar ya), compromiso, capacidad de inversión (budget), encaje (fit = no solo si claramente no encaja según los criterios), sentimiento e intención de compra. null si no hay información.
 - memories: hechos personales útiles para más adelante (eventos con fecha, familia, horarios, lesiones, preferencias). Frases cortas en tercera persona (“Tiene una boda en septiembre”). No repitas lo ya sabido.
 - flags.human_request: pide hablar con una persona o con el entrenador (no cuenta “lo tengo que hablar con mi pareja”). flags.asks_if_bot: pregunta si habla con un bot/IA (“¡eres una máquina!” como elogio no cuenta).
-- flags.declines_call: rechaza la llamada (“prefiero seguir por aquí”); “prefiero no decirlo” no es rechazar la llamada.
+- flags.declines_call: rechaza la llamada (“prefiero seguir por aquí”, “no quiero hacer la llamada”, “paso de llamadas”); “prefiero no decirlo” no es rechazar la llamada. Si la rechaza, wants_call es false aunque mencione la llamada.
 - flags.medical_issue: menciona una enfermedad, lesión, medicación, embarazo, trastorno alimentario o pide consejo médico (“operación bikini” no es un tema médico).
 - flags.angry: está molesto o enfadado CON EL NEGOCIO o insulta (no cuenta “me siento pesada” ni una queja sobre sí mismo).
 - flags.opt_out: SOLO si pide de forma explícita que no le escriban más o darse de baja (“no me escribas más”, “dame de baja”). No es baja: “no me escribiste ayer”, “no me mandes audios”, “si no me escribes no me entero”, “escríbeme más tarde”. Una baja es irreversible: ante la duda, false.
-- flags.asks_price: pregunta por precio. flags.wants_call: acepta o pide la llamada, o propone un día/hora.
+- flags.asks_price: pregunta por precio (“¿cuánto costaría?”, “¿cuánto me sale?”, “¿qué vale?”). flags.wants_call: acepta o pide la llamada, o propone un día/hora.
 - flags.complex_negotiation: pide descuentos, condiciones especiales o negocia. flags.out_of_scope: temas ajenos (facturas, colaboraciones, empleo…).
-- flags.technical_issue: problema técnico (un enlace que no funciona, etc.). flags.wants_reschedule / wants_cancel: quiere mover la cita (o no puede asistir: “al final no puedo”, “me ha surgido algo”) / pide cancelarla.
+- flags.technical_issue: problema técnico (un enlace que no funciona, etc.). flags.wants_reschedule / wants_cancel: quiere mover la cita (o no puede asistir: “al final no puedo”, “me ha surgido algo”; o pide otro día u hora para la llamada ya agendada: “mejor el miércoles”, “¿puede ser una hora más tarde?”) / pide cancelarla. Si el negocio le acaba de preguntar si cancela la llamada o la mueve, “sí”, “cancélala” o “cancelar” es wants_cancel y “muévela”, “a otro día” o un día concreto es wants_reschedule.
 - flags.asks_question: hace una pregunta que requiere respuesta.
 - objection_key: la clave de la objeción SOLO si pone un freno a avanzar (a la llamada, al precio o al servicio). Si simplemente describe su situación al responder una pregunta (p. ej. “no tengo tiempo” como causa de su problema), NO es objeción: es cualificación. Si no hay objeción, null.
 - preferred_date: si indica un día (“mañana”, “el jueves”), conviértelo a YYYY-MM-DD respecto a la fecha actual.

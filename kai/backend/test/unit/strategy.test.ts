@@ -10,6 +10,7 @@ import {
   makeLeadContext,
   makeRules,
   makeSettings,
+  NOW,
   offeredAt,
   qualificationOf,
 } from './factories.js';
@@ -24,6 +25,8 @@ function input(overrides: Partial<StrategyInput> & { lead?: Parameters<typeof ma
     state: {},
     analysis: makeAnalysis(),
     kaiHasSpoken: true,
+    // Reloj fijo (el de las factorías): los horarios de las ofertas de prueba no caducan con la fecha real.
+    now: NOW,
     ...rest,
   };
 }
@@ -34,7 +37,7 @@ const decide = (overrides: Parameters<typeof input>[0] = {}) => decideDirective(
 function recentOfferState(hoursAgo = 1): ConversationState {
   const A = offeredAt('2026-10-06T18:00', 'Europe/Madrid', 'mañana a las 18:00');
   const B = offeredAt('2026-10-06T19:30', 'Europe/Madrid', 'mañana a las 19:30');
-  return { offeredSlots: [A, B], lastOfferIds: [A.id, B.id], offeredAt: new Date(Date.now() - hoursAgo * 3600_000).toISOString() };
+  return { offeredSlots: [A, B], lastOfferIds: [A.id, B.id], offeredAt: new Date(NOW.getTime() - hoursAgo * 3600_000).toISOString() };
 }
 
 describe('nextQualificationRule', () => {
@@ -224,7 +227,7 @@ describe('decideDirective', () => {
       expect(d.needsSlots).toBeUndefined();
       // Etiquetas recalculadas en el momento de responder (la oferta pudo hacerse ayer).
       const [A, B] = recentOfferState().offeredSlots!;
-      expect(d.instruction).toContain(`“${humanSlotLabel(A.start, 'Europe/Madrid')}” o “${humanSlotLabel(B.start, 'Europe/Madrid')}”`);
+      expect(d.instruction).toContain(`“${humanSlotLabel(A.start, 'Europe/Madrid', NOW)}” o “${humanSlotLabel(B.start, 'Europe/Madrid', NOW)}”`);
     });
 
     it('si pide otro día, vuelve a consultar la agenda', () => {

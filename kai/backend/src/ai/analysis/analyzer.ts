@@ -201,23 +201,49 @@ const RX = {
   // Enfado: insultos o quejas claras dirigidas al negocio (no “me siento pesada” ni “joder, qué difícil”).
   angry:
     /estafa|estafador|\btimo\b|timador|me (teneis|tienes|estais) (harto|harta|frito|frita)|\b(eres|sois|estas|estais|seas|seais|que|ser|vaya|menudo|menuda|menudos|menudas) (un |unos |una |unas |muy |tan |mas )?pesad[oa]s?\b(?! me (siento|noto|veo|encuentro))|\bdeja(d)? de (molestar|dar la lata)|\bspam\b|denunci|que os jodan|a la mierda|cabron|gilipollas|idiota|imbecil|subnormal|sinverguenza|ladrones|que asco de (servicio|empresa|atencion|trato)|vergonzos[oa]|una verguenza|me estais tomando el pelo/,
-  price: /cuanto (cuesta|vale|es|cobras|cobrais|sale)|precio|tarifa|que coste|coste|cuanto seria/,
+  // Pregunta el precio (“¿cuánto costaría?”, “¿cuánto me sale?”, “¿qué vale?”); no “lo que cuesta es levantarme”,
+  // “creo que vale la pena”, “¿para qué vale la llamada?” ni “¿cuánto estás dispuesto…?”.
+  price:
+    /\bcuanto (?:me |te |nos |os |le |les )?(?:cuesta|cuestan|costaria|costarian|costaba|costaban|vale|valen|valdria|valia|es|son|era|eran|seria|serian|cobras|cobrais|cobra|cobran|cobrarias|sale|salen|saldria|salia)\b|(?<!\bpara )\bque (?:vale|valdria|cuesta|costaria)\b(?! la pena)[^.!?\n]*\?|precio|tarifa|coste|\b(?:cual es|de cuanto es|cuanto es) la (?:cuota|mensualidad)\b/,
   callYes: /(llamada|llamar|llamame|hablamos por telefono|videollamada|reunion|agendar|agenda|cita)\b/,
   /** Pide la llamada de forma explícita (tras haberla rechazado, solo esto vuelve a abrir la agenda). */
   callRequest:
     /\b(quiero|prefiero|me gustaria|podemos|podriamos|vamos a|mejor|al final) (si )?(hacer |tener |agendar |reservar )?(la |una )?(llamada|videollamada)\b|\b(hagamos|hacemos|agendamos|reservamos|agenda|reserva) (la |una )?(llamada|videollamada|cita)\b|\bllamame\b|\bagendamos\b|\bme apunto a la (llamada|videollamada)\b/,
   affirm: /^\s*(si|sip|vale|ok|okey|okay|perfecto|genial|claro|me encaja|me parece bien|venga|dale|por supuesto|de acuerdo|guay|bien|me vale)\b/,
-  // Rechazar la llamada (no “prefiero no decirlo” ni “ahora no puedo hablar”).
+  // Rechazar la llamada (“no quiero hacer la llamada”, “paso de llamadas”, “prefiero no hacer llamadas”), pero no
+  // “prefiero no decirlo” ni “ahora no puedo hablar”.
   declineCall:
-    /\bno (me interesa|quiero|necesito|hace falta|me hace falta) (la |una |ninguna )?(llamada|videollamada|reunion)\b|\bprefiero (no (hacer|tener) (la |una )?(llamada|videollamada)|no hablar por telefono|por escrito|seguir por (aqui|escrito|mensaje|mensajes|whatsapp|chat)|hablarlo por aqui)\b|\bnada de llamadas\b|\bsin llamadas?\b|\bno me gustan las llamadas\b/,
+    /\bno (?:me interesa|quiero|necesito|me apetece|hace falta|me hace falta|me hacen falta|veo necesaria)(?: hacer| tener| agendar| reservar)? (?:la |una |ninguna |las |mas )?(?:llamadas?|videollamadas?|reunion(?:es)?)\b|\bprefiero (?:no (?:hacer|tener) (?:la |una |ninguna |las )?(?:llamadas?|videollamadas?)|no hablar por telefono|por escrito|por aqui|seguir por (?:aqui|escrito|mensaje|mensajes|whatsapp|chat)|hablarlo por aqui)\b|\bpaso de (?:la |las |hacer (?:la |una )?)?(?:llamadas?|videollamadas?)\b|\bnada de (?:llamadas|videollamadas)\b|\bsin llamadas?\b|\bno me gustan(?: nada| mucho)? las (?:llamadas|videollamadas)\b|\bno me gusta(?: nada| mucho)? (?:hablar por telefono|hacer llamadas)\b/,
   negotiation: /descuento|rebaja|mas barato|pagar a plazos|financiar|precio especial|me haces (un )?precio|me lo dejas en|regatear/,
   outOfScope: /factura|devolucion|reembolso|colabora(cion|r)|patrocin|trabajar con vosotros|empleo|curriculum|publicidad en tu/,
   technical: /no (me )?funciona el (enlace|link)|no puedo (entrar|abrir|acceder)|no carga|link roto|me da error/,
   reschedule:
-    /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar|cambiamos|movemos) (la |el |mi )?(llamada|cita|hora|dia|videollamada)|\b(pasar|pasamos|pasame) (la |mi )?(llamada|cita|videollamada)\b|\bno (voy a )?(puedo|podre|poder) (ir|asistir|conectarme|estar|llegar|a esa hora|ese dia|esa hora)|\bal final no (puedo|podre|voy a poder)\b|\bno voy a (poder|llegar)\b|\bno me va a dar tiempo\b|\bme (ha surgido|surgio|ha salido) (algo|un imprevisto|un problema)\b|\bimprevisto\b|\botro (dia|horario|hueco) para la (llamada|cita)\b|\bno me (viene|va|cuadra|encaja|pilla) bien\b|^\s*(?:(?:pues|uf|vaya|ay|lo siento|perdona)[,.!]?\s+)?(?:no[,.!]?\s+)*no puedo\s*[.!,]*\s*(lo siento|perdona|sorry)?[.!]*\s*$|\b(mejor|prefiero|preferiria|podemos|podriamos|puede ser|seria|hay) (en )?(otro|otra) (dia|hora|horario|momento)\b|\b(otro|otra) (dia|hora|horario|momento) (mejor|si puede ser|porfa|por favor)\b/,
-  cancel: /\b(cancelar|cancela|cancelad|cancelame|anular|anula|anulad|anulame) (la |el |mi )?(llamada|cita|videollamada|reunion)\b|\bya no (quiero|necesito) (la )?(llamada|cita|videollamada)\b/,
+    /(cambiar|mover|aplazar|reprogramar|retrasar|adelantar|cambiamos|movemos) (la |el |mi )?(llamada|cita|hora|dia|videollamada)|\b(pasar|pasamos|pasame) (la |mi )?(llamada|cita|videollamada)\b|\bno (voy a )?(puedo|podre|poder) (ir|asistir|conectarme|estar|llegar|a esa hora|ese dia|esa hora)|\bal final no (puedo|podre|voy a poder)\b|\bno voy a (poder|llegar)\b|\bno me va a dar tiempo\b|\bme (ha surgido|surgio|ha salido) (algo|un imprevisto|un problema)\b|\bimprevisto\b|\botro (dia|horario|hueco) para la (llamada|cita)\b|\bno me (viene|va|cuadra|encaja|pilla) bien\b|^\s*(?:(?:pues|uf|vaya|ay|lo siento|perdona)[,.!]?\s+)?(?:no[,.!]?\s+)*no puedo\s*[.!,]*\s*(lo siento|perdona|sorry)?[.!]*\s*$|\b(mejor|prefiero|preferiria|podemos|podriamos|puede ser|seria|hay) (en )?(otro|otra) (dia|hora|horario|momento)\b|\b(otro|otra) (dia|hora|horario|momento) (mejor|si puede ser|porfa|por favor)\b|(?<!\bno (?:quiero |hace falta |hay que |es necesario |vayas a )?)\b(?:muevela|muevelo|moverla|moverlo|cambiala|cambialo|cambiarla|cambiarlo|pasala|pasarla|retrasala|retrasarla|adelantala|adelantarla|aplazala|aplazarla|reprogramala|reprogramarla)\b|\b(?:a|para) otro dia\b|\b(?:una|media) hora (?:mas tarde|mas pronto|antes|despues)\b|\b(?:puede|podria|podemos|podriamos) (?:ser|hacerla|dejarla|ponerla|pasarla) (?:un poco |algo )?(?:mas tarde|mas pronto|antes|despues)\b/,
+  // Cancelar la llamada, también con pronombre (“cancélala”, “quiero anularla”) o con la palabra sola (“Cancelar”),
+  // pero no “no la canceles” ni “no quiero cancelarla”.
+  cancel:
+    /\b(cancelar|cancela|cancelad|cancelame|anular|anula|anulad|anulame) (la |el |mi )?(llamada|cita|videollamada|reunion)\b|\bya no (quiero|necesito) (la )?(llamada|cita|videollamada)\b|(?<!\bno (?:quiero |hace falta |hay que |es necesario |vayas a )?)\b(?:cancelala|cancelalo|cancelarla|cancelarlo|anulala|anulalo|anularla|anularlo)\b|^\s*(?:(?:si|vale|ok|pues|mejor)[,.!]?\s+)?(?:cancelar|cancela|cancelad|anular|anula)(?:,? (?:por favor|porfa))?\s*[.!]*\s*$/,
   question: /\?|^(como|cuando|cuanto|que|donde|por que|quien|cual)\b/,
 };
+
+/**
+ * La palabra “llamada” va negada en la misma frase (“no tengo tiempo para una llamada”, “no sé si la llamada…”):
+ * mencionarla así no es aceptarla.
+ */
+const RX_CALL_NEGATED = /\b(?:no|ni|nunca|tampoco)\b(?:\s+[^\s.!?,;]+){0,5}?\s+(?:llamadas?|llamar|videollamadas?|reunion(?:es)?)\b/;
+/** Negaciones que en realidad son un sí (“no hay problema con la llamada”, “¿por qué no hacemos la llamada?”). */
+const RX_NOT_A_NEGATION = /\bno (?:hay|tengo) (?:ningun )?problema\b|\bno pasa nada\b|\bno me importa\b|\bpor que no\b/g;
+/** Pide otro día u hora (“mejor el miércoles”, “el jueves a las 18:00 me iría mejor”, “¿puede ser a las 19:00?”). */
+const RX_SCHEDULE_PREFERENCE =
+  /\b(?:mejor|prefiero|preferiria|puede ser|podria ser|podemos|podriamos|si puede ser|seria posible|en vez de|en lugar de|me (?:iria|vendria|va|viene|encaja|cuadra|pilla) mejor)\b/;
+/** El mensaje es solo un día u hora (“El viernes”, “Mañana por la tarde”, “El jueves a las 18:00”). */
+const RX_ONLY_DAY =
+  /^\s*(?:(?:pues|vale|ok|y|entonces|venga)[,.]?\s+)?(?:el |este |para el |para )?(?:hoy|manana|pasado manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)(?:\s+(?:por|de) la (?:manana|tarde|noche))?(?:\s+a las \d{1,2}(?:[:.]\d{2})?)?\s*[.!?]*\s*$/;
+const RX_EXPLICIT_TIME = /\ba las \d{1,2}(?:[:.]\d{2})?\b|\b\d{1,2}:\d{2}\b/;
+/** Habla de su entrenamiento o su alimentación, no de la llamada (“me va mejor entrenar por la mañana”). */
+const RX_NOT_ABOUT_CALL = /\b(?:entrenar|entreno|entrenamientos?|comer|cenar|desayunar|correr|gimnasio|gym|ejercicio|deporte|dieta)\b/;
+/** “Sí”, “vale, por favor”: respuesta afirmativa sin nada más. */
+const RX_YES_ONLY = /^\s*(?:si|sip|vale|ok|okey|venga|claro|de acuerdo)\b(?:[\s,.!]*(?:si|por favor|porfa|gracias|claro|venga|vale))*[\s.!]*$/;
 
 const QUAL_PATTERNS: Record<string, RegExp> = {
   goal: /(perder|bajar|quitar(me)?|eliminar)\s+(?:(?:unos|unas|algo de|un poco de|al menos|por lo menos|mas de|como|entre|esos|estos|los|mis|la|el|mi)\s+)?(\d+(?:[.,]\d+)?(?:\s*(?:-|a|o)\s*\d+)?\s*(kg|kilos)|peso|grasa|barriga|tripa|michelines)|adelgazar|ganar (musculo|masa|fuerza)|definir|tonificar|ponerme en forma|estar en forma|recomposicion|mejorar (mi )?(fisico|salud|forma)|verme mejor/,
@@ -443,11 +469,23 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   if (BUDGET_NO.test(n)) signals.budget = 'no';
   else if (BUDGET_YES.test(n) || (lastAsked === 'budget' && RX.affirm.test(n))) signals.budget = 'yes';
   else if (BUDGET_MAYBE.test(n)) signals.budget = 'maybe';
+  let fitFromGoal = false;
   if (UNDERAGE.test(n)) signals.fit = 'no';
-  else if (qualification.goal || input.lead.qualification.goal) signals.fit = input.lead.signals.fit === 'no' ? 'no' : 'yes';
+  else if (qualification.goal || input.lead.qualification.goal) {
+    signals.fit = input.lead.signals.fit === 'no' ? 'no' : 'yes';
+    fitFromGoal = true;
+  }
   for (const key of ['urgency', 'commitment', 'budget', 'fit'] as const) {
     const lvl = signals[key];
     if (!lvl || !enabledKeys.has(key)) continue;
+    if (key === 'fit' && fitFromGoal) {
+      // Encaje deducido del objetivo, no de este mensaje: la prueba es el objetivo. Si no, la ficha mostraría como
+      // «Encaje» cualquier frase posterior (“¿qué incluye el programa?”), y se reescribiría en cada mensaje.
+      if (input.lead.qualification.fit?.level === lvl) continue;
+      const goal = qualification.goal?.value ?? input.lead.qualification.goal?.value ?? raw.trim();
+      if (!qualification.fit) qualification.fit = { value: goal.slice(0, 200), confidence: 0.6, updatedAt: nowIso, level: lvl };
+      continue;
+    }
     if (!qualification[key]) qualification[key] = { value: raw.trim().slice(0, 200), confidence: 0.6, updatedAt: nowIso, level: lvl };
     else qualification[key].level = lvl;
   }
@@ -489,17 +527,31 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     /^\s*no\b/.test(n) &&
     wordCount <= 8 &&
     !/\bno (hay problema|pasa nada|te preocupes|problem)|todo (bien|perfecto|ok)|perfecto|genial|alli estare|ahi estare|cuenta conmigo|nos vemos/.test(n);
+  const preferredDate = resolvePreferredDate(n, input.now, tz);
+  const preferredPartOfDay = resolvePartOfDay(n);
+  // Con la llamada agendada, pedir otro día u hora con naturalidad (“mejor el miércoles”, “el jueves a las 18:00 me
+  // iría mejor”, o solo “el viernes”) es moverla. Solo cuenta en ese contexto (la estrategia lo usa si hay cita).
+  const asksOtherTime =
+    Boolean(preferredDate || preferredPartOfDay || RX_EXPLICIT_TIME.test(n)) && (RX_SCHEDULE_PREFERENCE.test(n) || RX_ONLY_DAY.test(n)) && !RX_NOT_ABOUT_CALL.test(n);
+  const wantsReschedule = RX.reschedule.test(n) || noToReminder || asksOtherTime;
+  // Respuesta a «¿quieres que cancele la llamada o prefieres que la movamos?»: un “sí” o volver a decir que no la
+  // quiere es cancelarla (pedir moverla ya lo detecta wantsReschedule).
+  const askedCancelOrMove = lastOutbound?.metadata?.directive === 'confirm_cancel';
+  const confirmsCancel = askedCancelOrMove && !wantsReschedule && (RX_YES_ONLY.test(n) || RX.declineCall.test(n));
+  const wantsCancel = RX.cancel.test(n) || confirmsCancel;
   // Pedir cancelar la llamada (“ya no quiero la cita”) también es no querer la llamada, nunca pedirla.
-  const declinesCall = RX.declineCall.test(n) || RX.cancel.test(n);
+  const declinesCall = RX.declineCall.test(n) || wantsCancel;
   // Si el lead ya rechazó la llamada, un “vale” o un “me interesa” no la reabren: solo una petición explícita.
   const callDeclined = Boolean((input.state as SetterState).callDeclinedAt);
   const callWasProposed = !callDeclined && (Boolean(input.state.callProposedAt) || /llamada/.test(normalize(lastOutbound?.content ?? '')));
   const positive = RX.affirm.test(n) || /quiero empezar|cuanto antes|adelante|vamos alla|me interesa|claro que si|me apunto|hagamosla|cuando quieras|me parece genial|me parece perfecto/.test(n);
+  // Mencionar la llamada cuenta como un sí, salvo que vaya negada (“no tengo tiempo para una llamada”).
+  const mentionsCall = RX.callYes.test(n) && !RX_CALL_NEGATED.test(n.replace(RX_NOT_A_NEGATION, ' '));
   const wantsCall =
     !declinesCall &&
     (callDeclined
       ? RX.callRequest.test(n)
-      : RX.callYes.test(n) || (callWasProposed && positive) || Boolean(resolvePreferredDate(n, input.now, tz) && callWasProposed));
+      : RX.callRequest.test(n) || mentionsCall || (callWasProposed && positive) || Boolean(preferredDate && callWasProposed));
 
   // Una objeción es un freno a AVANZAR (llamada, precio, servicio). Si el lead está describiendo su
   // situación (responde a una pregunta de cualificación), “no tengo tiempo” es información, no objeción.
@@ -534,15 +586,15 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
       complexNegotiation: RX.negotiation.test(n),
       outOfScope: RX.outOfScope.test(n),
       technicalIssue: RX.technical.test(n),
-      wantsReschedule: RX.reschedule.test(n) || noToReminder,
-      wantsCancel: RX.cancel.test(n),
+      wantsReschedule,
+      wantsCancel,
       asksQuestion: RX.question.test(n),
     },
     objectionKey,
     leadName: nameMatch?.[1] ?? null,
     goalSummary: qualification.goal?.value?.slice(0, 160) ?? null,
-    preferredDate: resolvePreferredDate(n, input.now, tz),
-    preferredPartOfDay: resolvePartOfDay(n),
+    preferredDate,
+    preferredPartOfDay,
     selectedSlotId: matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage }),
     summary: 'Análisis heurístico (modo simulación).',
     engine: 'heuristic',

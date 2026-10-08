@@ -162,13 +162,16 @@ export async function adminRoutes(app: FastifyInstance) {
       }),
       request.body,
     );
+    const [prev] = await getDb().select({ status: businesses.status }).from(businesses).where(eq(businesses.id, id)).limit(1);
+    if (!prev) throw notFound();
     const [row] = await getDb().update(businesses).set({ ...body, updatedAt: new Date() }).where(eq(businesses.id, id)).returning({ id: businesses.id });
     if (!row) throw notFound();
     // Cuenta desactivada: se cancelan ya sus trabajos y seguimientos pendientes (sin esperar a que venzan),
     // para que no salga una avalancha de mensajes antiguos si se reactiva.
     if (body.status === 'suspended') await stopBusinessAutomations(id, 'Cuenta desactivada');
-    // Reactivada: las llamadas ya reservadas recuperan sus recordatorios y el aviso de resultado.
-    if (body.status === 'active') await resumeAppointmentJobs(id);
+    // Reactivada (solo si NO estaba ya activa): las llamadas ya reservadas recuperan sus recordatorios y el aviso
+    // de resultado. Sobre una cuenta activa no hay nada que recuperar (y se repetirían avisos ya atendidos).
+    if (body.status === 'active' && prev.status !== 'active') await resumeAppointmentJobs(id);
     await audit({ businessId: id, actorType: 'admin', actorUserId: admin.id, action: 'admin.business_updated', entityType: 'business', entityId: id, metadata: body });
     return { ok: true };
   });

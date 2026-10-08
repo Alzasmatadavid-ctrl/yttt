@@ -7,7 +7,8 @@ import { dateTime } from './format';
  */
 export function nextActionFor(
   lead: { status: LeadStatus; nextAction?: string | null; optedOut?: boolean },
-  conv?: { handoffActive?: boolean; aiEnabled?: boolean } | null,
+  /** needsHumanReply: el último mensaje del lead está sin contestar y KAI no lo va a contestar (como en «Pendientes»). */
+  conv?: { handoffActive?: boolean; aiEnabled?: boolean; needsHumanReply?: boolean } | null,
   upcoming?: { startsAt: string } | null,
   timeZone?: string,
   /** false = el piloto automático de KAI está en pausa: no va a contestar a nadie. */
@@ -15,6 +16,10 @@ export function nextActionFor(
 ): string {
   if (lead.optedOut) return 'No contactar (pidió la baja)';
   if (conv?.handoffActive) return 'Responder tú (KAI te lo ha pasado)';
+  // KAI está activo pero no tiene ninguna respuesta en marcha para ese mensaje (p. ej. llegó con KAI en pausa):
+  // no se puede decir que «KAI responderá en breve».
+  if (conv?.needsHumanReply && conv.aiEnabled !== false && autopilotOn && lead.status !== 'client')
+    return 'Mensaje sin contestar: respóndele tú o deja que lo haga KAI';
   if (lead.nextAction) return lead.nextAction;
   if (upcoming) return `Llamada ${dateTime(upcoming.startsAt, timeZone)}`;
   if (conv && !conv.aiEnabled) return 'Conversación en tus manos';

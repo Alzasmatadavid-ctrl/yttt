@@ -26,6 +26,8 @@ interface InboxItem {
     nextAction: string | null;
     optedOut: boolean;
   };
+  /** El último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar). */
+  needsHumanReply?: boolean;
 }
 
 const FILTERS: { value: string; label: string }[] = [
@@ -46,6 +48,8 @@ interface Detail {
   memories: Memory[];
   appointments: Appointment[];
   connection: { displayName: string; status: string } | null;
+  /** El último mensaje del lead está sin contestar y KAI no lo va a contestar (sale en «Pendientes»). */
+  needsHumanReply?: boolean;
 }
 
 function MessageList({ messages }: { messages: Message[] }) {
@@ -133,10 +137,19 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
+  const settings = useBusinessSettings();
+  const autopilotOn = settings.data?.aiSettings.autopilotEnabled ?? true;
   const release = useMutation({
     mutationFn: (replyNow: boolean) => api.post(`/conversations/${conversationId}/release`, { replyNow }),
-    onSuccess: () => {
-      toast('KAI vuelve a encargarse de esta conversación.');
+    onSuccess: (_r, replyNow) => {
+      // Sin «responder ahora», KAI solo contesta a los mensajes NUEVOS: el que ya esperaba sigue en «Pendientes».
+      toast(
+        replyNow
+          ? 'KAI vuelve a encargarse de esta conversación y va a contestar ahora al último mensaje.'
+          : data?.needsHumanReply
+            ? 'KAI vuelve a encargarse de esta conversación y contestará a los mensajes nuevos. El último mensaje del lead sigue en «Pendientes» hasta que alguien lo responda.'
+            : 'KAI vuelve a encargarse de esta conversación.',
+      );
       void qc.invalidateQueries();
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -162,6 +175,9 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
   if (error || !data) return <div className="thread"><EmptyState icon={AlertTriangle} title="No se pudo cargar la conversación" description={errorText(error)} /></div>;
   const { conversation: conv, lead } = data;
   const reason = conv.handoffReason as HandoffReason | null;
+  // Mensaje del lead sin contestar fuera de un escalado: se ofrece que KAI lo responda (con el piloto automático
+  // en pausa KAI no responde a nadie, y a un lead dado de baja no se le puede escribir).
+  const canKaiReplyNow = Boolean(data.needsHumanReply) && autopilotOn && !lead.optedOut && lead.status !== 'client';
 
   return (
     <section className="thread" aria-label={`Conversación con ${lead.name}`}>
@@ -215,7 +231,27 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
       {!conv.handoffActive && !conv.aiEnabled && (
         <div className="handoff-banner" style={{ background: 'var(--info-soft)' }}>
           <UserRound style={{ color: 'var(--info)' }} />
-          <div className="grow">Estás llevando esta conversación. KAI está en pausa aquí.</div>
+          <div className="grow">
+            Estás llevando esta conversación. KAI está en pausa aquí.
+            {canKaiReplyNow && <div className="xs muted mt-4">El último mensaje del lead está sin contestar: respóndele tú o deja que lo haga KAI.</div>}
+          </div>
+          {canKaiReplyNow && (
+            <Button size="sm" icon={Play} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
+              Que KAI responda ahora
+            </Button>
+          )}
+        </div>
+      )}
+      {!conv.handoffActive && conv.aiEnabled && canKaiReplyNow && (
+        <div className="handoff-banner" style={{ background: 'var(--warning-soft)' }}>
+          <AlertTriangle style={{ color: 'var(--warning)' }} />
+          <div className="grow">
+            El último mensaje del lead sigue sin contestar (por ejemplo, porque llegó mientras KAI estaba en pausa). Respóndele tú o deja que lo
+            haga KAI.
+          </div>
+          <Button size="sm" icon={Play} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
+            Que KAI responda ahora
+          </Button>
         </div>
       )}
       {lead.optedOut && (
@@ -320,7 +356,7 @@ function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: s
         <Sparkles style={{ color: 'var(--accent-text)' }} />
         <div>
           <div className="subtle xs">Próxima acción</div>
-          <strong className="small">{nextActionFor(lead, data.conversation, upcoming, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}</strong>
+          <strong className="small">{nextActionFor(lead, { ...data.conversation, needsHumanReply: data.needsHumanReply }, upcoming, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}</strong>
         </div>
       </div>
       <div className="field">
@@ -479,7 +515,7 @@ export default function Inbox() {
             </div>
             <div className="subtle xs ellipsis mt-4">
               {it.lead.goalSummary ? `${it.lead.goalSummary} · ` : ''}
-              {nextActionFor(it.lead, it.conversation, null, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}
+              {nextActionFor(it.lead, { ...it.conversation, needsHumanReply: it.needsHumanReply }, null, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}
             </div>
           </div>
         </button>
