@@ -1,0 +1,423 @@
+import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { getDb } from '../database/client.js';
+import { aiSettings, appointments, channelConnections, conversations, leadEvents, leadMemories, leads, messages, scheduledJobs } from '../database/schema.js';
+import type { ChannelKey, ConversationState } from '../lib/domain.js';
+import { notFound } from '../lib/errors.js';
+import { truncate } from '../lib/text.js';
+import { audit } from '../audit/audit.service.js';
+import { resolveAlertsFor } from './alerts.service.js';
+
+export type Conversation = typeof conversations.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+
+export async function getOrCreateConversation(
+  businessId: string,
+  leadId: string,
+  channel: ChannelKey,
+  channelConnectionId?: string | null,
+): Promise<Conversation> {
+  const db = getDb();
+  const [existing] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.leadId, leadId), eq(conversations.channel, channel)))
+    .limit(1);
+  if (existing) {
+    if (channelConnectionId && existing.channelConnectionId !== channelConnectionId) {
+      await db.update(conversations).set({ channelConnectionId }).where(eq(conversations.id, existing.id));
+      return { ...existing, channelConnectionId };
+    }
+    return existing;
+  }
+  // El esquema solo exige que el lead exista (no que sea de este negocio): nunca se crea una conversación
+  // que apunte al lead de otro negocio, porque la Bandeja mostraría sus datos.
+  const [own] = await db
+    .select({ id: leads.id })
+    .from(leads)
+    .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)))
+    .limit(1);
+  if (!own) throw notFound('Lead no encontrado.');
+  const [created] = await db
+    .insert(conversations)
+    .values({ businessId, leadId, channel, channelConnectionId: channelConnectionId ?? null })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return created;
+  const [again] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.leadId, leadId), eq(conversations.channel, channel)))
+    .limit(1);
+  return again;
+}
+
+export async function getConversation(businessId: string, conversationId: string): Promise<Conversation> {
+  const [row] = await getDb()
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)))
+    .limit(1);
+  if (!row) throw notFound('Conversación no encontrada.');
+  return row;
+}
+
+export async function updateConversationState(businessId: string, conversationId: string, patch: Partial<ConversationState>) {
+  const conv = await getConversation(businessId, conversationId);
+  const state = { ...conv.state, ...patch };
+  await getDb()
+    .update(conversations)
+    .set({ state, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)));
+  return state;
+}
+
+/** Inserta un mensaje y actualiza los contadores de conversación y lead. */
+export async function insertMessage(input: {
+  businessId: string;
+  conversationId: string;
+  leadId: string;
+  direction: 'inbound' | 'outbound';
+  senderType: 'lead' | 'kai' | 'human' | 'system';
+  senderUserId?: string | null;
+  content: string;
+  contentType?: 'text' | 'template' | 'media' | 'unsupported';
+  externalId?: string | null;
+  status?: Message['status'];
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt?: Date;
+}): Promise<Message> {
+  const db = getDb();
+  const at = input.createdAt ?? new Date();
+  const [msg] = await db
+    .insert(messages)
+    .values({
+      businessId: input.businessId,
+      conversationId: input.conversationId,
+      leadId: input.leadId,
+      direction: input.direction,
+      senderType: input.senderType,
+      senderUserId: input.senderUserId ?? null,
+      content: input.content,
+      contentType: input.contentType ?? 'text',
+      externalId: input.externalId ?? null,
+      status: input.status ?? (input.direction === 'inbound' ? 'received' : 'sent'),
+      error: input.error ?? null,
+      metadata: input.metadata ?? {},
+      createdAt: at,
+    })
+    .returning();
+
+  const delivered = input.direction === 'inbound' || !['failed', 'skipped'].includes(msg.status);
+  if (delivered) {
+    const convPatch: Partial<typeof conversations.$inferInsert> = {
+      lastMessageAt: at,
+      lastMessagePreview: truncate(input.content.replace(/\s+/g, ' '), 140),
+      updatedAt: new Date(),
+    };
+    if (input.direction === 'inbound') {
+      convPatch.lastInboundAt = at;
+      convPatch.unreadCount = sql`${conversations.unreadCount} + 1` as unknown as number;
+      convPatch.status = 'open';
+    }
+    await db.update(conversations).set(convPatch).where(eq(conversations.id, input.conversationId));
+
+    const leadPatch: Partial<typeof leads.$inferInsert> = { lastInteractionAt: at, updatedAt: new Date() };
+    if (input.direction === 'inbound') leadPatch.lastInboundAt = at;
+    else {
+      leadPatch.lastOutboundAt = at;
+      leadPatch.firstResponseSeconds = sql`coalesce(${leads.firstResponseSeconds}, greatest(0, extract(epoch from (${at.toISOString()}::timestamptz - ${leads.createdAt}))::int))` as unknown as number;
+    }
+    await db.update(leads).set(leadPatch).where(and(eq(leads.businessId, input.businessId), eq(leads.id, input.leadId)));
+  }
+  return msg;
+}
+
+export async function listMessages(businessId: string, conversationId: string, limit = 200) {
+  const rows = await getDb()
+    .select()
+    .from(messages)
+    .where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit);
+  return rows.reverse();
+}
+
+export type InboxFilter = 'all' | 'new' | 'hot' | 'qualified' | 'pending' | 'booked' | 'no_reply' | 'clients' | 'handoff';
+
+/**
+ * Join conversación ↔ lead SIEMPRE dentro del mismo negocio (defensa en profundidad: aunque una
+ * conversación apuntara por error al lead de otro negocio, sus datos nunca saldrían en estos listados).
+ */
+export const conversationLeadJoin = and(eq(leads.id, conversations.leadId), eq(leads.businessId, conversations.businessId))!;
+
+/** ¿Tiene el negocio el piloto automático encendido? (sin ajustes guardados, KAI está activo por defecto). */
+export async function autopilotEnabled(businessId: string): Promise<boolean> {
+  const [row] = await getDb().select({ on: aiSettings.autopilotEnabled }).from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
+  return row?.on ?? true;
+}
+
+/**
+ * Mensajes automáticos que NO contestan al lead: confirmación, recordatorios y aviso de no-show de la llamada,
+ * y seguimientos. Salen aunque el entrenador lleve la conversación, así que no pueden dar por contestado
+ * un mensaje del lead que nadie ha respondido.
+ */
+export const NON_REPLY_PURPOSES = ['confirmation', 'reminder', 'no_show', 'follow_up'] as const;
+
+/**
+ * El último mensaje del lead en esta conversación sigue sin contestar: después no se le ha enviado (con éxito)
+ * ninguna respuesta del equipo o de KAI (los mensajes automáticos de `NON_REPLY_PURPOSES` no cuentan).
+ */
+export function leadMessageUnanswered(): SQL {
+  const nonReply = sql.join(
+    NON_REPLY_PURPOSES.map((p) => sql`${p}`),
+    sql`, `,
+  );
+  return sql`(${conversations.lastInboundAt} is not null and not exists (
+    select 1 from ${messages} m
+    where m.conversation_id = ${conversations.id} and m.direction = 'outbound' and m.status not in ('failed', 'skipped')
+      and m.created_at >= ${conversations.lastInboundAt}
+      and (m.sender_type = 'human' or coalesce(m.metadata->>'purpose', '') not in (${nonReply}))
+  ))`;
+}
+
+/**
+ * Se intentó contestar al último mensaje del lead (KAI o el equipo) y la respuesta no se pudo enviar (canal sin
+ * conectar, ventana de 24 h cerrada, error de WhatsApp/Instagram…): sigue sin contestar y hay al menos un intento de
+ * respuesta «no enviado». El mismo criterio que `unsentReply` en la web (frontend/src/lib/messages.ts).
+ */
+export function replyUnsentCondition(): SQL {
+  const nonReply = sql.join(
+    NON_REPLY_PURPOSES.map((p) => sql`${p}`),
+    sql`, `,
+  );
+  return sql`(${leadMessageUnanswered()} and exists (
+    select 1 from ${messages} m
+    where m.conversation_id = ${conversations.id} and m.direction = 'outbound' and m.status in ('failed', 'skipped')
+      and m.created_at >= ${conversations.lastInboundAt}
+      and (m.sender_type = 'human' or coalesce(m.metadata->>'purpose', '') not in (${nonReply}))
+  ))`;
+}
+
+/**
+ * ¿Tiene KAI una respuesta programada o en marcha para esta conversación? (trabajo `kai_reply`, clave `reply:<id>`).
+ * Dos `exists` para que cada uno use su índice (el único parcial de pendientes y el de estado).
+ */
+function kaiReplyInFlight(): SQL {
+  const key = sql`'reply:' || ${conversations.id}::text`;
+  return sql`(exists (select 1 from ${scheduledJobs} j where j.dedupe_key = ${key} and j.status = 'pending')
+    or exists (select 1 from ${scheduledJobs} j where j.dedupe_key = ${key} and j.status = 'running'))`;
+}
+
+/**
+ * «Necesita respuesta humana»: hay un escalado abierto, o el último mensaje del lead está sin contestar y
+ * KAI no lo va a contestar porque:
+ *  - el entrenador lleva la conversación (KAI en pausa en ella),
+ *  - el piloto automático del negocio está apagado,
+ *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes), o
+ *  - KAI no tiene ninguna respuesta en marcha (p. ej. el mensaje llegó con KAI en pausa y luego se reactivó).
+ * Los leads que pidieron la baja no cuentan (no se les puede escribir), salvo que hayan vuelto a escribir
+ * después de pedirla: entonces el entrenador tiene que verlo (puede volver a permitir mensajes desde su ficha).
+ * Requiere el join con `leads` (ver `conversationLeadJoin`).
+ */
+export function needsHumanReplyCondition(opts: { autopilotOn: boolean }): SQL {
+  const optedOutAt = sql`(select max(e.created_at) from ${leadEvents} e where e.lead_id = ${leads.id} and e.type = 'opted_out')`;
+  const notOptedOut = sql`(${leads.optedOut} = false or ${conversations.lastInboundAt} > ${optedOutAt})`;
+  const unanswered = sql`(${notOptedOut} and ${leadMessageUnanswered()})`;
+  const kaiWontAnswer = opts.autopilotOn
+    ? sql`(${conversations.aiEnabled} = false or (${leads.status} = 'client' and (${leads.wonAt} is null or ${leads.wonAt} < ${conversations.lastInboundAt})) or not ${kaiReplyInFlight()})`
+    : sql`true`;
+  return sql`(${conversations.handoffActive} = true or (${unanswered} and ${kaiWontAnswer}))`;
+}
+
+function inboxFilterCondition(filter: InboxFilter, ctx: { autopilotOn: boolean }): SQL | undefined {
+  switch (filter) {
+    case 'new':
+      return inArray(leads.status, ['new', 'contacted']);
+    case 'hot':
+      return inArray(leads.temperature, ['caliente', 'muy_cualificado']);
+    case 'qualified':
+      return inArray(leads.status, ['qualified', 'call_proposed']);
+    case 'pending':
+      // Necesita respuesta humana: escalado, o mensaje del lead sin contestar que KAI no va a contestar.
+      return needsHumanReplyCondition(ctx);
+    case 'handoff':
+      return eq(conversations.handoffActive, true);
+    case 'booked':
+      return inArray(leads.status, ['call_booked', 'reminder_sent']);
+    case 'no_reply':
+      return sql`${leads.lastOutboundAt} is not null and (${leads.lastInboundAt} is null or ${leads.lastInboundAt} < ${leads.lastOutboundAt}) and ${leads.lastOutboundAt} < now() - interval '24 hours' and ${leads.status} not in ('client','lost')`;
+    case 'clients':
+      return eq(leads.status, 'client');
+    default:
+      return undefined;
+  }
+}
+
+export async function listInbox(
+  businessId: string,
+  opts: { filter?: InboxFilter; search?: string; limit?: number; offset?: number; includeTest?: boolean } = {},
+) {
+  const autopilotOn = await autopilotEnabled(businessId);
+  const conds: SQL[] = [eq(conversations.businessId, businessId), eq(leads.businessId, businessId)];
+  if (!opts.includeTest) conds.push(eq(leads.isTest, false));
+  const fc = inboxFilterCondition(opts.filter ?? 'all', { autopilotOn });
+  if (fc) conds.push(fc);
+  if (opts.search?.trim()) {
+    const q = `%${opts.search.trim().replace(/[%_]/g, '')}%`;
+    conds.push(sql`(${leads.name} ilike ${q} or ${leads.phone} ilike ${q} or ${leads.instagramUsername} ilike ${q} or ${leads.email} ilike ${q})`);
+  }
+  const rows = await getDb()
+    .select({
+      conversation: conversations,
+      lead: {
+        id: leads.id,
+        name: leads.name,
+        avatarUrl: leads.avatarUrl,
+        source: leads.source,
+        status: leads.status,
+        score: leads.score,
+        temperature: leads.temperature,
+        goalSummary: leads.goalSummary,
+        nextAction: leads.nextAction,
+        nextActionAt: leads.nextActionAt,
+        lastInboundAt: leads.lastInboundAt,
+        lastOutboundAt: leads.lastOutboundAt,
+        instagramUsername: leads.instagramUsername,
+        phone: leads.phone,
+        optedOut: leads.optedOut,
+        isTest: leads.isTest,
+      },
+      /** El último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar). */
+      needsHumanReply: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })}, false)`,
+      /** …porque la respuesta que se le intentó enviar no salió (la Bandeja dice que revise el motivo). */
+      replyUnsent: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })} and ${replyUnsentCondition()}, false)`,
+    })
+    .from(conversations)
+    .innerJoin(leads, conversationLeadJoin)
+    .where(and(...conds))
+    .orderBy(sql`${conversations.handoffActive} desc`, sql`${conversations.lastMessageAt} desc nulls last`)
+    .limit(Math.min(opts.limit ?? 50, 200))
+    .offset(opts.offset ?? 0);
+  return rows;
+}
+
+export async function inboxCounts(businessId: string) {
+  const filters: InboxFilter[] = ['all', 'new', 'hot', 'qualified', 'pending', 'booked', 'no_reply', 'clients'];
+  const out: Record<string, number> = {};
+  const autopilotOn = await autopilotEnabled(businessId);
+  await Promise.all(
+    filters.map(async (f) => {
+      const conds: SQL[] = [eq(conversations.businessId, businessId), eq(leads.businessId, businessId), eq(leads.isTest, false)];
+      const fc = inboxFilterCondition(f, { autopilotOn });
+      if (fc) conds.push(fc);
+      const [r] = await getDb()
+        .select({ n: sql<number>`count(*)::int` })
+        .from(conversations)
+        .innerJoin(leads, conversationLeadJoin)
+        .where(and(...conds));
+      out[f] = Number(r?.n ?? 0);
+    }),
+  );
+  return out;
+}
+
+export async function getConversationDetail(businessId: string, conversationId: string) {
+  const db = getDb();
+  const conversation = await getConversation(businessId, conversationId);
+  const [lead] = await db
+    .select()
+    .from(leads)
+    .where(and(eq(leads.businessId, businessId), eq(leads.id, conversation.leadId)))
+    .limit(1);
+  const [msgs, memories, appts, connection] = await Promise.all([
+    listMessages(businessId, conversationId),
+    db
+      .select()
+      .from(leadMemories)
+      .where(and(eq(leadMemories.businessId, businessId), eq(leadMemories.leadId, conversation.leadId)))
+      .orderBy(desc(leadMemories.createdAt))
+      .limit(30),
+    db
+      .select()
+      .from(appointments)
+      .where(and(eq(appointments.businessId, businessId), eq(appointments.leadId, conversation.leadId)))
+      .orderBy(asc(appointments.startsAt)),
+    conversation.channelConnectionId
+      ? db
+          .select({ id: channelConnections.id, displayName: channelConnections.displayName, status: channelConnections.status })
+          .from(channelConnections)
+          .where(and(eq(channelConnections.businessId, businessId), eq(channelConnections.id, conversation.channelConnectionId)))
+          .limit(1)
+          .then((r) => r[0] ?? null)
+      : Promise.resolve(null),
+  ]);
+  // Igual que en la Bandeja: el último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar).
+  const autopilotOn = await autopilotEnabled(businessId);
+  const [pending] = await db
+    .select({ v: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })}, false)` })
+    .from(conversations)
+    .innerJoin(leads, conversationLeadJoin)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)))
+    .limit(1);
+  return { conversation, lead, messages: msgs, memories, appointments: appts, connection, needsHumanReply: Boolean(pending?.v) };
+}
+
+export async function markConversationRead(businessId: string, conversationId: string) {
+  await getDb()
+    .update(conversations)
+    .set({ unreadCount: 0 })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)));
+}
+
+/** El entrenador toma el control: KAI deja de responder en esta conversación. */
+export async function takeOverConversation(businessId: string, conversationId: string, userId: string) {
+  const conv = await getConversation(businessId, conversationId);
+  await getDb()
+    .update(conversations)
+    .set({ aiEnabled: false, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)));
+  await audit({ businessId, actorType: 'user', actorUserId: userId, action: 'conversation.taken_over', entityType: 'conversation', entityId: conv.id });
+}
+
+/**
+ * Escalado atendido: una persona ya ha respondido al lead. La conversación deja de estar “pendiente”
+ * y se cierra el aviso “KAI necesita tu intervención”, pero KAI sigue pausado (el entrenador mantiene
+ * el control hasta que pulse «Devolver a KAI»). No hace nada si no había escalado.
+ */
+export async function markHandoffAttended(
+  businessId: string,
+  conversationId: string,
+  actor: { type: 'user'; userId: string } | { type: 'integration' },
+  /** Condición extra que se comprueba en la misma actualización (p. ej. que el eco de Instagram siga siendo del entrenador). */
+  onlyIf?: SQL,
+): Promise<boolean> {
+  const [conv] = await getDb()
+    .update(conversations)
+    .set({ handoffActive: false, aiEnabled: false, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId), eq(conversations.handoffActive, true), onlyIf))
+    .returning();
+  if (!conv) return false;
+  await resolveAlertsFor(businessId, { leadId: conv.leadId, type: 'handoff' });
+  await audit({
+    businessId,
+    actorType: actor.type,
+    actorUserId: actor.type === 'user' ? actor.userId : null,
+    action: 'conversation.handoff_attended',
+    entityType: 'conversation',
+    entityId: conv.id,
+    metadata: { reason: conv.handoffReason },
+  });
+  return true;
+}
+
+/** Devuelve la conversación a KAI y cierra el escalado si lo había. */
+export async function releaseConversation(businessId: string, conversationId: string, userId: string) {
+  const conv = await getConversation(businessId, conversationId);
+  await getDb()
+    .update(conversations)
+    .set({ aiEnabled: true, handoffActive: false, handoffReason: null, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)));
+  await resolveAlertsFor(businessId, { leadId: conv.leadId, type: 'handoff' });
+  await audit({ businessId, actorType: 'user', actorUserId: userId, action: 'conversation.released_to_kai', entityType: 'conversation', entityId: conv.id });
+}

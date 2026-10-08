@@ -1,0 +1,567 @@
+import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Ban, Brain, CalendarPlus, ClipboardCheck, History, MessageCircle, MessagesSquare, Plus, Repeat, Save, Target, Trash2, UserRound, X } from 'lucide-react';
+import { leadSourceLabel, leadStatusLabel, type LeadSource, type LeadStatus } from '@shared';
+import { api, errorText } from '../lib/api';
+import { dateTime, money, timeAgo } from '../lib/format';
+import { useBusinessCurrency, useBusinessTimezone, useCan } from '../lib/business';
+import { Button, Callout, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageLoading, Textarea, useToast, TagInput } from '../components/ui';
+import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
+import { BookCallModal, OutcomeModal, QualificationList, StatusSelect } from '../components/lead-actions';
+import type { Appointment, Conversation, Lead, Memory, QualificationRule } from '../lib/types';
+
+interface Profile {
+  lead: Lead;
+  memories: Memory[];
+  events: { id: string; type: string; actorType: string; data: Record<string, unknown>; createdAt: string }[];
+  appointments: Appointment[];
+  conversations: Conversation[];
+  qualificationRules: QualificationRule[];
+  scoreBreakdown: { key: string; weight: number; earned: number }[];
+  followUps: { followUp: { id: string; step: number; status: string; scheduledFor: string; reason: string; note: string | null; sentAt: string | null } }[];
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  created: 'Lead creado',
+  status_changed: 'Cambio de etapa',
+  message_in: 'Mensaje del lead',
+  message_out: 'Mensaje enviado',
+  score_changed: 'Puntuación actualizada',
+  call_booked: 'Llamada agendada',
+  call_cancelled: 'Llamada cancelada',
+  call_completed: 'Llamada realizada',
+  reminder_sent: 'Recordatorio enviado',
+  no_show: 'No se presentó',
+  no_show_message_sent: 'Mensaje de no-show enviado',
+  followup_sent: 'Seguimiento enviado',
+  handoff: 'KAI pidió intervención humana',
+  opted_out: 'Dado de baja: no se le vuelve a escribir',
+  opted_in: 'Vuelve a aceptar mensajes',
+};
+
+const ACTOR_LABELS: Record<string, string> = { kai: 'KAI', human: 'Equipo', system: 'Sistema', lead: 'Lead', integration: 'Integración' };
+
+function describeEvent(e: Profile['events'][number]) {
+  if (e.type === 'status_changed') return `${leadStatusLabel(e.data.from as LeadStatus)} → ${leadStatusLabel(e.data.to as LeadStatus)}`;
+  if (e.type === 'score_changed') return `${e.data.from} → ${e.data.to}`;
+  if (e.type === 'created') return e.data.source ? `Origen: ${leadSourceLabel(e.data.source as LeadSource)}` : '';
+  if (e.type === 'handoff') return String(e.data.detail ?? e.data.reason ?? '');
+  if (e.type === 'opted_out') {
+    const reason = typeof e.data.reason === 'string' ? e.data.reason : '';
+    if (e.data.manual) return reason ? `Baja manual del equipo · ${reason}` : 'Baja manual del equipo';
+    return 'Lo pidió el propio lead en la conversación';
+  }
+  return '';
+}
+
+/**
+ * Baja / alta manual de mensajes (POST /leads/:id/opt-out). Para cuando el lead pide por otra vía (teléfono, email,
+ * en persona) que no le escriban más, o cuando vuelve a pedir que le escriban. Siempre con confirmación.
+ */
+function OptOutDialog({ lead, open, onClose }: { lead: Lead; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const optingOut = !lead.optedOut;
+  const close = () => {
+    setReason('');
+    onClose();
+  };
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post<{ lead: Lead }>(`/leads/${lead.id}/opt-out`, optingOut ? { optedOut: true, ...(reason.trim() ? { reason: reason.trim() } : {}) } : { optedOut: false }),
+    onSuccess: () => {
+      toast(optingOut ? 'Lead dado de baja: no se le volverá a escribir.' : 'El lead vuelve a aceptar mensajes. KAI sigue en pausa en sus conversaciones hasta que se las devuelvas.');
+      // La baja pausa a KAI en sus conversaciones y cancela seguimientos: cambia la ficha, la bandeja y los listados.
+      for (const key of ['lead', 'leads', 'inbox', 'inbox-counts', 'conversation', 'dashboard']) void qc.invalidateQueries({ queryKey: [key] });
+      close();
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const name = lead.name || 'este lead';
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title={optingOut ? `¿Dar de baja a ${name}?` : '¿Volver a permitir mensajes?'}
+      footer={
+        <>
+          <Button onClick={close}>Cancelar</Button>
+          <Button variant={optingOut ? 'danger' : 'primary'} icon={optingOut ? Ban : MessageCircle} loading={mutation.isPending} onClick={() => mutation.mutate()}>
+            {optingOut ? 'Dar de baja' : 'Volver a permitir mensajes'}
+          </Button>
+        </>
+      }
+    >
+      {optingOut ? (
+        <div className="col gap-12">
+          <p className="muted">
+            Ni KAI ni tu equipo podrán volver a escribirle: KAI se pausa en sus conversaciones y se cancelan los seguimientos y recordatorios pendientes. El
+            lead y su historial no se borran.
+          </p>
+          <p className="muted small">Úsalo cuando te pida, por teléfono, email o en persona, que no le escribáis más.</p>
+          <Field label="Motivo (opcional)" hint="Solo lo ve tu equipo, en el historial del lead.">
+            <Input value={reason} maxLength={300} placeholder="Ej.: Me lo pidió por teléfono" onChange={(e) => setReason(e.target.value)} />
+          </Field>
+        </div>
+      ) : (
+        <div className="col gap-12">
+          <p className="muted">Hazlo solo si {lead.name || 'el lead'} te ha pedido que vuelvas a escribirle. Tu equipo podrá escribirle de nuevo desde la conversación.</p>
+          <p className="muted small">KAI seguirá en pausa en sus conversaciones hasta que pulses «Devolver a KAI» en la bandeja de entrada.</p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+type LeadForm = { name: string; phone: string; email: string; instagramUsername: string; notes: string; tags: string[] };
+
+const EMPTY_FORM: LeadForm = { name: '', phone: '', email: '', instagramUsername: '', notes: '', tags: [] };
+
+function toForm(lead: Lead): LeadForm {
+  return { name: lead.name, phone: lead.phone ?? '', email: lead.email ?? '', instagramUsername: lead.instagramUsername ?? '', notes: lead.notes, tags: lead.tags };
+}
+
+const sameForm = (a: LeadForm, b: LeadForm) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Borrador del formulario «Datos del lead». Se resincroniza con el servidor solo si no hay cambios
+ * pendientes: cambiar la etapa, agendar o volver a la pestaña refrescan el lead, y eso no debe borrar
+ * lo que el entrenador está escribiendo y aún no ha guardado.
+ */
+function useLeadDraft(lead: Lead | undefined) {
+  const id = lead?.id ?? null;
+  const source = lead ? toForm(lead) : EMPTY_FORM;
+  const sourceKey = JSON.stringify(source);
+  const [state, setState] = useState({ id, key: sourceKey, base: source, draft: source });
+  let current = state;
+  if (state.id !== id) {
+    // Otro lead (o se está cargando): se empieza de cero, nunca se arrastra un borrador de un lead a otro.
+    current = { id, key: sourceKey, base: source, draft: source };
+    setState(current);
+  } else if (state.key !== sourceKey) {
+    const pending = !sameForm(state.draft, state.base);
+    current = { id, key: sourceKey, base: source, draft: pending ? state.draft : source };
+    setState(current);
+  }
+  return {
+    form: current.draft,
+    dirty: !sameForm(current.draft, current.base),
+    setForm: (update: (f: LeadForm) => LeadForm) => setState((s) => ({ ...s, draft: update(s.draft) })),
+    /**
+     * Tras guardar: lo guardado (normalizado por el servidor) pasa a ser la nueva base. Si mientras se guardaba
+     * se siguió escribiendo, se conserva lo escrito (sigue habiendo cambios pendientes).
+     * `key` no se toca: sigue siendo la de los últimos datos del servidor que se han visto. Así, cuando la caché pase a
+     * tener el lead guardado, se resincroniza como cualquier refresco (respetando lo pendiente), y mientras tenga aún
+     * el lead de antes no se vuelve a él.
+     */
+    markSaved: (saved: Lead, sent: LeadForm) => {
+      const f = toForm(saved);
+      setState((s) => ({ ...s, id: saved.id, base: f, draft: sameForm(s.draft, sent) ? f : s.draft }));
+    },
+  };
+}
+
+export default function LeadDetail() {
+  const { leadId } = useParams();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [booking, setBooking] = useState(false);
+  const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [optOutOpen, setOptOutOpen] = useState(false);
+  // Llamada que se quiere cancelar (se pide confirmación: no se puede deshacer).
+  const [cancelFor, setCancelFor] = useState<Appointment | null>(null);
+  const [newMemory, setNewMemory] = useState('');
+  const { data, isLoading, error } = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.get<Profile>(`/leads/${leadId}`), enabled: Boolean(leadId) });
+  const { form, setForm, dirty, markSaved } = useLeadDraft(data?.lead);
+  const tz = useBusinessTimezone();
+  const currency = useBusinessCurrency();
+  const canDelete = useCan('leads:delete');
+
+  const invalidate = () => void qc.invalidateQueries({ queryKey: ['lead', leadId] });
+  const save = useMutation({
+    mutationFn: (f: LeadForm) => api.patch<{ lead: Lead }>(`/leads/${leadId}`, { ...f, phone: f.phone || null, email: f.email || null, instagramUsername: f.instagramUsername || null }),
+    onSuccess: (r, sent) => {
+      toast('Datos guardados');
+      if (r?.lead) {
+        // La caché pasa a tener ya el lead guardado. Si no, hasta que llegara la consulta nueva el formulario
+        // se resincronizaría con los datos de antes de guardar (y un segundo «Guardar» los volvería a escribir).
+        qc.setQueryData<Profile>(['lead', leadId], (old) => (old ? { ...old, lead: r.lead } : old));
+        markSaved(r.lead, sent);
+      }
+      invalidate();
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const addMemory = useMutation({
+    mutationFn: () => api.post(`/leads/${leadId}/memories`, { content: newMemory, kind: 'fact' }),
+    onSuccess: () => {
+      setNewMemory('');
+      invalidate();
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const delMemory = useMutation({ mutationFn: (id: string) => api.del(`/leads/${leadId}/memories/${id}`), onSuccess: invalidate, onError: (e) => toast(errorText(e), 'error') });
+  const del = useMutation({
+    mutationFn: () => api.del(`/leads/${leadId}`),
+    onSuccess: () => {
+      toast('Lead eliminado');
+      void qc.invalidateQueries({ queryKey: ['leads'] });
+      navigate('/app/leads');
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+  const cancelAppt = useMutation({
+    mutationFn: (v: { id: string; thenWrite: boolean }) => api.post(`/agenda/appointments/${v.id}/cancel`, { reason: 'Cancelada por el equipo' }),
+    onSuccess: (_r, v) => {
+      setCancelFor(null);
+      // Cambia la ficha, la agenda, el panel de hoy y el pipeline (el lead vuelve a una etapa anterior).
+      for (const key of ['lead', 'leads', 'appointments', 'dashboard', 'slots', 'conversation']) void qc.invalidateQueries({ queryKey: [key] });
+      const conv = data?.conversations.find((c) => c.channel !== 'web');
+      if (v.thenWrite && conv) {
+        toast('Llamada cancelada. Escríbele para avisarle.');
+        navigate(`/app/inbox/${conv.id}`);
+      } else toast('Llamada cancelada. KAI no avisa al lead: si quieres, escríbele desde la conversación.');
+    },
+    onError: (e) => toast(errorText(e), 'error'),
+  });
+
+  if (isLoading) return <PageLoading />;
+  if (error || !data) return <div className="page"><EmptyState icon={UserRound} title="Lead no encontrado" description={errorText(error)} action={<Button onClick={() => navigate('/app/leads')}>Volver a leads</Button>} /></div>;
+  const { lead } = data;
+  const conversation = data.conversations.find((c) => c.channel !== 'web') ?? data.conversations[0];
+  // ¿Se le puede escribir desde la bandeja? (no en pruebas del simulador ni si pidió la baja)
+  const canWriteToLead = Boolean(data.conversations.some((c) => c.channel !== 'web') && !lead.optedOut);
+  const upcoming = data.appointments.find((a) => a.status === 'scheduled' && new Date(a.endsAt) > new Date());
+  const totalWeight = data.scoreBreakdown.reduce((s, b) => s + b.weight, 0) || 1;
+  const set = (k: 'name' | 'phone' | 'email' | 'instagramUsername' | 'notes') => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  return (
+    <div className="page">
+      <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => navigate(-1)}>
+        Volver
+      </Button>
+      <div className="row-between wrap mt-12" style={{ marginBottom: 20 }}>
+        <div className="row" style={{ gap: 14 }}>
+          <LeadAvatar name={lead.name} url={lead.avatarUrl} size={56} channel={lead.source} />
+          <div>
+            <h1>{lead.name || 'Sin nombre'}</h1>
+            <div className="row wrap mt-4" style={{ gap: 6 }}>
+              <StatusBadge status={lead.status} />
+              <TemperatureBadge temperature={lead.temperature} />
+              <ScoreBadge score={lead.score} />
+              <SourceBadge source={lead.source} />
+              {lead.isTest && <span className="badge">Prueba</span>}
+              {lead.optedOut && <span className="badge badge-danger">Dado de baja</span>}
+            </div>
+          </div>
+        </div>
+        <div className="row wrap">
+          {conversation && (
+            <Button icon={MessagesSquare} onClick={() => navigate(conversation.channel === 'web' ? `/app/simulador/${conversation.id}` : `/app/inbox/${conversation.id}`)}>
+              Conversación
+            </Button>
+          )}
+          {!upcoming && (
+            <Button icon={CalendarPlus} onClick={() => setBooking(true)}>
+              Agendar llamada
+            </Button>
+          )}
+          <div style={{ width: 190 }}>
+            <StatusSelect leadId={lead.id} status={lead.status} onChanged={invalidate} />
+          </div>
+          {!lead.optedOut && (
+            <Button variant="ghost" icon={Ban} onClick={() => setOptOutOpen(true)}>
+              Dar de baja (no volver a escribirle)
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant="danger" iconOnly icon={Trash2} onClick={() => setConfirmDelete(true)}>
+              Eliminar lead
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {lead.optedOut && (
+        <div style={{ marginBottom: 16 }} role="status">
+          <Callout tone="danger" icon={Ban}>
+            <div className="row-between wrap" style={{ gap: 12 }}>
+              <span>
+                <strong>Este lead está dado de baja.</strong> Ni KAI ni tu equipo le escribirán: no recibe respuestas, seguimientos ni recordatorios.
+              </span>
+              <Button size="sm" icon={MessageCircle} onClick={() => setOptOutOpen(true)}>
+                Volver a permitir mensajes
+              </Button>
+            </div>
+          </Callout>
+        </div>
+      )}
+
+      <div className="grid-split">
+        <div className="col gap-16">
+          <Card title="Cualificación" icon={Target} actions={<span className="subtle small">Puntuación interna: {lead.score}/100 · el lead no la ve</span>}>
+            <div className="grid-2" style={{ gap: 24 }}>
+              <QualificationList rules={data.qualificationRules} qualification={lead.qualification} />
+              <div className="col" style={{ gap: 10 }}>
+                <span className="section-title">Cómo se calcula</span>
+                {data.scoreBreakdown.map((b) => {
+                  const rule = data.qualificationRules.find((r) => r.key === b.key);
+                  return (
+                    <div key={b.key} className="col gap-4">
+                      <div className="row-between xs">
+                        <span className="muted">{rule?.label ?? b.key}</span>
+                        <span className="tnum subtle">
+                          {Math.round((b.earned / totalWeight) * 100)} / {Math.round((b.weight / totalWeight) * 100)}
+                        </span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 6, background: 'var(--surface-3)' }}>
+                        <div style={{ width: `${(b.earned / Math.max(1, b.weight)) * 100}%`, height: '100%', borderRadius: 6, background: 'var(--series-1)' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {lead.signals.fit === 'no' && <span className="badge badge-danger">No encaja (puntuación limitada)</span>}
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Memoria de KAI" icon={Brain}>
+            {data.memories.length === 0 && <p className="muted small">Aún no hay recuerdos. KAI guarda automáticamente lo relevante (eventos, horarios, lesiones, preferencias…).</p>}
+            <div className="col gap-4">
+              {data.memories.map((m) => (
+                <div key={m.id} className="row-between" style={{ padding: '6px 0', borderBottom: '1px dashed var(--border)' }}>
+                  <span>{m.content}</span>
+                  <Button variant="ghost" size="sm" iconOnly icon={X} onClick={() => delMemory.mutate(m.id)}>
+                    Borrar recuerdo
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <form
+              className="row mt-12"
+              onSubmit={(e) => {
+                e.preventDefault();
+                // Un solo envío a la vez (Enter dos veces seguidas guardaría el recuerdo duplicado).
+                if (newMemory.trim().length >= 3 && !addMemory.isPending) addMemory.mutate();
+              }}
+            >
+              <Input value={newMemory} onChange={(e) => setNewMemory(e.target.value)} placeholder="Añadir algo que KAI deba recordar (ej. trabaja a turnos)" />
+              <Button type="submit" icon={Plus} loading={addMemory.isPending}>
+                Añadir
+              </Button>
+            </form>
+          </Card>
+
+          <Card
+            title="Datos del lead"
+            icon={UserRound}
+            actions={
+              <>
+                {dirty && <span className="subtle small">Cambios sin guardar</span>}
+                <Button size="sm" variant="primary" icon={Save} loading={save.isPending} onClick={() => save.mutate(form)}>
+                  Guardar
+                </Button>
+              </>
+            }
+          >
+            <div className="grid-2" style={{ gap: 12 }}>
+              <Field label="Nombre">
+                <Input value={form.name} onChange={set('name')} />
+              </Field>
+              <Field label="Teléfono">
+                <Input value={form.phone} onChange={set('phone')} />
+              </Field>
+              <Field label="Email">
+                <Input value={form.email} onChange={set('email')} />
+              </Field>
+              <Field label="Instagram">
+                <Input value={form.instagramUsername} onChange={set('instagramUsername')} />
+              </Field>
+            </div>
+            <div className="mt-12">
+              <Field label="Etiquetas">
+                <TagInput value={form.tags} onChange={(tags) => setForm((f) => ({ ...f, tags }))} />
+              </Field>
+            </div>
+            <div className="mt-12">
+              <Field label="Notas internas">
+                <Textarea value={form.notes} onChange={set('notes')} rows={4} />
+              </Field>
+            </div>
+            <dl className="kv mt-16">
+              <dt>Entró</dt>
+              <dd>{dateTime(lead.createdAt, tz)}</dd>
+              {lead.sourceDetail && (
+                <>
+                  <dt>Campaña / detalle</dt>
+                  <dd>{lead.sourceDetail}</dd>
+                </>
+              )}
+              <dt>Primera respuesta</dt>
+              <dd>{lead.firstResponseSeconds !== null ? `${Math.round(lead.firstResponseSeconds / 60)} min` : '—'}</dd>
+              {lead.dealValueCents !== null && (
+                <>
+                  <dt>Importe venta</dt>
+                  <dd>{money(lead.dealValueCents, currency)}</dd>
+                </>
+              )}
+              {lead.lostReason && (
+                <>
+                  <dt>Motivo pérdida</dt>
+                  <dd>{lead.lostReason}</dd>
+                </>
+              )}
+            </dl>
+          </Card>
+        </div>
+
+        <div className="col gap-16">
+          <Card title="Llamadas" icon={ClipboardCheck}>
+            {data.appointments.length === 0 ? (
+              <p className="muted small">Sin llamadas todavía.</p>
+            ) : (
+              <div className="col">
+                {data.appointments.map((a) => (
+                  <div key={a.id} className="attention-item" style={{ cursor: 'default' }}>
+                    <div className="grow">
+                      <strong>{dateTime(a.startsAt, tz)}</strong>
+                      <div className="subtle xs">
+                        {a.bookedBy === 'kai' ? 'Agendada por KAI' : a.bookedBy === 'lead' ? 'Reservada por el lead' : 'Agendada por el equipo'} · {a.calendarProvider === 'internal' ? 'Agenda KAI' : a.calendarProvider === 'google' ? 'Google Calendar' : 'Calendly'}
+                      </div>
+                      {a.meetingUrl && (
+                        <a href={a.meetingUrl} target="_blank" rel="noreferrer" className="xs">
+                          Enlace de la videollamada
+                        </a>
+                      )}
+                    </div>
+                    <div className="col" style={{ alignItems: 'flex-end', gap: 6 }}>
+                      <span className={`badge ${a.status === 'scheduled' ? 'badge-info' : a.status === 'completed' ? 'badge-success' : a.status === 'no_show' ? 'badge-danger' : ''}`}>
+                        {{ scheduled: 'Programada', completed: 'Realizada', no_show: 'No presentado', cancelled: 'Cancelada', rescheduled: 'Reprogramada' }[a.status]}
+                      </span>
+                      {a.status === 'scheduled' && (
+                        <div className="row" style={{ gap: 4 }}>
+                          {/* El resultado solo se registra cuando la llamada ya ha empezado: marcar «no se presentó» en una
+                              llamada futura haría que KAI le escribiera al lead como si hubiera faltado. */}
+                          {new Date(a.startsAt) <= new Date() && (
+                            <Button size="sm" onClick={() => setOutcomeFor(a.id)}>
+                              Resultado
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => setCancelFor(a)}>
+                            Cancelar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Seguimientos" icon={Repeat}>
+            {data.followUps.length === 0 ? (
+              <p className="muted small">KAI programará seguimientos si el lead deja de responder.</p>
+            ) : (
+              <div className="col gap-4">
+                {data.followUps.slice(0, 10).map(({ followUp: f }) => (
+                  <div key={f.id} className="row-between small" style={{ padding: '5px 0' }}>
+                    <span>
+                      Paso {f.step} · {f.status === 'scheduled' ? `programado ${dateTime(f.scheduledFor, tz)}` : f.status === 'sent' ? `enviado ${timeAgo(f.sentAt)}` : f.note ?? f.status}
+                    </span>
+                    <span className={`badge ${f.status === 'sent' ? 'badge-success' : f.status === 'scheduled' ? 'badge-info' : ''}`}>
+                      {{ scheduled: 'Programado', sent: 'Enviado', cancelled: 'Cancelado', skipped: 'Omitido', failed: 'Fallido' }[f.status] ?? f.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Historial" icon={History}>
+            <div className="col" style={{ gap: 0 }}>
+              {data.events.slice(0, 40).map((e) => (
+                <div key={e.id} className="row" style={{ alignItems: 'flex-start', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--border)' }}>
+                  <span className="badge" style={{ minWidth: 70, justifyContent: 'center' }}>
+                    {ACTOR_LABELS[e.actorType] ?? e.actorType}
+                  </span>
+                  <div className="grow small">
+                    <div>{EVENT_LABELS[e.type] ?? e.type}</div>
+                    {describeEvent(e) && <div className="subtle xs">{describeEvent(e)}</div>}
+                  </div>
+                  <span className="subtle xs">{timeAgo(e.createdAt)}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <OptOutDialog lead={lead} open={optOutOpen} onClose={() => setOptOutOpen(false)} />
+      <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversation?.id} />
+      <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
+      <Modal
+        open={cancelFor !== null}
+        onClose={() => !cancelAppt.isPending && setCancelFor(null)}
+        title="¿Cancelar la llamada?"
+        footer={
+          <>
+            <Button onClick={() => setCancelFor(null)} disabled={cancelAppt.isPending}>
+              Mantener la llamada
+            </Button>
+            {canWriteToLead && (
+              <Button
+                icon={MessagesSquare}
+                loading={cancelAppt.isPending && cancelAppt.variables?.thenWrite === true}
+                disabled={cancelAppt.isPending}
+                onClick={() => cancelFor && cancelAppt.mutate({ id: cancelFor.id, thenWrite: true })}
+              >
+                Cancelar y escribirle
+              </Button>
+            )}
+            <Button
+              variant="danger"
+              loading={cancelAppt.isPending && cancelAppt.variables?.thenWrite === false}
+              disabled={cancelAppt.isPending}
+              onClick={() => cancelFor && cancelAppt.mutate({ id: cancelFor.id, thenWrite: false })}
+            >
+              Cancelar llamada
+            </Button>
+          </>
+        }
+      >
+        {cancelFor && (
+          <div className="col gap-12">
+            <p className="muted" style={{ margin: 0 }}>
+              Vas a cancelar la llamada con <strong>{lead.name || 'este lead'}</strong> del <strong>{dateTime(cancelFor.startsAt, tz)}</strong>. Se quitará de tu
+              agenda, se cancelarán la confirmación y los recordatorios y el lead volverá a una etapa anterior del pipeline. No se puede deshacer.
+            </p>
+            {cancelFor.calendarProvider === 'google' && (
+              <p className="muted small" style={{ margin: 0 }}>
+                También se borrará de tu Google Calendar y, si el lead estaba invitado al evento, Google le enviará un email de cancelación.
+              </p>
+            )}
+            <Callout tone="warning">
+              KAI no le escribe para avisarle.{' '}
+              {canWriteToLead ? 'Si quieres que lo sepa, pulsa «Cancelar y escribirle» y cuéntaselo tú desde la conversación.' : 'Si quieres que lo sepa, avísale por otra vía.'}
+            </Callout>
+          </div>
+        )}
+      </Modal>
+      <ConfirmDialog
+        open={confirmDelete}
+        title="¿Eliminar este lead?"
+        message="Se borrarán definitivamente el lead, sus conversaciones, mensajes, citas y memoria. Esta acción no se puede deshacer."
+        confirmLabel="Eliminar definitivamente"
+        danger
+        loading={del.isPending}
+        onConfirm={() => del.mutate()}
+        onClose={() => setConfirmDelete(false)}
+      />
+    </div>
+  );
+}

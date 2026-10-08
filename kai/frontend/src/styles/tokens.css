@@ -1,0 +1,130 @@
+/*
+ * KAI — tokens de diseño.
+ * Identidad: grafito profundo + "volt" (verde lima eléctrico): inteligencia, velocidad, rendimiento.
+ * Tema oscuro por defecto; el tema claro redefine los mismos tokens.
+ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Space Grotesk', 'Inter Variable', system-ui, sans-serif;
+
+  --bg: #0b0c0e;
+  --bg-elev: #0f1114;
+  --surface: #15171c;
+  --surface-2: #1b1e24;
+  --surface-3: #23272f;
+  --border: #252930;
+  --border-strong: #343944;
+  --text: #eef0f3;
+  --text-2: #a8afbb;
+  /* Texto secundario (pistas, fechas, notas): ≥ 4,5:1 sobre las superficies del tema oscuro (WCAG AA). */
+  --text-3: #8a92a0;
+
+  --accent: #c6ff3d;
+  --accent-hover: #b3f01f;
+  --accent-ink: #0b0c0e;
+  --accent-text: #c6ff3d;
+  --accent-soft: rgba(198, 255, 61, 0.12);
+  --accent-line: rgba(198, 255, 61, 0.35);
+
+  --info: #6aa5ff;
+  --info-soft: rgba(106, 165, 255, 0.14);
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.14);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --hot: #ff7a45;
+  --hot-soft: rgba(255, 122, 69, 0.15);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.15);
+  --slate-soft: rgba(168, 175, 187, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+  --ring: 0 0 0 3px rgba(198, 255, 61, 0.32);
+
+  /* Gráficas (paleta categórica validada para fondo oscuro, en orden fijo) */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --grid: #262a31;
+  --funnel-1: #86b6ef;
+  --funnel-2: #5598e7;
+  --funnel-3: #2a78d6;
+  --funnel-4: #1c5cab;
+  --funnel-5: #184f95;
+
+  --radius-xs: 6px;
+  --radius-s: 8px;
+  --radius: 12px;
+  --radius-l: 16px;
+  --radius-xl: 22px;
+
+  --sidebar-w: 248px;
+  --topbar-h: 60px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #e8ebf0;
+  --border: #e3e6eb;
+  --border-strong: #cdd2da;
+  --text: #0e1116;
+  --text-2: #4b5260;
+  /* Texto secundario: ≥ 4,5:1 sobre blanco, fondo y superficies del tema claro (WCAG AA). */
+  --text-3: #5f6673;
+
+  --accent: #c6ff3d;
+  --accent-hover: #b3f01f;
+  --accent-ink: #0b0c0e;
+  --accent-text: #4a6e00;
+  --accent-soft: rgba(124, 176, 0, 0.14);
+  --accent-line: rgba(100, 150, 0, 0.45);
+
+  /* Colores de estado: se usan como texto sobre su fondo suave (insignias de 11,5 px) y sobre las superficies.
+     Todos dan ≥ 4,5:1 (WCAG AA) sobre su fondo suave encima de blanco, --bg, --surface-2 y --surface-3. */
+  --info: #1d4ed8;
+  --info-soft: rgba(37, 99, 235, 0.1);
+  --success: #05704f;
+  --success-soft: rgba(5, 150, 105, 0.1);
+  --warning: #92400e;
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --danger: #b91c1c;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+  --hot: #ad3a0b;
+  --hot-soft: rgba(234, 88, 12, 0.1);
+  --violet: #7c3aed;
+  --violet-soft: rgba(124, 58, 237, 0.1);
+  --slate-soft: rgba(75, 82, 96, 0.08);
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 10px 30px rgba(16, 24, 40, 0.1);
+  --shadow-lg: 0 24px 60px rgba(16, 24, 40, 0.16);
+  --ring: 0 0 0 3px rgba(124, 176, 0, 0.35);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --grid: #eceef2;
+  --funnel-1: #86b6ef;
+  --funnel-2: #5598e7;
+  --funnel-3: #2a78d6;
+  --funnel-4: #1c5cab;
+  --funnel-5: #184f95;
+}

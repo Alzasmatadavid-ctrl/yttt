@@ -1,0 +1,36 @@
+# KAI + PostgreSQL en tu propio servidor (opcional).
+#   1. Copia .env.example a .env y rellena al menos ENCRYPTION_KEY, APP_URL y POSTGRES_PASSWORD.
+#   2. docker compose up -d --build
+#   3. Abre APP_URL en el navegador.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kai
+      POSTGRES_USER: kai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+    volumes:
+      - kai-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kai -d kai']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://kai:${POSTGRES_PASSWORD}@db:5432/kai
+      SERVE_FRONTEND: 'true'
+    ports:
+      - '3000:3000'
+
+volumes:
+  kai-db:
