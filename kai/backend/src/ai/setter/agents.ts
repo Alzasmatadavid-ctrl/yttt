@@ -453,14 +453,14 @@ export class RuleBasedSetterAgent implements SetterAgent {
               `Te lo confirmo: ${svc.name} son ${price}. ¿Hay algo de lo que incluye que quieras que te aclare?`,
             ]);
           else if (callDeclined) text = withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} ¿Qué te parece?`);
-          else text = withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para valorar si encaja contigo?`);
+          else text = withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} ¿Te gustaría verlo con ${trainer} en una ${s.callLabel} para ver si encaja contigo?`);
         }
         break;
       }
       case 'propose_call': {
         // La memoria guarda la frase del lead: se menciona el acontecimiento, no se cita literalmente.
         const lead_in = event ? `Teniendo en cuenta ${event}, ` : 'Por lo que me cuentas, ';
-        text = `${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para valorar tu caso. ¿Te encaja?`;
+        text = `${lead_in}creo que tendría sentido que lo vierais en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer} para revisar tu caso. ¿Te encaja?`;
         shorter = [`Creo que tendría sentido verlo en una ${s.callLabel} de ${s.callDurationMinutes} minutos con ${trainer}. ¿Te encaja?`];
         break;
       }
@@ -473,11 +473,16 @@ export class RuleBasedSetterAgent implements SetterAgent {
         const pn = normalize(pendingText);
         const shift = !current ? null : /\bmas tarde\b|\bhoras? despues\b/.test(pn) ? 'later' : /\bmas (?:pronto|temprano)\b|\b(?:horas?|poco) antes\b/.test(pn) ? 'earlier' : null;
         const sameDay = current && shift ? DateTime.fromJSDate(current.startsAt).setZone(biz.business.timezone).toISODate() : null;
+        // «¿Podemos pasarla a otro día?» sin decir cuál: desde el día siguiente al de la llamada que tiene (otra hora
+        // de ese mismo día no es lo que pide).
+        const otherDay = current && !shift && !directive.slotQuery?.date && /\b(?:otro dia|otra fecha|dia distinto)\b/.test(pn);
+        const fromNextDay = otherDay && current ? DateTime.fromJSDate(current.startsAt).setZone(biz.business.timezone).plus({ days: 1 }).startOf('day').minus({ milliseconds: 1 }) : null;
         const r = await input.toolbox.run('get_available_slots', {
           date: directive.slotQuery?.date ?? sameDay ?? null,
           part_of_day: directive.slotQuery?.partOfDay ?? 'any',
           ...(current && shift === 'later' ? { later_than: current.startsAt.toISOString() } : {}),
           ...(current && shift === 'earlier' ? { earlier_than: current.startsAt.toISOString() } : {}),
+          ...(fromNextDay ? { later_than: fromNextDay.toUTC().toISO() } : {}),
         });
         const data = JSON.parse(r.content) as { slots?: { label: string }[]; note?: string };
         const labels = (data.slots ?? []).map((x) => x.label);

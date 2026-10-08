@@ -90,6 +90,12 @@ export default function Pipeline() {
     if (lead) changeStatus(lead, status);
   };
 
+  /** Desplaza el tablero hasta la columna de una etapa (atajos de la barra de etapas). */
+  const goToColumn = (status: LeadStatus) => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById(`board-col-${status}`)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest', inline: 'start' });
+  };
+
   const confirmClient = () => {
     if (!clientModal) return;
     const amount = parseOptionalAmount(deal, { currency });
@@ -113,70 +119,81 @@ export default function Pipeline() {
       {leads.length === 0 && !search ? (
         <EmptyState icon={SquareKanban} title="Tu pipeline está vacío" description="Los leads aparecerán aquí en cuanto entren por cualquier canal." />
       ) : (
-        <div className="board">
-          {LEAD_STATUSES.map((s) => {
-            const col = byStatus.get(s.key) ?? [];
-            const value = col.length * price;
-            return (
-              <section
-                key={s.key}
-                className={`board-col ${overCol === s.key ? 'drop' : ''}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setOverCol(s.key);
-                }}
-                onDragLeave={() => setOverCol((c) => (c === s.key ? null : c))}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  drop(s.key);
-                }}
-                aria-label={s.label}
-              >
-                <div className="board-col-header">
-                  <strong className="small">{s.label}</strong>
-                  <span className="badge tnum">{col.length}</span>
-                </div>
-                {price > 0 && col.length > 0 && !['lost'].includes(s.key) && (
-                  <div className="subtle xs" style={{ padding: '0 12px 6px' }}>
-                    {money(value, currency)} potencial
+        <>
+          {/* Atajos a cada etapa: en el móvil se ve una columna cada vez y así se sabe cuántas hay y cuántos leads tiene cada una. */}
+          <nav className="board-nav" aria-label="Ir a una etapa del pipeline">
+            {LEAD_STATUSES.map((s) => (
+              <button key={s.key} type="button" className="chip" onClick={() => goToColumn(s.key)}>
+                {s.label} <span className="count">{byStatus.get(s.key)?.length ?? 0}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="board">
+            {LEAD_STATUSES.map((s) => {
+              const col = byStatus.get(s.key) ?? [];
+              const value = col.length * price;
+              return (
+                <section
+                  key={s.key}
+                  id={`board-col-${s.key}`}
+                  className={`board-col ${overCol === s.key ? 'drop' : ''}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setOverCol(s.key);
+                  }}
+                  onDragLeave={() => setOverCol((c) => (c === s.key ? null : c))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    drop(s.key);
+                  }}
+                  aria-label={s.label}
+                >
+                  <div className="board-col-header">
+                    <strong className="small">{s.label}</strong>
+                    <span className="badge tnum">{col.length}</span>
                   </div>
-                )}
-                <div className="board-cards">
-                  {col.map((l) => (
-                    <div
-                      key={l.id}
-                      className={`lead-card ${dragId === l.id ? 'dragging' : ''}`}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragId(l.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragEnd={() => setDragId(null)}
-                    >
-                      <button type="button" className="lead-card-main" onClick={() => navigate(`/app/leads/${l.id}`)}>
-                        <span className="row" style={{ gap: 8 }}>
-                          <LeadAvatar name={l.name} url={l.avatarUrl} size={28} channel={l.source} />
-                          <strong className="ellipsis grow small">{l.name || 'Sin nombre'}</strong>
-                          <ScoreBadge score={l.score} />
-                        </span>
-                        {l.goalSummary && <span className="muted xs ellipsis">{l.goalSummary}</span>}
-                      </button>
-                      <div className="row-between" style={{ gap: 6 }}>
-                        <TemperatureBadge temperature={l.temperature} />
-                        <span className="row" style={{ gap: 4 }}>
-                          <span className="subtle xs">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</span>
-                          <Button variant="ghost" size="sm" iconOnly icon={ArrowRightLeft} className="lead-card-move" onClick={() => setMoveFor(l)} title="Mover a otra etapa">
-                            {`Mover a ${l.name || 'este lead'} a otra etapa`}
-                          </Button>
-                        </span>
-                      </div>
+                  {price > 0 && col.length > 0 && !['lost'].includes(s.key) && (
+                    <div className="subtle xs" style={{ padding: '0 12px 6px' }}>
+                      {money(value, currency)} potencial
                     </div>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+                  )}
+                  <div className="board-cards">
+                    {col.map((l) => (
+                      <div
+                        key={l.id}
+                        className={`lead-card ${dragId === l.id ? 'dragging' : ''}`}
+                        draggable
+                        onDragStart={(e) => {
+                          setDragId(l.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => setDragId(null)}
+                      >
+                        <button type="button" className="lead-card-main" onClick={() => navigate(`/app/leads/${l.id}`)}>
+                          <span className="row" style={{ gap: 8 }}>
+                            <LeadAvatar name={l.name} url={l.avatarUrl} size={28} channel={l.source} />
+                            <strong className="ellipsis grow small">{l.name || 'Sin nombre'}</strong>
+                            <ScoreBadge score={l.score} />
+                          </span>
+                          {l.goalSummary && <span className="muted xs ellipsis">{l.goalSummary}</span>}
+                        </button>
+                        <div className="row-between" style={{ gap: 6 }}>
+                          <TemperatureBadge temperature={l.temperature} />
+                          <span className="row" style={{ gap: 4 }}>
+                            <span className="subtle xs">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</span>
+                            <Button variant="ghost" size="sm" iconOnly icon={ArrowRightLeft} className="lead-card-move" onClick={() => setMoveFor(l)} title="Mover a otra etapa">
+                              {`Mover a ${l.name || 'este lead'} a otra etapa`}
+                            </Button>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </>
       )}
       <Modal open={Boolean(moveFor)} onClose={() => setMoveFor(null)} title={`Mover a ${moveFor?.name || 'este lead'}`}>
         {moveFor && (

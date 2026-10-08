@@ -8,6 +8,7 @@ import { useAuth } from '../../lib/auth';
 import { Button, Callout, ConfirmDialog, EmptyState, PageHeader, PageLoading } from '../../components/ui';
 import type { SettingsResponse } from '../../lib/types';
 import type { TabProps } from './setter-shared';
+import { useLeaveGuard } from '../leave-guard';
 import PersonalityTab from './PersonalityTab';
 import QualificationTab from './QualificationTab';
 import ScoringTab from './ScoringTab';
@@ -56,36 +57,10 @@ export default function SetterSettings() {
   );
   const pendingTabs = TABS.filter((t) => dirty[t.value]);
 
-  // Aviso del navegador si se intenta cerrar o recargar con cambios sin guardar.
+  // Con cambios sin guardar: aviso al cerrar o recargar y «¿Salir sin guardar?» al ir a otra pantalla
+  // (menú, enlaces, avisos de la campana, Copilot o «Probar en el simulador»).
   const anyDirty = pendingTabs.length > 0;
-  useEffect(() => {
-    if (!anyDirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [anyDirty]);
-
-  // Aviso propio al ir a otra pantalla de la aplicación (menú lateral, enlaces…) con cambios sin guardar.
-  const [leaveTo, setLeaveTo] = useState<string | null>(null);
-  useEffect(() => {
-    if (!anyDirty) return;
-    const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const link = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null;
-      if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
-      const url = new URL(link.href, window.location.href);
-      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setLeaveTo(url.pathname + url.search + url.hash);
-    };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, [anyDirty]);
-  const goTo = (path: string) => (anyDirty ? setLeaveTo(path) : navigate(path));
+  const leave = useLeaveGuard(anyDirty);
 
   // En pantallas estrechas, la pestaña activa siempre queda a la vista dentro de la barra de pestañas.
   useEffect(() => {
@@ -121,7 +96,7 @@ export default function SetterSettings() {
       title="Setter IA"
       description="Configura cómo conversa KAI con tus leads: cómo se presenta, qué averigua, cómo puntúa, qué ofrece y cuándo te pasa la conversación. Los cambios se aplican a los mensajes nuevos."
       actions={
-        <Button icon={FlaskConical} onClick={() => goTo('/app/simulador')}>
+        <Button icon={FlaskConical} onClick={() => navigate('/app/simulador')}>
           Probar en el simulador
         </Button>
       }
@@ -207,7 +182,7 @@ export default function SetterSettings() {
       })}
 
       <ConfirmDialog
-        open={leaveTo !== null}
+        open={leave.leaving}
         title="¿Salir sin guardar?"
         message={
           <>
@@ -216,12 +191,8 @@ export default function SetterSettings() {
         }
         confirmLabel="Salir sin guardar"
         danger
-        onConfirm={() => {
-          const target = leaveTo;
-          setLeaveTo(null);
-          if (target) navigate(target);
-        }}
-        onClose={() => setLeaveTo(null)}
+        onConfirm={leave.leave}
+        onClose={leave.stay}
       />
     </div>
   );

@@ -222,9 +222,9 @@ export default function AppLayout() {
     },
     onError: (e) => toast(errorText(e), 'error'),
   });
-  const ownedBusinesses = me?.businesses.filter((b) => b.role === 'trainer').length ?? 0;
+  // Igual que el servidor: el límite del plan cuenta los negocios de la cuenta (el principal y los creados desde él).
   const canAddBusiness =
-    activeBusiness?.role === 'trainer' && (activeBusiness.maxBusinesses === null || ownedBusinesses < (activeBusiness.maxBusinesses ?? 1));
+    activeBusiness?.role === 'trainer' && (activeBusiness.maxBusinesses === null || (activeBusiness.accountBusinesses ?? 1) < activeBusiness.maxBusinesses);
   const hasBizMenu = (me?.businesses.length ?? 0) > 1 || canAddBusiness;
 
   const pendingCount = inbox.data?.counts.pending ?? 0;

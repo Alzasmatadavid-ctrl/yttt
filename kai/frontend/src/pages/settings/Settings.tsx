@@ -1,9 +1,10 @@
 /* Página «Ajustes»: negocio, equipo, plan y cuenta, en pestañas sincronizadas con ?tab=. */
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useCallback, useState, type KeyboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Lock, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { Button, Callout, PageHeader } from '../../components/ui';
+import { Button, Callout, ConfirmDialog, PageHeader } from '../../components/ui';
+import { useLeaveGuard } from '../leave-guard';
 import BusinessTab from './BusinessTab';
 import TeamTab from './TeamTab';
 import PlanTab from './PlanTab';
@@ -43,16 +44,9 @@ export default function Settings() {
   const [businessDirty, setBusinessDirty] = useState(false);
   const onBusinessDirty = useCallback((d: boolean) => setBusinessDirty(d), []);
 
-  // Aviso del navegador si se intenta cerrar o recargar con cambios sin guardar.
-  useEffect(() => {
-    if (!businessDirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [businessDirty]);
+  // Con cambios sin guardar en «Negocio»: aviso al cerrar o recargar y «¿Salir sin guardar?» al ir a otra pantalla
+  // (menú, enlaces, avisos de la campana, Copilot o «Configurar el setter»). Antes solo avisaba al cerrar la pestaña.
+  const leave = useLeaveGuard(businessDirty);
 
   const selectTab = (next: TabKey) => {
     if (next === tab) return;
@@ -147,6 +141,16 @@ export default function Settings() {
             ))}
         </div>
       ))}
+
+      <ConfirmDialog
+        open={leave.leaving}
+        title="¿Salir sin guardar?"
+        message="Tienes cambios sin guardar en «Negocio». Si sales ahora, se perderán. Para conservarlos, quédate y pulsa Guardar en cada tarjeta que hayas cambiado."
+        confirmLabel="Salir sin guardar"
+        danger
+        onConfirm={leave.leave}
+        onClose={leave.stay}
+      />
     </div>
   );
 }

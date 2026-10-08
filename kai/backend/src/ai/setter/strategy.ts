@@ -210,7 +210,7 @@ export function decideDirective(input: StrategyInput): Directive {
         needsSlots: true,
         slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
         instruction:
-          'El lead quiere mover (o no puede asistir a) su llamada. Sin dramas: consulta huecos con get_available_slots y ofrécele 2 alternativas para reprogramar. Si elige una, usa reschedule_call. Solo usa cancel_call si pide cancelar explícitamente y no quiere otra hora.',
+          'El lead quiere mover (o no puede asistir a) su llamada. Sin dramas: consulta huecos con get_available_slots y ofrécele 2 alternativas para reprogramar (si pide otro día sin decir cuál, que no sean del mismo día de su llamada). Si elige una, usa reschedule_call. Solo usa cancel_call si pide cancelar explícitamente y no quiere otra hora.',
         answerQuestionFirst,
       };
     }

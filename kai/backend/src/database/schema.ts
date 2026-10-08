@@ -6,6 +6,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   date,
   index,
@@ -137,6 +138,11 @@ export const businesses = pgTable('businesses', {
   onboardingCompletedAt: ts('onboarding_completed_at'),
   /** Inversión mensual en anuncios (para ROI estimado). Opcional. */
   monthlyAdSpendCents: integer('monthly_ad_spend_cents').notNull().default(0),
+  /**
+   * Negocio principal de la cuenta (desde el que se crean los negocios adicionales); null = este es el principal.
+   * El límite de negocios del plan se cuenta por cuenta, no por persona del equipo.
+   */
+  accountBusinessId: uuid('account_business_id').references((): AnyPgColumn => businesses.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -641,8 +647,19 @@ export const alerts = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     businessId: businessRef(),
+    // contact_unverified: un formulario trae datos de contacto distintos de los de un lead que ya existe.
     type: text('type')
-      .$type<'handoff' | 'call_outcome' | 'integration_error' | 'limit_reached' | 'delivery_blocked' | 'new_lead_manual' | 'no_availability' | 'client_message'>()
+      .$type<
+        | 'handoff'
+        | 'call_outcome'
+        | 'integration_error'
+        | 'limit_reached'
+        | 'delivery_blocked'
+        | 'new_lead_manual'
+        | 'no_availability'
+        | 'client_message'
+        | 'contact_unverified'
+      >()
       .notNull(),
     severity: text('severity').$type<'info' | 'warning' | 'critical'>().notNull().default('warning'),
     title: text('title').notNull(),

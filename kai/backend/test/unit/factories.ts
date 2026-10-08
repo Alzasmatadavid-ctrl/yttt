@@ -75,6 +75,7 @@ export function makeBusiness(overrides: Partial<BusinessRow> = {}): BusinessRow 
     onboardingStep: 5,
     onboardingCompletedAt: CREATED,
     monthlyAdSpendCents: 0,
+    accountBusinessId: null,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...overrides,

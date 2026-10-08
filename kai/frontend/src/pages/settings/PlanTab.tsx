@@ -124,7 +124,7 @@ function PlanCards({ plans, currentId }: { plans: Plan[]; currentId: string | nu
 }
 
 export default function PlanTab() {
-  const { me, activeBusiness } = useAuth();
+  const { activeBusiness } = useAuth();
   const plan = useQuery({ queryKey: PLAN_QUERY_KEY, queryFn: () => api.get<PlanResponse>('/settings/plan') });
 
   if (plan.isPending) return <PageLoading />;
@@ -153,8 +153,8 @@ export default function PlanTab() {
   const currentInTable = current ? plans.some((p) => p.id === current.id) : false;
   const monthName = new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   const copilotQueries = data.usage.copilot_queries ?? 0;
-  // Igual que el servidor: cuentan los negocios en los que tienes el rol Entrenador.
-  const ownedBusinesses = me?.businesses.filter((b) => b.role === 'trainer').length ?? 0;
+  // Igual que el servidor: cuentan los negocios de la cuenta (el principal y los creados desde él), no los de cada persona.
+  const ownedBusinesses = activeBusiness?.accountBusinesses ?? 1;
   const maxBusinesses = data.limits.maxBusinesses;
   const isTrainer = activeBusiness?.role === 'trainer';
   const businessesBadge = !isTrainer

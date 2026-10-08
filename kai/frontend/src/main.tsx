@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router';
+import { createBrowserRouter, RouterProvider } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
@@ -26,16 +26,25 @@ const queryClient = new QueryClient({
   },
 });
 
+// Router «de datos» con una sola ruta comodín: las rutas de verdad siguen en <Routes> dentro de App. Hace falta para
+// useBlocker («¿Salir sin guardar?» también con Atrás/Adelante del navegador, ver pages/leave-guard.ts).
+const router = createBrowserRouter([
+  {
+    path: '*',
+    element: (
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
+    ),
+  },
+]);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </ToastProvider>
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,
 );

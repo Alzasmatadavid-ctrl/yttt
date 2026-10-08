@@ -167,6 +167,7 @@ async function registerOptOutFromInbound(businessId: string, lead: Lead, convers
     body: `${lead.name || 'Un lead'} ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». Se ha registrado la baja: no se le enviarán más mensajes y se han cancelado sus seguimientos y recordatorios. Si ha sido un malentendido, puedes darle de alta de nuevo desde su ficha.`,
     leadId: lead.id,
     conversationId: conversation.id,
+    dedupeByTitle: true,
   });
 }
 

@@ -14,7 +14,11 @@ export interface CreateAlertInput {
   leadId?: string | null;
   conversationId?: string | null;
   appointmentId?: string | null;
-  /** Avisos sin lead ni cita: no crear otro si ya hay uno abierto del mismo tipo y con el mismo título. */
+  /**
+   * No crear otro si ya hay uno abierto del mismo tipo y con el mismo título (y del mismo lead/cita, si los hay).
+   * Con lead o cita, sin esta opción basta con el mismo tipo: un aviso distinto del mismo tipo (p. ej. «Mensaje no
+   * enviado» y «Un lead ha pedido no recibir más mensajes») quedaría oculto detrás del otro.
+   */
   dedupeByTitle?: boolean;
 }
 
@@ -29,7 +33,7 @@ export async function createAlert(input: CreateAlertInput) {
   const conds = [eq(alerts.businessId, input.businessId), eq(alerts.type, input.type), eq(alerts.status, 'open')];
   if (input.leadId) conds.push(eq(alerts.leadId, input.leadId));
   if (input.appointmentId) conds.push(eq(alerts.appointmentId, input.appointmentId));
-  if (!input.leadId && !input.appointmentId && input.dedupeByTitle) conds.push(eq(alerts.title, input.title));
+  if (input.dedupeByTitle) conds.push(eq(alerts.title, input.title));
   if (input.leadId || input.appointmentId || input.dedupeByTitle) {
     const [existing] = await db.select().from(alerts).where(and(...conds)).limit(1);
     if (existing) return existing;

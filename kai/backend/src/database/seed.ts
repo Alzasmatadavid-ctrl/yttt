@@ -98,6 +98,8 @@ interface DemoLead {
   lostReason?: string;
   handoff?: { reason: string; title: string; body: string };
   outcomeAlert?: boolean;
+  /** Mensajes del lead que el entrenador aún no ha abierto (por defecto, 1 si el último mensaje es del lead). */
+  unread?: number;
   optedOut?: boolean;
   state?: Partial<ConversationState>;
   notes?: string;
@@ -112,10 +114,16 @@ const DEMO_LEADS: DemoLead[] = [
     source: 'instagram',
     sourceDetail: 'Respuesta a historia',
     channel: 'instagram',
-    status: 'new',
+    status: 'conversing',
     daysAgo: 0,
     startHour: 9,
-    thread: [['lead', 'Buenas! Vi tu reel de los errores al perder grasa y me sentí muy identificado', 0]],
+    // Cada hilo termina como lo dejaría KAI con los canales conectados: el lead escribe y KAI le contesta al momento.
+    // Así «Pendientes» solo muestra lo que de verdad necesita al entrenador (el escalado de Andrés Vidal).
+    thread: [
+      ['lead', 'Buenas! Vi tu reel de los errores al perder grasa y me sentí muy identificado', 0],
+      ['kai', `¡Hola Javier! ${DISCLOSURE}. Me alegra que el reel te haya servido. ¿Qué te gustaría conseguir ahora mismo?`, 1],
+    ],
+    unread: 1,
   },
   {
     name: 'Rubén Ortega',
@@ -153,7 +161,9 @@ const DEMO_LEADS: DemoLead[] = [
       ['lead', 'Pues sobre todo quitarme la barriga y ganar algo de músculo', 9],
       ['kai', 'Tiene todo el sentido, es de lo más habitual en los chicos que trabajamos. ¿Cómo es ahora mismo tu semana con el entrenamiento?', 10],
       ['lead', 'Trabajo en oficina y voy al gym 2 días pero sin plan, hago un poco de todo', 26],
+      ['kai', 'Ya tienes el hábito de ir, que es lo más difícil. Ir sin un plan claro es muy habitual. ¿Qué es lo que más te está costando para ver resultados?', 27],
     ],
+    unread: 1,
     memories: [{ kind: 'fact', content: 'Trabaja en oficina muchas horas sentado.' }],
   },
   {
@@ -177,6 +187,7 @@ const DEMO_LEADS: DemoLead[] = [
       ['lead', 'Pues que tengo dos peques y llego reventado a casa, quiero tener energía para jugar con ellos', 35],
       ['kai', 'Qué buen motivo. Con dos peques el tiempo es oro, así que lo que hagamos tiene que encajar en tu día a día. ¿Qué te ha pasado otras veces cuando lo has intentado?', 36],
       ['lead', 'Empiezo con muchas ganas y a las 3 semanas lo dejo. Además como fuera bastante por trabajo', 80],
+      ['kai', 'Te entiendo: empezar a tope y dejarlo a las pocas semanas es lo más habitual. Por eso en Kaizen se avanza paso a paso, también comiendo fuera. ¿Te gustaría empezar este mes o lo ves para más adelante?', 81],
     ],
     memories: [
       { kind: 'personal', content: 'Tiene dos hijos pequeños.', importance: 3 },
@@ -209,6 +220,7 @@ const DEMO_LEADS: DemoLead[] = [
       ['lead', 'Ayuno intermitente y una app de dietas, pero por la noche acabo picoteando siempre', 30],
       ['kai', 'Es muy normal: cuando todo depende de la fuerza de voluntad, la noche es el punto débil. ¿Cuánto tiempo a la semana podrías dedicar a entrenar?', 31],
       ['lead', '3 días seguro, y quiero empezar este mes sí o sí', 52],
+      ['kai', '¡Así me gusta! Con 3 días a la semana se puede hacer un trabajo muy bueno. ¿Estarías dispuesto a invertir en un acompañamiento profesional si ves que encaja contigo?', 53],
     ],
     memories: [{ kind: 'preference', content: 'Prefiere entrenar por la mañana antes de trabajar.' }],
   },
@@ -354,6 +366,7 @@ const DEMO_LEADS: DemoLead[] = [
       ['lead', 'Me lo tengo que pensar y hablar con mi pareja', 300],
       ['kai', 'Claro, tiene todo el sentido decidirlo juntos. La llamada no te compromete a nada y te puede ayudar a tener las cosas claras para hablarlo. ¿Te escribo la semana que viene?', 301],
       ['lead', 'Sí, mejor', 330],
+      ['kai', 'Perfecto, Luis. Te escribo la semana que viene y lo vemos con calma. ¡Que vaya bien la charla con tu pareja!', 331],
     ],
     appointment: { daysOffset: -5, hour: 10, status: 'completed', outcome: 'follow_up', notes: 'Lo habla con su pareja. Retomar la semana que viene.' },
     notes: 'Retomar el contacto la semana que viene.',
@@ -717,7 +730,7 @@ async function createDemoLead(businessId: string, userId: string, spec: DemoLead
       handoffActive: Boolean(spec.handoff),
       handoffReason: spec.handoff?.reason ?? null,
       handoffAt: spec.handoff ? at(lastMinute) : null,
-      unreadCount: lastMsg && lastMsg[0] === 'lead' ? 1 : 0,
+      unreadCount: spec.unread ?? (lastMsg && lastMsg[0] === 'lead' ? 1 : 0),
       lastMessageAt: lastMsg ? at(lastMsg[2]) : null,
       lastMessagePreview: lastMsg ? lastMsg[1].slice(0, 140) : null,
       lastInboundAt,

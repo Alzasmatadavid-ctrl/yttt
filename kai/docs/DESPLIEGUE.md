@@ -105,7 +105,7 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 
 ## Lista de comprobación antes de vender KAI
 
-- [ ] `NODE_ENV=production`, `ENCRYPTION_KEY` y `DATABASE_URL` configuradas (sin ellas KAI no arranca en producción, a propósito).
+- [ ] `NODE_ENV=production`, `ENCRYPTION_KEY` y `DATABASE_URL` configuradas (sin ellas KAI no arranca en producción, a propósito). Si falta `NODE_ENV` pero `APP_URL` usa `https://` con tu dominio o la base de datos está en otro servidor, KAI arranca igualmente en modo producción y lo avisa en los registros.
 - [ ] `APP_URL` con `https://` y tu dominio definitivo (las cookies de sesión se marcan como seguras).
 - [ ] `ADMIN_PASSWORD` larga y única (mínimo 12 caracteres con letras y números; si es más débil, la cuenta no se crea). Tras el primer arranque puedes borrarla de las variables: la cuenta ya existe.
 - [ ] Email real configurado (Resend) para recuperar contraseñas e invitaciones (sin él, en producción no se envía ningún email).

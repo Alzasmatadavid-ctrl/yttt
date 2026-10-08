@@ -182,6 +182,24 @@ export function leadMessageUnanswered(): SQL {
 }
 
 /**
+ * Se intentó contestar al último mensaje del lead (KAI o el equipo) y la respuesta no se pudo enviar (canal sin
+ * conectar, ventana de 24 h cerrada, error de WhatsApp/Instagram…): sigue sin contestar y hay al menos un intento de
+ * respuesta «no enviado». El mismo criterio que `unsentReply` en la web (frontend/src/lib/messages.ts).
+ */
+export function replyUnsentCondition(): SQL {
+  const nonReply = sql.join(
+    NON_REPLY_PURPOSES.map((p) => sql`${p}`),
+    sql`, `,
+  );
+  return sql`(${leadMessageUnanswered()} and exists (
+    select 1 from ${messages} m
+    where m.conversation_id = ${conversations.id} and m.direction = 'outbound' and m.status in ('failed', 'skipped')
+      and m.created_at >= ${conversations.lastInboundAt}
+      and (m.sender_type = 'human' or coalesce(m.metadata->>'purpose', '') not in (${nonReply}))
+  ))`;
+}
+
+/**
  * ¿Tiene KAI una respuesta programada o en marcha para esta conversación? (trabajo `kai_reply`, clave `reply:<id>`).
  * Dos `exists` para que cada uno use su índice (el único parcial de pendientes y el de estado).
  */
@@ -272,6 +290,8 @@ export async function listInbox(
       },
       /** El último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar). */
       needsHumanReply: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })}, false)`,
+      /** …porque la respuesta que se le intentó enviar no salió (la Bandeja dice que revise el motivo). */
+      replyUnsent: sql<boolean>`coalesce(${needsHumanReplyCondition({ autopilotOn })} and ${replyUnsentCondition()}, false)`,
     })
     .from(conversations)
     .innerJoin(leads, conversationLeadJoin)

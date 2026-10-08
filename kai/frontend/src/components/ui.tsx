@@ -1,6 +1,7 @@
 /* Componentes base de la interfaz de KAI. */
 import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, type LucideIcon } from 'lucide-react';
+import { focusTrapTarget } from '../lib/focus';
 
 // ───────────── Botón ─────────────
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -256,8 +257,24 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Con el diálogo abierto, Tab no sale de él (al menú o a la página de detrás, tapados por el fondo oscuro).
+    // Si hay otro modal abierto encima (va después en el documento), es ese el que retiene el foco.
+    const keepFocusInside = (e: KeyboardEvent) => {
+      const dialog = ref.current;
+      if (!dialog) return;
+      const dialogs = document.querySelectorAll('.modal[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== dialog) return;
+      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0 && el.getClientRects().length > 0,
+      );
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const target = focusTrapTarget(focusables, active, Boolean(active && dialog.contains(active)), e.shiftKey);
+      if (focusables.length === 0 || target) e.preventDefault();
+      target?.focus();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCloseRef.current();
+      else if (e.key === 'Tab') keepFocusInside(e);
     };
     window.addEventListener('keydown', onKey);
     // Foco inicial (solo al abrir): respeta autoFocus; si no, el primer control del contenido, no el botón Cerrar de la cabecera.

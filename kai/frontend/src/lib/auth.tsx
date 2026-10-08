@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, getRequestBusiness, setRequestBusiness } from './api';
+import { sessionRetry, sessionRetryDelay } from './session';
 import type { Me } from './types';
 
 interface AuthValue {
@@ -53,7 +54,14 @@ function adoptSessionBusiness(data: Me | undefined, qc: QueryClient): boolean {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [, rerender] = useState(0);
-  const { data, isLoading, refetch } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me'), staleTime: 60_000 });
+  // Un fallo puntual (429, 502…) no es «sin sesión»: se reintenta, también el 429, y si sigue fallando RequireAuth lo dice.
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.get<Me>('/auth/me'),
+    staleTime: 60_000,
+    retry: sessionRetry,
+    retryDelay: sessionRetryDelay,
+  });
 
   // El negocio de la pestaña se fija con el primer /auth/me que tenga negocio, durante el render: así la primera petición
   // de cualquier pantalla ya sale con la cabecera. Después se mantiene aunque otra pestaña cambie el negocio de la sesión.

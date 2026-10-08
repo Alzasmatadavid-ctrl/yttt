@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, CheckCheck, Hand, Inbox as InboxIcon, PanelRight, Play, RotateCw, Search, Send, Sparkles, User, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Brain, CalendarPlus, CheckCheck, Hand, Inbox as InboxIcon, PanelRight, Play, Plug, RotateCw, Search, Send, Sparkles, User, UserRound, X } from 'lucide-react';
 import { CHANNEL_LABELS, HANDOFF_REASONS, type HandoffReason, type LeadSource, type LeadStatus, type LeadTemperature } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dateTime, dayLabel, shortTime, timeAgo, timeOnly } from '../lib/format';
 import { nextActionFor } from '../lib/leads';
+import { unsentReply } from '../lib/messages';
 import { useBusinessSettings } from '../lib/business';
 import { Button, Card, EmptyState, Spinner, Switch, useToast } from '../components/ui';
 import { LeadAvatar, ScoreBadge, SourceBadge, StatusBadge, TemperatureBadge } from '../components/lead-bits';
@@ -28,6 +29,8 @@ interface InboxItem {
   };
   /** El último mensaje del lead espera respuesta de una persona (KAI no lo va a contestar). */
   needsHumanReply?: boolean;
+  /** Se intentó contestar al lead y la respuesta no se pudo enviar (si el servidor lo indica; ver unsentReply). */
+  replyUnsent?: boolean;
 }
 
 const FILTERS: { value: string; label: string }[] = [
@@ -92,6 +95,7 @@ function MessageList({ messages }: { messages: Message[] }) {
 function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversationId: string; onBack: () => void; onTogglePanel: () => void; panelOpen: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const [text, setText] = useState('');
   const [pauseKai, setPauseKai] = useState(true);
   const { data, isLoading, error } = useQuery({
@@ -143,9 +147,12 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
     mutationFn: (replyNow: boolean) => api.post(`/conversations/${conversationId}/release`, { replyNow }),
     onSuccess: (_r, replyNow) => {
       // Sin «responder ahora», KAI solo contesta a los mensajes NUEVOS: el que ya esperaba sigue en «Pendientes».
+      // Si la respuesta anterior no se pudo enviar, no se promete que vaya a llegar: el envío puede volver a fallar.
       toast(
         replyNow
-          ? 'KAI vuelve a encargarse de esta conversación y va a contestar ahora al último mensaje.'
+          ? data?.needsHumanReply && unsentReply(data.messages)
+            ? 'KAI va a intentar contestar de nuevo. Si el envío vuelve a fallar, verás aquí el motivo.'
+            : 'KAI vuelve a encargarse de esta conversación y va a contestar ahora al último mensaje.'
           : data?.needsHumanReply
             ? 'KAI vuelve a encargarse de esta conversación y contestará a los mensajes nuevos. El último mensaje del lead sigue en «Pendientes» hasta que alguien lo responda.'
             : 'KAI vuelve a encargarse de esta conversación.',
@@ -178,6 +185,10 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
   // Mensaje del lead sin contestar fuera de un escalado: se ofrece que KAI lo responda (con el piloto automático
   // en pausa KAI no responde a nadie, y a un lead dado de baja no se le puede escribir).
   const canKaiReplyNow = Boolean(data.needsHumanReply) && autopilotOn && !lead.optedOut && lead.status !== 'client';
+  // Ya se intentó contestar (KAI o el equipo) y la respuesta no llegó al lead: el problema es el envío (canal sin
+  // conectar, ventana de 24 h cerrada…). Se explica el motivo en vez de decir que nadie ha contestado.
+  const unsent = data.needsHumanReply && !conv.handoffActive && !lead.optedOut ? unsentReply(data.messages) : null;
+  const offerKaiReply = canKaiReplyNow && !unsent;
 
   return (
     <section className="thread" aria-label={`Conversación con ${lead.name}`}>
@@ -189,20 +200,24 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="row" style={{ gap: 8 }}>
             <strong className="ellipsis">{lead.name || 'Sin nombre'}</strong>
-            <StatusBadge status={lead.status} />
+            {/* En móvil la etapa se oculta (layout.css) para que se lea el nombre del lead. */}
+            <span className="thread-status">
+              <StatusBadge status={lead.status} />
+            </span>
           </div>
           <div className="subtle small ellipsis">
             {CHANNEL_LABELS[conv.channel]}
             {data.connection ? ` · ${data.connection.displayName}` : ''} · última actividad {timeAgo(conv.lastMessageAt)}
           </div>
         </div>
+        {/* En pantallas estrechas el botón se queda solo con el icono (btn-label/btn-compact en layout.css); aria-label y title conservan el nombre. */}
         {conv.aiEnabled && !conv.handoffActive ? (
-          <Button size="sm" icon={Hand} loading={takeOver.isPending} onClick={() => takeOver.mutate()}>
-            Tomar el control
+          <Button size="sm" icon={Hand} loading={takeOver.isPending} onClick={() => takeOver.mutate()} className="btn-compact" aria-label="Tomar el control" title="Tomar el control">
+            <span className="btn-label">Tomar el control</span>
           </Button>
         ) : (
-          <Button size="sm" variant="primary" icon={Bot} loading={release.isPending} onClick={() => release.mutate(false)}>
-            Devolver a KAI
+          <Button size="sm" variant="primary" icon={Bot} loading={release.isPending} onClick={() => release.mutate(false)} className="btn-compact" aria-label="Devolver a KAI" title="Devolver a KAI">
+            <span className="btn-label">Devolver a KAI</span>
           </Button>
         )}
         <Button variant="ghost" size="sm" iconOnly icon={PanelRight} onClick={onTogglePanel} className="thread-panel-toggle" aria-expanded={panelOpen}>
@@ -233,16 +248,16 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           <UserRound style={{ color: 'var(--info)' }} />
           <div className="grow">
             Estás llevando esta conversación. KAI está en pausa aquí.
-            {canKaiReplyNow && <div className="xs muted mt-4">El último mensaje del lead está sin contestar: respóndele tú o deja que lo haga KAI.</div>}
+            {offerKaiReply && <div className="xs muted mt-4">El último mensaje del lead está sin contestar: respóndele tú o deja que lo haga KAI.</div>}
           </div>
-          {canKaiReplyNow && (
+          {offerKaiReply && (
             <Button size="sm" icon={Play} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
               Que KAI responda ahora
             </Button>
           )}
         </div>
       )}
-      {!conv.handoffActive && conv.aiEnabled && canKaiReplyNow && (
+      {!conv.handoffActive && conv.aiEnabled && offerKaiReply && (
         <div className="handoff-banner" style={{ background: 'var(--warning-soft)' }}>
           <AlertTriangle style={{ color: 'var(--warning)' }} />
           <div className="grow">
@@ -252,6 +267,29 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           <Button size="sm" icon={Play} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
             Que KAI responda ahora
           </Button>
+        </div>
+      )}
+      {unsent && (
+        <div className="handoff-banner" style={{ background: 'var(--danger-soft)' }}>
+          <AlertTriangle style={{ color: 'var(--danger)' }} />
+          <div className="grow">
+            <strong>No se ha podido enviar la respuesta al lead.</strong> {unsent.reason ?? 'Revisa el canal en Integraciones.'}
+            <div className="xs muted mt-4">
+              El lead sigue esperando respuesta. Si el problema es la conexión de WhatsApp o Instagram, soluciónalo en Integraciones y vuelve a
+              intentarlo.
+            </div>
+            {/* Los botones van debajo del texto: al lado, en la columna de la conversación, dejarían el motivo en una tira estrecha. */}
+            <div className="row wrap mt-8" style={{ gap: 6 }}>
+              <Button size="sm" icon={Plug} onClick={() => navigate('/app/integraciones')}>
+                Ir a Integraciones
+              </Button>
+              {canKaiReplyNow && (
+                <Button size="sm" icon={RotateCw} loading={release.isPending && release.variables === true} onClick={() => release.mutate(true)}>
+                  Que KAI lo intente de nuevo
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {lead.optedOut && (
@@ -356,7 +394,15 @@ function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: s
         <Sparkles style={{ color: 'var(--accent-text)' }} />
         <div>
           <div className="subtle xs">Próxima acción</div>
-          <strong className="small">{nextActionFor(lead, { ...data.conversation, needsHumanReply: data.needsHumanReply }, upcoming, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}</strong>
+          <strong className="small">
+            {nextActionFor(
+              lead,
+              { ...data.conversation, needsHumanReply: data.needsHumanReply, replyUnsent: Boolean(data.needsHumanReply && unsentReply(data.messages)) },
+              upcoming,
+              tz,
+              settings.data?.aiSettings.autopilotEnabled ?? true,
+            )}
+          </strong>
         </div>
       </div>
       <div className="field">
@@ -515,7 +561,7 @@ export default function Inbox() {
             </div>
             <div className="subtle xs ellipsis mt-4">
               {it.lead.goalSummary ? `${it.lead.goalSummary} · ` : ''}
-              {nextActionFor(it.lead, { ...it.conversation, needsHumanReply: it.needsHumanReply }, null, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}
+              {nextActionFor(it.lead, { ...it.conversation, needsHumanReply: it.needsHumanReply, replyUnsent: it.replyUnsent }, null, tz, settings.data?.aiSettings.autopilotEnabled ?? true)}
             </div>
           </div>
         </button>
@@ -531,7 +577,8 @@ export default function Inbox() {
             <Search />
             <input className="input" placeholder="Buscar por nombre, teléfono o @usuario" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar" />
           </div>
-          <div className="chips" style={{ maxHeight: 72, overflowY: 'auto' }}>
+          {/* Todos los filtros a la vista: en escritorio ocupan las filas que hagan falta; en móvil, una fila que se desliza (layout.css). */}
+          <div className="chips inbox-chips">
             {FILTERS.map((f) => (
               <button key={f.value} className="chip" aria-pressed={filter === f.value} onClick={() => setParams(f.value === 'all' ? {} : { filtro: f.value })}>
                 {f.label}
@@ -569,7 +616,8 @@ export default function Inbox() {
           <LeadPanel key={`panel-${activeId}`} conversationId={activeId} overlayOpen={showPanel} onClose={closePanel} />
         </>
       ) : (
-        <section className="thread" style={{ display: 'grid', placeItems: 'center', gridColumn: 'span 2' }}>
+        // Con clase (no estilos en línea) para que en móvil y tablet se oculte y la lista ocupe toda la pantalla (layout.css).
+        <section className="thread thread-empty">
           <Card className="card-tight" title={undefined}>
             <EmptyState icon={Sparkles} title="Selecciona una conversación" description="KAI responde, cualifica y agenda por ti. Entra en cualquier conversación para ver qué está pasando o tomar el control." />
           </Card>

@@ -708,7 +708,10 @@
   overflow-y: auto;
   min-height: 60px;
 }
+/* position: relative contiene los textos ocultos (.sr-only, absolutos) del botón «Mover»: sin un antepasado posicionado
+   escapaban del tablero con scroll y ensanchaban toda la página (3.800 px; en el móvil, el diálogo «Mover» salía cortado). */
 .lead-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1303,6 +1306,9 @@
     scrollbar-width: none;
     margin: 0 -12px;
     padding: 0 12px 2px;
+    /* Difuminado en el borde derecho: pista de que la fila de filtros se puede deslizar. */
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   }
   .inbox-chips::-webkit-scrollbar {
     display: none;
@@ -1424,6 +1430,8 @@
 }
 .lead-row-card:hover {
   background: var(--surface-2);
+  /* Es un enlace a la ficha: sin el subrayado general de los enlaces. */
+  text-decoration: none;
 }
 @media (max-width: 720px) {
   .leads-filters {
@@ -1435,9 +1443,14 @@
   .leads-filters .input-group {
     grid-column: 1 / -1;
   }
+  /* Media columna no da para «Cualquier temperatura»: puntos suspensivos en vez de cortar la palabra (al abrirlo se ve entero). */
   .leads-filters .select {
     min-width: 0;
     width: 100%;
+    padding-left: 10px;
+    padding-right: 28px;
+    background-position: right 9px center;
+    text-overflow: ellipsis;
   }
   .leads-table {
     display: none;
@@ -1471,8 +1484,7 @@
 .agenda-day-title {
   font-weight: 650;
   font-size: 13px;
-  text-transform: capitalize;
-  margin-bottom: 6px;
+  margin: 0 0 2px;
 }
 .agenda-appt {
   display: flex;
@@ -1516,8 +1528,9 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+/* Ancho suficiente para «10:00» y también para «10:00 AM» (navegadores en inglés), como en el onboarding. */
 .avail-range .input {
-  width: 118px;
+  width: 140px;
 }
 @media (max-width: 720px) {
   .week-wrap {
@@ -1533,8 +1546,23 @@
     width: 100%;
     padding-top: 0;
   }
+  /* Las franjas ocupan toda la línea y «+ Franja» baja debajo (antes se montaba encima del campo «Hasta»). */
+  .avail-row .avail-ranges {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  /* Cada franja en una sola línea: desde · – · hasta · quitar, siempre dentro del ancho de la pantalla. */
+  .avail-range {
+    flex-wrap: nowrap;
+  }
   .avail-range .input {
-    width: 112px;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: 150px;
+  }
+  .avail-range .btn {
+    flex-shrink: 0;
   }
 }
 

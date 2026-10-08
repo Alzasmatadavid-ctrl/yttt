@@ -1,8 +1,10 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
+import { RotateCw, WifiOff } from 'lucide-react';
 import { useAuth } from './lib/auth';
-import { PageLoading } from './components/ui';
+import { Button, EmptyState, PageLoading } from './components/ui';
 import { safeNext } from './lib/nav';
+import { sessionState } from './lib/session';
 import AppLayout from './layouts/AppLayout';
 import AdminLayout from './layouts/AdminLayout';
 
@@ -44,10 +46,34 @@ const OPEN_DURING_ONBOARDING = ['/app/integraciones'];
  */
 const NO_BUSINESS_PATH = '/sin-negocio';
 
+/**
+ * /auth/me no ha respondido (sin conexión, servidor reiniciándose, demasiadas peticiones). No es lo mismo que no tener
+ * sesión: en vez de mandar al login, se avisa y se ofrece reintentar sin salir de la página.
+ */
+function SessionUnreachable() {
+  const { refresh } = useAuth();
+  return (
+    <div className="page-loading">
+      <EmptyState
+        icon={WifiOff}
+        title="No hemos podido conectar con KAI"
+        description="No se ha podido comprobar tu sesión. Revisa tu conexión a internet y vuelve a intentarlo en unos segundos."
+        action={
+          <Button icon={RotateCw} onClick={() => void refresh()}>
+            Reintentar
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
 function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allowOnboarding?: boolean }) {
   const { me, loading, activeBusiness } = useAuth();
   const location = useLocation();
-  if (loading) return <PageLoading />;
+  const session = sessionState(me, loading);
+  if (session === 'loading') return <PageLoading />;
+  if (session === 'unreachable') return <SessionUnreachable />;
   if (!me?.user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (!activeBusiness) {
     return me.user.platformRole === 'admin' ? <Navigate to="/admin" replace /> : <Navigate to={NO_BUSINESS_PATH} replace />;
@@ -62,7 +88,9 @@ function RequireAuth({ children, allowOnboarding }: { children: ReactNode; allow
 
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
-  if (loading) return <PageLoading />;
+  const session = sessionState(me, loading);
+  if (session === 'loading') return <PageLoading />;
+  if (session === 'unreachable') return <SessionUnreachable />;
   if (!me?.user) return <Navigate to="/login?next=/admin" replace />;
   if (me.user.platformRole !== 'admin') return <Navigate to="/app" replace />;
   return <>{children}</>;

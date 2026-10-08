@@ -77,6 +77,8 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
         body: `${lead.name || 'Lead'}: ${reason}`,
         leadId: lead.id,
         conversationId: conv.id,
+        // Que no quede oculto detrás de otro aviso de entrega del mismo lead (p. ej. el de la baja).
+        dedupeByTitle: true,
       });
     }
     return { message, delivered: false, blockedReason: reason };

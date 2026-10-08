@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Plus, RotateCw, Search, Users } from 'lucide-react';
-import { LEAD_SOURCES, LEAD_STATUSES, LEAD_TEMPERATURES } from '@shared';
+import { LEAD_SOURCES, LEAD_STATUSES, LEAD_TEMPERATURES, leadSourceLabel } from '@shared';
 import { api, errorText } from '../lib/api';
 import { timeAgo } from '../lib/format';
 import { Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, useToast } from '../components/ui';
@@ -101,14 +101,15 @@ export default function Leads() {
         }
       />
       <Card flush>
-        <div className="row wrap" style={{ padding: 14, gap: 10, borderBottom: '1px solid var(--border)' }}>
+        {/* Filtros: en fila en escritorio; en el móvil, rejilla de 2 columnas con el buscador a todo el ancho (layout.css). */}
+        <div className="leads-filters">
           <div className="input-group grow" style={{ minWidth: 220 }}>
             <Search />
             <input className="input" placeholder="Buscar por nombre, email, teléfono, objetivo…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar leads" />
           </div>
-          <Select aria-label="Etapa" value={status} onChange={(e) => setStatus(e.target.value)} options={[{ value: '', label: 'Todas las etapas' }, ...LEAD_STATUSES.map((s) => ({ value: s.key, label: s.label }))]} style={{ width: 190 }} />
-          <Select aria-label="Temperatura" value={temperature} onChange={(e) => setTemperature(e.target.value)} options={[{ value: '', label: 'Cualquier temperatura' }, ...LEAD_TEMPERATURES.map((s) => ({ value: s.key, label: s.label }))]} style={{ width: 190 }} />
-          <Select aria-label="Origen" value={source} onChange={(e) => setSource(e.target.value)} options={[{ value: '', label: 'Todos los orígenes' }, ...LEAD_SOURCES.filter((s) => s.key !== 'simulator').map((s) => ({ value: s.key, label: s.label }))]} style={{ width: 170 }} />
+          <Select aria-label="Etapa" value={status} onChange={(e) => setStatus(e.target.value)} options={[{ value: '', label: 'Todas las etapas' }, ...LEAD_STATUSES.map((s) => ({ value: s.key, label: s.label }))]} />
+          <Select aria-label="Temperatura" value={temperature} onChange={(e) => setTemperature(e.target.value)} options={[{ value: '', label: 'Cualquier temperatura' }, ...LEAD_TEMPERATURES.map((s) => ({ value: s.key, label: s.label }))]} />
+          <Select aria-label="Origen" value={source} onChange={(e) => setSource(e.target.value)} options={[{ value: '', label: 'Todos los orígenes' }, ...LEAD_SOURCES.filter((s) => s.key !== 'simulator').map((s) => ({ value: s.key, label: s.label }))]} />
           <Select
             aria-label="Orden"
             value={sort}
@@ -118,7 +119,6 @@ export default function Leads() {
               { value: 'score', label: 'Mayor puntuación' },
               { value: 'created', label: 'Más nuevos' },
             ]}
-            style={{ width: 180 }}
           />
         </div>
         {isLoading ? (
@@ -140,55 +140,79 @@ export default function Leads() {
         ) : leads.length === 0 ? (
           <EmptyState icon={Users} title="No hay leads" description="Prueba a cambiar los filtros o crea un lead manualmente." />
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Lead</th>
-                  <th>Etapa</th>
-                  <th>Temperatura</th>
-                  <th className="num">Puntuación</th>
-                  <th>Origen</th>
-                  <th>Objetivo</th>
-                  <th>Última interacción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((l) => (
-                  // Toda la fila se puede pulsar con el ratón; con teclado o lector de pantalla, el nombre es un enlace a la ficha.
-                  <tr key={l.id} className="clickable" onClick={() => navigate(`/app/leads/${l.id}`)}>
-                    <td>
-                      <div className="row">
-                        <LeadAvatar name={l.name} url={l.avatarUrl} size={30} />
-                        <div style={{ minWidth: 0 }}>
-                          <Link to={`/app/leads/${l.id}`} className="cell-link" onClick={(e) => e.stopPropagation()}>
-                            {l.name || 'Sin nombre'}
-                          </Link>
-                          <div className="subtle xs">{l.phone ?? l.email ?? (l.instagramUsername ? `@${l.instagramUsername}` : '')}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <StatusBadge status={l.status} />
-                    </td>
-                    <td>
-                      <TemperatureBadge temperature={l.temperature} />
-                    </td>
-                    <td className="num">
-                      <ScoreBadge score={l.score} />
-                    </td>
-                    <td>
-                      <SourceBadge source={l.source} />
-                    </td>
-                    <td className="muted ellipsis" style={{ maxWidth: 240 }}>
-                      {l.goalSummary ?? '—'}
-                    </td>
-                    <td className="subtle">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</td>
+          <>
+            <div className="table-wrap leads-table">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Etapa</th>
+                    <th>Temperatura</th>
+                    <th className="num">Puntuación</th>
+                    <th>Origen</th>
+                    <th>Objetivo</th>
+                    <th>Última interacción</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {leads.map((l) => (
+                    // Toda la fila se puede pulsar con el ratón; con teclado o lector de pantalla, el nombre es un enlace a la ficha.
+                    <tr key={l.id} className="clickable" onClick={() => navigate(`/app/leads/${l.id}`)}>
+                      <td>
+                        <div className="row">
+                          <LeadAvatar name={l.name} url={l.avatarUrl} size={30} />
+                          <div style={{ minWidth: 0 }}>
+                            <Link to={`/app/leads/${l.id}`} className="cell-link" onClick={(e) => e.stopPropagation()}>
+                              {l.name || 'Sin nombre'}
+                            </Link>
+                            <div className="subtle xs">{l.phone ?? l.email ?? (l.instagramUsername ? `@${l.instagramUsername}` : '')}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <StatusBadge status={l.status} />
+                      </td>
+                      <td>
+                        <TemperatureBadge temperature={l.temperature} />
+                      </td>
+                      <td className="num">
+                        <ScoreBadge score={l.score} />
+                      </td>
+                      <td>
+                        <SourceBadge source={l.source} />
+                      </td>
+                      <td className="muted ellipsis" style={{ maxWidth: 240 }}>
+                        {l.goalSummary ?? '—'}
+                      </td>
+                      <td className="subtle">{timeAgo(l.lastInteractionAt ?? l.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* En el móvil la tabla de 7 columnas no cabe: cada lead se muestra como una tarjeta con los mismos datos. */}
+            <div className="leads-cards">
+              {leads.map((l) => (
+                <Link key={l.id} to={`/app/leads/${l.id}`} className="lead-row-card">
+                  <LeadAvatar name={l.name} url={l.avatarUrl} size={36} channel={l.source} />
+                  <span className="col grow" style={{ gap: 6 }}>
+                    <span className="row" style={{ gap: 8 }}>
+                      <strong className="ellipsis grow">{l.name || 'Sin nombre'}</strong>
+                      <ScoreBadge score={l.score} />
+                    </span>
+                    <span className="row wrap" style={{ gap: 6 }}>
+                      <StatusBadge status={l.status} />
+                      <TemperatureBadge temperature={l.temperature} />
+                    </span>
+                    {l.goalSummary && <span className="muted xs ellipsis">{l.goalSummary}</span>}
+                    <span className="subtle xs">
+                      {leadSourceLabel(l.source)} · {timeAgo(l.lastInteractionAt ?? l.createdAt)}
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </>
         )}
       </Card>
       <NewLeadModal open={params.get('nuevo') === '1'} onClose={() => setParams({})} />

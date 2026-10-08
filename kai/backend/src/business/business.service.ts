@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { count, eq, or } from 'drizzle-orm';
 import { getDb, type Database } from '../database/client.js';
 import {
   aiSettings,
@@ -101,4 +101,16 @@ export async function getBusiness(businessId: string) {
   const [b] = await getDb().select().from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!b) throw notFound('Negocio no encontrado.');
   return b;
+}
+
+/** Negocio principal de la cuenta a la que pertenece un negocio. */
+export const accountOf = (b: { id: string; accountBusinessId: string | null }) => b.accountBusinessId ?? b.id;
+
+/** Negocios de una cuenta: el principal y los adicionales creados desde ella. */
+export async function countAccountBusinesses(accountId: string): Promise<number> {
+  const [row] = await getDb()
+    .select({ n: count() })
+    .from(businesses)
+    .where(or(eq(businesses.id, accountId), eq(businesses.accountBusinessId, accountId)));
+  return Number(row?.n ?? 0);
 }

@@ -9,33 +9,13 @@ import { useCan } from '../lib/business';
 import { Button, Callout, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, PageLoading, Tabs, useToast } from '../components/ui';
 import { OutcomeModal } from '../components/lead-actions';
 import type { Appointment, AvailabilityConfig, CalendarConnection } from '../lib/types';
+import { addDaysIso, appointmentsByDay, dayTitle, tzParts, weekdayOfIso } from './agenda-days';
+import { useLeaveGuard } from './leave-guard';
 
 interface ApptRow {
   appointment: Appointment;
   /** isTest: cita de una conversación de prueba del simulador (no es un lead real). */
   lead: { id: string; name: string; score: number; goalSummary: string | null; isTest?: boolean };
-}
-
-/** Partes de una fecha en la zona horaria del negocio. */
-function tzParts(d: Date, timeZone: string) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-      .formatToParts(d)
-      .map((p) => [p.type, p.value]),
-  );
-  const hour = Number(parts.hour) % 24;
-  return { iso: `${parts.year}-${parts.month}-${parts.day}`, hour, minute: Number(parts.minute) };
-}
-
-function addDaysIso(iso: string, days: number) {
-  const d = new Date(`${iso}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function weekdayOfIso(iso: string) {
-  const wd = new Date(`${iso}T12:00:00Z`).getUTCDay();
-  return wd === 0 ? 7 : wd; // ISO: 1 = lunes
 }
 
 const HOUR_H = 44;
@@ -61,78 +41,116 @@ function WeekView({ timezone, weekly, offset, onPick }: { timezone: string; week
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
   const now = tzParts(new Date(), timezone);
   const appts = (data?.appointments ?? []).filter((a) => a.appointment.status !== 'cancelled' && a.appointment.status !== 'rescheduled');
+  const byDay = appointmentsByDay(days, appts, timezone);
+  const hm = (iso: string) => {
+    const p = tzParts(new Date(iso), timezone);
+    return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+  };
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <div className="week">
-        <div className="week-head" style={{ borderLeft: 0 }} />
-        {days.map((d) => (
-          <div key={d} className={`week-head ${d === today ? 'today' : ''}`}>
-            {new Date(`${d}T12:00:00Z`).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}
-          </div>
-        ))}
-        <div className="week-times">
-          {hours.map((h) => (
-            <div key={h} className="week-time">
-              {String(h).padStart(2, '0')}:00
+    <>
+      <div className="week-wrap">
+        <div className="week">
+          <div className="week-head" style={{ borderLeft: 0 }} />
+          {days.map((d) => (
+            <div key={d} className={`week-head ${d === today ? 'today' : ''}`}>
+              {new Date(`${d}T12:00:00Z`).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}
             </div>
           ))}
+          <div className="week-times">
+            {hours.map((h) => (
+              <div key={h} className="week-time">
+                {String(h).padStart(2, '0')}:00
+              </div>
+            ))}
+          </div>
+          {byDay.map(({ iso: d, appts: dayAppts }) => {
+            const wd = String(weekdayOfIso(d)) as keyof AvailabilityWeek;
+            return (
+              <div key={d} className="week-day">
+                {hours.map((h) => (
+                  <div key={h} className="week-cell" />
+                ))}
+                {(weekly[wd] ?? []).map((r) => (
+                  <div key={`${r.start}-${r.end}`} className="week-avail" style={{ top: ((toMin(r.start) - startHour * 60) / 60) * HOUR_H, height: ((toMin(r.end) - toMin(r.start)) / 60) * HOUR_H }} />
+                ))}
+                {d === now.iso && now.hour >= startHour && now.hour < endHour && <div className="now-line" style={{ top: ((now.hour * 60 + now.minute - startHour * 60) / 60) * HOUR_H }} />}
+                {dayAppts.map((a) => {
+                  const s = tzParts(new Date(a.appointment.startsAt), timezone);
+                  const minutes = (new Date(a.appointment.endsAt).getTime() - new Date(a.appointment.startsAt).getTime()) / 60000;
+                  const top = ((s.hour * 60 + s.minute - startHour * 60) / 60) * HOUR_H;
+                  return (
+                    <button
+                      key={a.appointment.id}
+                      className={`week-event ${a.appointment.bookedBy === 'kai' ? 'kai' : ''} ${a.appointment.status}`}
+                      style={{ top, height: Math.max(22, (minutes / 60) * HOUR_H - 2) }}
+                      onClick={() => onPick(a)}
+                      title={`${a.lead.name}${a.lead.isTest ? ' (prueba)' : ''} · ${dateTime(a.appointment.startsAt, timezone)}`}
+                    >
+                      <strong>
+                        {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
+                      </strong>{' '}
+                      {a.lead.name}
+                      {a.lead.isTest && (
+                        <span className="badge" style={{ marginLeft: 4, padding: '0 5px', fontSize: 10 }}>
+                          Prueba
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
-        {days.map((d) => {
-          const wd = String(weekdayOfIso(d)) as keyof AvailabilityWeek;
-          const dayAppts = appts.filter((a) => tzParts(new Date(a.appointment.startsAt), timezone).iso === d);
+        <div className="legend mt-8">
+          <span className="legend-item">
+            <span className="legend-swatch" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent-line)' }} />
+            Disponibilidad para llamadas
+          </span>
+          <span className="legend-item">
+            <span className="legend-swatch" style={{ background: 'var(--accent)' }} />
+            Agendada por KAI
+          </span>
+          <span className="legend-item">
+            <span className="legend-swatch" style={{ background: 'var(--info)' }} />
+            Agendada por ti o por el lead
+          </span>
+        </div>
+      </div>
+      {/* En el móvil la rejilla de 7 días no cabe: la misma semana como lista por días (layout.css muestra una u otra). */}
+      <div className="card card-tight agenda-list">
+        {byDay.map(({ iso: d, appts: dayAppts }) => {
+          const dayRanges = weekly[String(weekdayOfIso(d)) as keyof AvailabilityWeek] ?? [];
+          // \u2060 (unión invisible) evita que «17:00–20:00» se parta en dos líneas por el guion.
+          const schedule = dayRanges.length ? `horario: ${dayRanges.map((r) => `${r.start}\u2060–\u2060${r.end}`).join(', ')}` : 'día sin horario para llamadas';
           return (
-            <div key={d} className="week-day">
-              {hours.map((h) => (
-                <div key={h} className="week-cell" />
+            <section key={d} className={`agenda-day ${d === today ? 'today' : ''}`} aria-labelledby={`agenda-day-${d}`}>
+              <h3 id={`agenda-day-${d}`} className="agenda-day-title">
+                {dayTitle(d)}
+                {d === today && ' · hoy'}
+              </h3>
+              <div className="subtle xs">{dayAppts.length ? `${schedule.charAt(0).toUpperCase()}${schedule.slice(1)}` : `Sin llamadas · ${schedule}`}</div>
+              {dayAppts.map((a) => (
+                <button key={a.appointment.id} type="button" className={`agenda-appt ${a.appointment.bookedBy === 'kai' ? 'kai' : ''} ${a.appointment.status}`} onClick={() => onPick(a)}>
+                  <strong className="tnum">{hm(a.appointment.startsAt)}</strong>
+                  <span className="grow">
+                    <span className="row" style={{ gap: 6 }}>
+                      <span className="ellipsis">{a.lead.name}</span>
+                      {a.lead.isTest && <span className="badge">Prueba</span>}
+                    </span>
+                    <span className="subtle xs">
+                      {a.appointment.bookedBy === 'kai' ? 'Agendada por KAI' : 'Agendada por ti o por el lead'}
+                      {a.appointment.status !== 'scheduled' && ` · ${STATUS_TEXT[a.appointment.status]}`}
+                    </span>
+                  </span>
+                </button>
               ))}
-              {(weekly[wd] ?? []).map((r) => (
-                <div key={`${r.start}-${r.end}`} className="week-avail" style={{ top: ((toMin(r.start) - startHour * 60) / 60) * HOUR_H, height: ((toMin(r.end) - toMin(r.start)) / 60) * HOUR_H }} />
-              ))}
-              {d === now.iso && now.hour >= startHour && now.hour < endHour && <div className="now-line" style={{ top: ((now.hour * 60 + now.minute - startHour * 60) / 60) * HOUR_H }} />}
-              {dayAppts.map((a) => {
-                const s = tzParts(new Date(a.appointment.startsAt), timezone);
-                const minutes = (new Date(a.appointment.endsAt).getTime() - new Date(a.appointment.startsAt).getTime()) / 60000;
-                const top = ((s.hour * 60 + s.minute - startHour * 60) / 60) * HOUR_H;
-                return (
-                  <button
-                    key={a.appointment.id}
-                    className={`week-event ${a.appointment.bookedBy === 'kai' ? 'kai' : ''} ${a.appointment.status}`}
-                    style={{ top, height: Math.max(22, (minutes / 60) * HOUR_H - 2) }}
-                    onClick={() => onPick(a)}
-                    title={`${a.lead.name}${a.lead.isTest ? ' (prueba)' : ''} · ${dateTime(a.appointment.startsAt, timezone)}`}
-                  >
-                    <strong>
-                      {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
-                    </strong>{' '}
-                    {a.lead.name}
-                    {a.lead.isTest && (
-                      <span className="badge" style={{ marginLeft: 4, padding: '0 5px', fontSize: 10 }}>
-                        Prueba
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            </section>
           );
         })}
       </div>
-      <div className="legend mt-8">
-        <span className="legend-item">
-          <span className="legend-swatch" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent-line)' }} />
-          Disponibilidad para llamadas
-        </span>
-        <span className="legend-item">
-          <span className="legend-swatch" style={{ background: 'var(--accent)' }} />
-          Agendada por KAI
-        </span>
-        <span className="legend-item">
-          <span className="legend-swatch" style={{ background: 'var(--info)' }} />
-          Agendada por ti o por el lead
-        </span>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -245,17 +263,18 @@ function AvailabilityEditor({ config, connections, onDirtyChange }: { config: Av
         <p className="muted small" style={{ marginBottom: 14 }}>
           KAI solo ofrecerá huecos dentro de este horario, descontando tus citas{connections.some((c) => c.provider === 'google') ? ' y lo que tengas ocupado en Google Calendar' : ''}. Zona horaria: <strong>{config.timezone}</strong>.
         </p>
+        {/* Clases .avail-* (layout.css): en el móvil el día va en su línea, cada franja cabe en el ancho y «Franja» baja debajo. */}
         <div className="col" style={{ gap: 10 }}>
           {(Object.keys(WEEKDAY_LABELS) as (keyof AvailabilityWeek)[]).map((day) => (
-            <div key={day} className="row wrap" style={{ alignItems: 'flex-start', gap: 10, paddingBottom: 10, borderBottom: '1px dashed var(--border)' }}>
-              <strong style={{ width: 90, paddingTop: 8 }}>{WEEKDAY_LABELS[day]}</strong>
-              <div className="col grow" style={{ gap: 6 }}>
+            <div key={day} className="avail-row">
+              <strong className="avail-day">{WEEKDAY_LABELS[day]}</strong>
+              <div className="col grow avail-ranges" style={{ gap: 6 }}>
                 {weekly[day].length === 0 && <span className="subtle small" style={{ paddingTop: 8 }}>No disponible</span>}
                 {weekly[day].map((r, i) => (
-                  <div key={i} className="row" style={{ gap: 6 }}>
-                    <Input type="time" value={r.start} onChange={(e) => setRange(day, i, 'start', e.target.value)} style={{ width: 120 }} aria-label="Desde" />
+                  <div key={i} className="avail-range">
+                    <Input type="time" value={r.start} onChange={(e) => setRange(day, i, 'start', e.target.value)} aria-label="Desde" />
                     <span className="subtle">–</span>
-                    <Input type="time" value={r.end} onChange={(e) => setRange(day, i, 'end', e.target.value)} style={{ width: 120 }} aria-label="Hasta" />
+                    <Input type="time" value={r.end} onChange={(e) => setRange(day, i, 'end', e.target.value)} aria-label="Hasta" />
                     <Button variant="ghost" size="sm" iconOnly icon={Trash2} onClick={() => setWeekly((w) => ({ ...w, [day]: w[day].filter((_, idx) => idx !== i) }))}>
                       Quitar franja
                     </Button>
@@ -338,34 +357,9 @@ export default function Agenda() {
   const pastRange = useMemo(() => ({ from: new Date(Date.now() - 14 * 86_400_000).toISOString(), to: new Date().toISOString() }), []);
   const pending = useQuery({ queryKey: ['appointments', 'past'], queryFn: () => api.get<{ appointments: ApptRow[] }>('/agenda/appointments', pastRange) });
 
-  // Aviso del navegador si se intenta cerrar o recargar con cambios sin guardar en el horario.
-  useEffect(() => {
-    if (!availabilityDirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [availabilityDirty]);
-  // Aviso propio al ir a otra pantalla de la aplicación (menú lateral, enlaces…) con cambios sin guardar.
-  const [leaveTo, setLeaveTo] = useState<string | null>(null);
-  useEffect(() => {
-    if (!availabilityDirty) return;
-    const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const link = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null;
-      if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
-      const url = new URL(link.href, window.location.href);
-      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setLeaveTo(url.pathname + url.search + url.hash);
-    };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, [availabilityDirty]);
-  const goTo = (path: string) => (availabilityDirty ? setLeaveTo(path) : navigate(path));
+  // Con cambios sin guardar en el horario: aviso al cerrar o recargar y «¿Salir sin guardar?» al ir a otra pantalla
+  // (menú, enlaces, avisos de la campana, Copilot o «Ver lead»).
+  const leave = useLeaveGuard(availabilityDirty);
 
   if (availability.isLoading) return <PageLoading />;
   if (!availability.data) {
@@ -470,7 +464,7 @@ export default function Agenda() {
               <Button
                 onClick={() => {
                   setPicked(null);
-                  goTo(`/app/leads/${picked.lead.id}`);
+                  navigate(`/app/leads/${picked.lead.id}`);
                 }}
               >
                 Ver lead
@@ -520,17 +514,13 @@ export default function Agenda() {
       </Modal>
       <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
       <ConfirmDialog
-        open={leaveTo !== null}
+        open={leave.leaving}
         title="¿Salir sin guardar?"
         message="Tienes cambios sin guardar en tu horario de llamadas. Si sales ahora, se perderán. Para conservarlos, quédate y pulsa Guardar en «Disponibilidad»."
         confirmLabel="Salir sin guardar"
         danger
-        onConfirm={() => {
-          const target = leaveTo;
-          setLeaveTo(null);
-          if (target) navigate(target);
-        }}
-        onClose={() => setLeaveTo(null)}
+        onConfirm={leave.leave}
+        onClose={leave.stay}
       />
     </div>
   );

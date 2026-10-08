@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isRemoteDatabaseUrl } from '../database/seed-safety.js';
 
 /**
  * Configuración central de KAI.
@@ -103,16 +104,55 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
+/**
+ * ¿Es la configuración de un servidor público? APP_URL con https y un dominio que no es este ordenador,
+ * o una base de datos que no está en este ordenador (ni en el docker-compose local).
+ */
+export function looksLikePublicServer(appUrl: string | undefined, databaseUrl: string | undefined): boolean {
+  if (isRemoteDatabaseUrl(databaseUrl?.trim() || undefined)) return true;
+  try {
+    const url = new URL(appUrl?.trim() ?? '');
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return url.protocol === 'https:' && !['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(host) && !host.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * NODE_ENV sin definir en un servidor público: se trata como producción. .env.example lo deja comentado (con Docker
+ * lo fija la imagen) y con «npm start» es fácil olvidarlo; sin esto, el olvido desactivaría a la vez todas las
+ * protecciones de producción: conectar canales sin verificarlos con Meta, la clave de cifrado de desarrollo (pública),
+ * avisos de Meta sin firma, emails con enlaces de acceso en los registros… Para desarrollar de verdad contra una
+ * base de datos remota o un dominio https, basta con poner NODE_ENV=development.
+ */
+export function inferredProduction(source: Record<string, string | undefined>): boolean {
+  return !source.NODE_ENV?.trim() && looksLikePublicServer(source.APP_URL, source.DATABASE_URL);
+}
+
+const INFERRED_PRODUCTION_NOTE =
+  'NODE_ENV no está definido, pero APP_URL usa https con un dominio público o DATABASE_URL apunta a otro servidor, así que KAI arranca en modo producción. Si de verdad es un entorno de pruebas, pon NODE_ENV=development en el .env.';
+
+let productionWasInferred = false;
+
 function loadEnv(): Env {
-  const parsed = EnvSchema.safeParse(process.env);
+  const source = { ...process.env };
+  if (inferredProduction(source)) {
+    source.NODE_ENV = 'production';
+    // Para que todo el proceso (y cualquier librería) vea el mismo modo.
+    process.env.NODE_ENV = 'production';
+    productionWasInferred = true;
+  }
+  const parsed = EnvSchema.safeParse(source);
   if (!parsed.success) {
     const details = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Configuración inválida en .env:\n${details}`);
   }
   const env = parsed.data;
   if (env.NODE_ENV === 'production') {
-    if (!env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY es obligatoria en producción (32 bytes en base64).');
-    if (!env.DATABASE_URL) throw new Error('DATABASE_URL es obligatoria en producción (PostgreSQL).');
+    const why = productionWasInferred ? ` ${INFERRED_PRODUCTION_NOTE}` : '';
+    if (!env.ENCRYPTION_KEY) throw new Error(`ENCRYPTION_KEY es obligatoria en producción (32 bytes en base64).${why}`);
+    if (!env.DATABASE_URL) throw new Error(`DATABASE_URL es obligatoria en producción (PostgreSQL).${why}`);
   }
   return env;
 }
@@ -164,6 +204,7 @@ export function adminPasswordProblem(password: string | undefined): string | nul
 /** Avisos de configuración que conviene mostrar al arrancar (no impiden el arranque). */
 export function startupWarnings(): string[] {
   const out: string[] = [];
+  if (productionWasInferred) out.push(`${INFERRED_PRODUCTION_NOTE} Añade NODE_ENV=production al .env para que quede explícito.`);
   const adminProblem = env.ADMIN_EMAIL ? adminPasswordProblem(env.ADMIN_PASSWORD) : null;
   if (adminProblem) out.push(adminProblem);
   if (isProduction() && !emailConfigured())

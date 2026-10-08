@@ -393,8 +393,12 @@ describe('migración 0001: pregunta de urgencia con una sola pregunta', () => {
         await db.update(qualificationRules).set({ question }).where(and(eq(qualificationRules.businessId, biz.id), eq(qualificationRules.key, 'urgency')));
         return biz.id;
       };
+      // El código actual ya escribe columnas que llegan en migraciones posteriores (0002: negocio principal de la
+      // cuenta): se crean solo para dar de alta los datos “antiguos” y se quitan antes de migrar.
+      await db.execute(sql`alter table "businesses" add column "account_business_id" uuid`);
       const withDefault = await newBusiness('antiguo@example.com', OLD);
       const custom = await newBusiness('personalizado@example.com', '¿Cuándo te gustaría empezar?');
+      await db.execute(sql`alter table "businesses" drop column "account_business_id"`);
 
       // Arranque con la versión nueva: aplica las migraciones pendientes.
       await migrate(handle.db as never, { migrationsFolder: MIGRATIONS_FOLDER });

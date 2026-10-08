@@ -206,14 +206,19 @@ const RX = {
   price:
     /\bcuanto (?:me |te |nos |os |le |les )?(?:cuesta|cuestan|costaria|costarian|costaba|costaban|vale|valen|valdria|valia|es|son|era|eran|seria|serian|cobras|cobrais|cobra|cobran|cobrarias|sale|salen|saldria|salia)\b|(?<!\bpara )\bque (?:vale|valdria|cuesta|costaria)\b(?! la pena)[^.!?\n]*\?|precio|tarifa|coste|\b(?:cual es|de cuanto es|cuanto es) la (?:cuota|mensualidad)\b/,
   callYes: /(llamada|llamar|llamame|hablamos por telefono|videollamada|reunion|agendar|agenda|cita)\b/,
-  /** Pide la llamada de forma explícita (tras haberla rechazado, solo esto vuelve a abrir la agenda). */
+  /**
+   * Pide la llamada de forma explícita (tras haberla rechazado, solo esto vuelve a abrir la agenda). También las formas
+   * naturales de pedir hablar (“¿podemos hablar?”, “¿cuándo hablamos?”, “prefiero hablar por teléfono”), pero no
+   * “hablamos por aquí”, “¿podemos hablar del precio?”, “ahora no podemos hablar”, “podemos hablar más tarde” ni
+   * “¿se puede hacer sin hablar por teléfono?”.
+   */
   callRequest:
-    /\b(quiero|prefiero|me gustaria|podemos|podriamos|vamos a|mejor|al final) (si )?(hacer |tener |agendar |reservar )?(la |una )?(llamada|videollamada)\b|\b(hagamos|hacemos|agendamos|reservamos|agenda|reserva) (la |una )?(llamada|videollamada|cita)\b|\bllamame\b|\bagendamos\b|\bme apunto a la (llamada|videollamada)\b/,
+    /\b(quiero|prefiero|me gustaria|podemos|podriamos|vamos a|mejor|al final) (si )?(hacer |tener |agendar |reservar )?(la |una )?(llamada|videollamada)\b|\b(hagamos|hacemos|agendamos|reservamos|agenda|reserva) (la |una )?(llamada|videollamada|cita)\b|\bllamame\b|\bagendamos\b|\bme apunto a la (llamada|videollamada)\b|(?<!\bno )\b(?:podemos|podriamos|podamos|pudieramos) hablar\b(?! (?:por (?:aqui|escrito|mensajes?|whatsapp|chat|instagram|insta|privado|dm)|de\b|del\b|sobre\b|con\b|mas tarde|luego|despues|en otro momento|otro rato))|\b(?:cuando|que dia|a que hora) (?:hablamos|nos llamamos)\b(?! (?:por (?:aqui|escrito|mensajes?|whatsapp|chat|instagram|insta|privado|dm)|de\b|del\b|sobre\b))|^\s*¿?\s*(?:(?:vale|ok|pues|entonces|genial|perfecto|venga)[,.!]?\s+)?¿?\s*hablamos\s*\?|\bquedamos para hablar\b|(?<!\b(?:no (?:puedo |quiero |me gusta |me apetece )?|sin ))\bhablar por telefono\b/,
   affirm: /^\s*(si|sip|vale|ok|okey|okay|perfecto|genial|claro|me encaja|me parece bien|venga|dale|por supuesto|de acuerdo|guay|bien|me vale)\b/,
-  // Rechazar la llamada (“no quiero hacer la llamada”, “paso de llamadas”, “prefiero no hacer llamadas”), pero no
-  // “prefiero no decirlo” ni “ahora no puedo hablar”.
+  // Rechazar la llamada (“no quiero hacer la llamada”, “paso de llamadas”, “prefiero no hacer llamadas”, “¿se puede
+  // hacer sin hablar por teléfono?”), pero no “prefiero no decirlo” ni “ahora no puedo hablar”.
   declineCall:
-    /\bno (?:me interesa|quiero|necesito|me apetece|hace falta|me hace falta|me hacen falta|veo necesaria)(?: hacer| tener| agendar| reservar)? (?:la |una |ninguna |las |mas )?(?:llamadas?|videollamadas?|reunion(?:es)?)\b|\bprefiero (?:no (?:hacer|tener) (?:la |una |ninguna |las )?(?:llamadas?|videollamadas?)|no hablar por telefono|por escrito|por aqui|seguir por (?:aqui|escrito|mensaje|mensajes|whatsapp|chat)|hablarlo por aqui)\b|\bpaso de (?:la |las |hacer (?:la |una )?)?(?:llamadas?|videollamadas?)\b|\bnada de (?:llamadas|videollamadas)\b|\bsin llamadas?\b|\bno me gustan(?: nada| mucho)? las (?:llamadas|videollamadas)\b|\bno me gusta(?: nada| mucho)? (?:hablar por telefono|hacer llamadas)\b/,
+    /\bno (?:me interesa|quiero|necesito|me apetece|hace falta|me hace falta|me hacen falta|veo necesaria)(?: hacer| tener| agendar| reservar)? (?:la |una |ninguna |las |mas )?(?:llamadas?|videollamadas?|reunion(?:es)?)\b|\bprefiero (?:no (?:hacer|tener) (?:la |una |ninguna |las )?(?:llamadas?|videollamadas?)|no hablar por telefono|por escrito|por aqui|seguir por (?:aqui|escrito|mensaje|mensajes|whatsapp|chat)|hablarlo por aqui)\b|\bpaso de (?:la |las |hacer (?:la |una )?)?(?:llamadas?|videollamadas?)\b|\bnada de (?:llamadas|videollamadas)\b|\bsin (?:hacer |tener )?(?:la |una |ninguna )?(?:llamadas?|videollamadas?)\b|\bsin hablar(?:lo)? por telefono\b|\bno me gustan(?: nada| mucho)? las (?:llamadas|videollamadas)\b|\bno me gusta(?: nada| mucho)? (?:hablar por telefono|hacer llamadas)\b/,
   negotiation: /descuento|rebaja|mas barato|pagar a plazos|financiar|precio especial|me haces (un )?precio|me lo dejas en|regatear/,
   outOfScope: /factura|devolucion|reembolso|colabora(cion|r)|patrocin|trabajar con vosotros|empleo|curriculum|publicidad en tu/,
   technical: /no (me )?funciona el (enlace|link)|no puedo (entrar|abrir|acceder)|no carga|link roto|me da error/,
@@ -435,6 +440,11 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // El objetivo es lo que más pesa (resúmenes, mensajes, puntuación): solo se toma como objetivo lo que lo parece.
   const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== 'goal' && enabledKeys.has(k) && rx.test(n));
   const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || !aboutOtherKey;
+  // Tampoco responde a la pregunta quien pide hablar con una persona («prefiero hablar con David directamente»),
+  // pregunta si es un bot o habla de la llamada («no quiero hacer la llamada»): la ficha mostraría eso como su
+  // objetivo (y, con él, «Encaje: sí»).
+  const aboutTheConversation =
+    RX.humanRequest.test(n) || asksForTrainer(n, input.biz.trainer.displayName) || RX.asksIfBot.test(n) || RX.callRequest.test(n) || RX.declineCall.test(n);
   if (
     lastAsked &&
     enabledKeys.has(lastAsked) &&
@@ -442,6 +452,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     wordCount >= 2 &&
     !onlyQuestion &&
     answersLastAsked &&
+    !aboutTheConversation &&
     !RX.price.test(n) &&
     !RX.optOut.test(n)
   ) {

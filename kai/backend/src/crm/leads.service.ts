@@ -3,6 +3,7 @@ import { getDb } from '../database/client.js';
 import {
   aiSettings,
   appointments,
+  businesses,
   conversations,
   leadEvents,
   leadMemories,
@@ -28,6 +29,7 @@ import { incrementUsage, checkUsageLimit } from '../plans/plans.service.js';
 import { bandMin, computeScore, requiredCaptured, temperatureFor } from './scoring.js';
 import { nextStatus, type PipelineEvent } from './pipeline.js';
 import { createAlert } from './alerts.service.js';
+import { countryCodeForTimezone, samePhoneNumber, toWhatsAppId } from '../integrations/channels/phone.js';
 
 export type Lead = typeof leads.$inferSelect;
 export type ActorType = 'user' | 'kai' | 'system' | 'integration' | 'lead';
@@ -66,27 +68,53 @@ export function normalizePhone(phone: string | null | undefined): string | null 
   return digits.startsWith('+') ? digits : digits.startsWith('00') ? `+${digits.slice(2)}` : digits;
 }
 
+async function businessTimezone(businessId: string): Promise<string> {
+  const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return biz?.timezone ?? 'Europe/Madrid';
+}
+
+/** Prefijo telefónico del país del negocio (para comparar números apuntados sin prefijo). */
+const businessCountryCode = async (businessId: string) => countryCodeForTimezone(await businessTimezone(businessId));
+
 /** Busca un lead existente por cualquiera de sus identificadores (evita duplicados entre canales). */
 export async function findExistingLead(businessId: string, input: Partial<CreateLeadInput>): Promise<Lead | null> {
+  const db = getDb();
+  // 1) El identificador del canal (WhatsApp o Instagram, verificado por Meta) manda: si ya hay un lead con él, es ese,
+  //    aunque otro más antiguo tenga un email o un teléfono parecido.
+  const channelConds: SQL[] = [];
+  if (input.whatsappId) channelConds.push(eq(leads.whatsappId, input.whatsappId));
+  if (input.instagramUserId) channelConds.push(eq(leads.instagramUserId, input.instagramUserId));
+  if (channelConds.length) {
+    const [row] = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.businessId, businessId), or(...channelConds)))
+      .orderBy(asc(leads.createdAt))
+      .limit(1);
+    if (row) return row;
+  }
+  // 2) Email o teléfono.
   const conds: SQL[] = [];
-  if (input.whatsappId) conds.push(eq(leads.whatsappId, input.whatsappId));
-  if (input.instagramUserId) conds.push(eq(leads.instagramUserId, input.instagramUserId));
-  if (input.email) conds.push(eq(leads.email, input.email.trim().toLowerCase()));
+  const email = input.email?.trim().toLowerCase();
+  if (email) conds.push(eq(leads.email, email));
   const phone = normalizePhone(input.phone);
   if (phone) {
     conds.push(eq(leads.phone, phone));
-    // Mismo número con o sin prefijo de país (+34600111222 ≈ 600111222).
-    const tail = phone.replace(/\D/g, '').slice(-9);
-    if (tail.length === 9) conds.push(sql`right(regexp_replace(coalesce(${leads.phone}, ''), '[^0-9]', '', 'g'), 9) = ${tail}`);
+    // Candidatos que acaban igual; abajo se comprueba que es el mismo número (con o sin prefijo de país, pero nunca
+    // el de otro país que acabe igual: +33 612 345 678 no es +34 612 345 678).
+    const tail = phone.replace(/\D/g, '').slice(-8);
+    conds.push(sql`right(regexp_replace(coalesce(${leads.phone}, ''), '[^0-9]', '', 'g'), ${sql.raw(String(tail.length))}) = ${tail}`);
   }
   if (conds.length === 0) return null;
-  const [row] = await getDb()
+  const rows = await db
     .select()
     .from(leads)
     .where(and(eq(leads.businessId, businessId), or(...conds)))
     .orderBy(asc(leads.createdAt))
-    .limit(1);
-  return row ?? null;
+    .limit(50);
+  if (rows.length === 0) return null;
+  const cc = phone ? await businessCountryCode(businessId) : null;
+  return rows.find((l) => (email && l.email === email) || (phone && l.phone && samePhoneNumber(l.phone, phone, cc))) ?? null;
 }
 
 export interface CreateLeadOptions {
@@ -99,23 +127,20 @@ export interface CreateLeadOptions {
   unverifiedContact?: boolean;
 }
 
-const phoneDigits = (p: string) => p.replace(/\D/g, '');
-/** Mismo número, con o sin prefijo de país (el mismo criterio que `findExistingLead`). */
-const samePhone = (a: string, b: string) => phoneDigits(a).slice(-9) === phoneDigits(b).slice(-9);
-
 /** Datos de contacto sin verificar que no coinciden con la ficha: no se guardan y se avisa al entrenador. */
 async function reportUnverifiedContact(businessId: string, existing: Lead, input: CreateLeadInput) {
   const differs: string[] = [];
   const email = input.email?.trim().toLowerCase();
   if (email && email !== existing.email) differs.push(`email ${email}`);
   const phone = normalizePhone(input.phone);
-  if (phone && !(existing.phone && samePhone(existing.phone, phone))) differs.push(`teléfono ${phone}`);
+  if (phone && !(existing.phone && samePhoneNumber(existing.phone, phone, await businessCountryCode(businessId)))) differs.push(`teléfono ${phone}`);
   const instagram = input.instagramUsername?.trim().replace(/^@/, '');
   if (instagram && instagram.toLowerCase() !== existing.instagramUsername?.toLowerCase()) differs.push(`Instagram @${instagram}`);
   if (differs.length === 0) return;
   await createAlert({
     businessId,
-    type: 'delivery_blocked',
+    // Tipo propio: con «delivery_blocked» se ocultaría detrás de un «Mensaje no enviado» del mismo lead (y al revés).
+    type: 'contact_unverified',
     title: 'Datos de contacto sin confirmar',
     body:
       `Ha llegado un formulario con datos de ${existing.name || 'un lead que ya tienes'} y otros datos de contacto (${differs.join(', ')}). ` +
@@ -135,6 +160,11 @@ async function completeExistingLead(businessId: string, existing: Lead, input: C
     if (!existing.email && input.email) patch.email = input.email.trim().toLowerCase();
     if (!existing.phone && input.phone) patch.phone = normalizePhone(input.phone);
     if (!existing.whatsappId && input.whatsappId) patch.whatsappId = input.whatsappId;
+    else if (input.whatsappId && existing.whatsappId !== input.whatsappId && existing.phone && input.phone) {
+      // Escribe por WhatsApp (verificado por Meta) desde el número que tiene en su ficha, pero su WhatsApp apuntaba a
+      // otro (p. ej. el antiguo): a partir de ahora se le contesta a este, que es el suyo.
+      if (samePhoneNumber(existing.phone, input.phone, await businessCountryCode(businessId))) patch.whatsappId = input.whatsappId;
+    }
     if (!existing.instagramUserId && input.instagramUserId) patch.instagramUserId = input.instagramUserId;
     if (!existing.instagramUsername && input.instagramUsername) patch.instagramUsername = input.instagramUsername;
   }
@@ -300,6 +330,31 @@ export interface UpdateLeadInput {
   dealValueCents?: number | null;
 }
 
+/**
+ * WhatsApp del lead tras cambiarle el teléfono a mano (undefined = se queda como está). Su WhatsApp es su teléfono:
+ * si no, KAI y el equipo seguirían escribiendo (con todo su contexto) al número antiguo, que puede ser ya de otra persona.
+ */
+async function whatsappIdForNewPhone(businessId: string, current: Lead, phone: string | null): Promise<string | null | undefined> {
+  // Sin WhatsApp guardado ya se le escribe a su teléfono, sea cual sea.
+  if (!current.whatsappId) return undefined;
+  if (!phone) return null;
+  const timezone = await businessTimezone(businessId);
+  // El mismo número que ya tenía (p. ej. solo cambia el formato): se conserva el identificador que da Meta.
+  if (samePhoneNumber(`+${current.whatsappId}`, phone, countryCodeForTimezone(timezone))) return undefined;
+  const whatsappId = toWhatsAppId(phone, timezone);
+  if (!whatsappId) return null;
+  const [other] = await getDb()
+    .select({ name: leads.name })
+    .from(leads)
+    .where(and(eq(leads.businessId, businessId), eq(leads.whatsappId, whatsappId), sql`${leads.id} <> ${current.id}`))
+    .limit(1);
+  if (other)
+    throw badRequest(
+      `Ese teléfono ya es el WhatsApp de otro lead${other.name ? ` (${other.name})` : ''}. Si es la misma persona, sigue la conversación desde su ficha.`,
+    );
+  return whatsappId;
+}
+
 export async function updateLead(businessId: string, leadId: string, patch: UpdateLeadInput, actor: Actor) {
   const current = await getLead(businessId, leadId);
   if (patch.assignedUserId) {
@@ -319,7 +374,11 @@ export async function updateLead(businessId: string, leadId: string, patch: Upda
   }
   const values: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
   if (patch.name !== undefined) values.name = patch.name.trim();
-  if (patch.phone !== undefined) values.phone = normalizePhone(patch.phone);
+  if (patch.phone !== undefined) {
+    values.phone = normalizePhone(patch.phone);
+    const whatsappId = await whatsappIdForNewPhone(businessId, current, values.phone);
+    if (whatsappId !== undefined) values.whatsappId = whatsappId;
+  }
   if (patch.email !== undefined) values.email = patch.email?.trim().toLowerCase() || null;
   if (patch.instagramUsername !== undefined) values.instagramUsername = patch.instagramUsername;
   if (patch.notes !== undefined) values.notes = patch.notes;

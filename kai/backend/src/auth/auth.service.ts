@@ -114,6 +114,8 @@ export async function listUserBusinesses(userId: string) {
       planName: plans.name,
       /** Negocios que permite el plan (null = ilimitados). Sin plan asignado: 1. */
       maxBusinesses: sql<number | null>`case when ${plans.id} is null then 1 else (${plans.limits}->>'maxBusinesses')::int end`,
+      /** Negocios de su cuenta (el principal y los creados desde él): el límite del plan se cuenta por cuenta. */
+      accountBusinesses: sql<number>`(select count(*)::int from "businesses" as "account_b" where "account_b"."id" = coalesce(${businesses.accountBusinessId}, ${businesses.id}) or "account_b"."account_business_id" = coalesce(${businesses.accountBusinessId}, ${businesses.id}))`,
     })
     .from(memberships)
     .innerJoin(businesses, eq(businesses.id, memberships.businessId))
