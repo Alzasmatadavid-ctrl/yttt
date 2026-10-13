@@ -205,7 +205,10 @@ export function avoidRepeating(text: string, recentMessages: string[], maxChars:
   if (!recent.has(key(text))) return text;
   const body = text.replace(RX_LEADING_INTERJECTION, '');
   for (let i = 0; i < REPEAT_OPENERS.length; i++) {
-    const candidate = `${REPEAT_OPENERS[(Math.abs(seed) + i) % REPEAT_OPENERS.length]} ${body}`;
+    const opener = REPEAT_OPENERS[(Math.abs(seed) + i) % REPEAT_OPENERS.length];
+    // Nada de «Entendido. Entendido, no te voy a insistir…».
+    if (key(body).startsWith(key(opener).replace(/\.$/, ''))) continue;
+    const candidate = `${opener} ${body}`;
     if (!recent.has(key(candidate)) && candidate.length <= maxChars) return candidate;
   }
   return text;
@@ -338,7 +341,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
     // conversación, así que se le recuerda que eso lo consulte con su médico (sin reconocimientos positivos). Si el
     // aviso se acaba de enviar en un mensaje aparte, no se repite.
     const lastMsg = input.convCtx.history[input.convCtx.history.length - 1];
-    const medicalTopic = /tema de salud/i.test(input.extraNote ?? '');
+    const medicalTopic = /tema de salud|consejos m[eé]dicos/i.test(input.extraNote ?? '');
     const medicalNoticeJustSent =
       /acabas de enviarle/i.test(input.extraNote ?? '') || (lastMsg?.direction === 'outbound' && ['medical_notice', 'medical_redirect'].includes(String(lastMsg.metadata?.kind ?? '')));
     const medicalNotes =
@@ -356,7 +359,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
         ? ''
         : onlyThanks
           ? 'Gracias a ti.'
-          : leadSaysNo
+          : leadSaysNo || medicalTopic
             ? pick(ACKS.neutral, seed)
             : !askedKey
               ? bareAck
@@ -606,13 +609,14 @@ export class RuleBasedSetterAgent implements SetterAgent {
                   `Te lo confirmo: ${svc.name} son ${price}. ${cap(trainer)} te lo explica todo en la ${s.callLabel}.`,
                 ])
               : withIncludes(`Claro. ${svc.name} cuesta ${price}.${includes} En la ${s.callLabel} lo veréis en detalle con ${trainer}.`);
-          else if (asksCallCost)
+          else if (asksCallCost) {
             text = `${
               callFree
                 ? `La ${s.callLabel} no tiene coste. Si después decidís trabajar juntos, ${svc.name} cuesta ${price}.`
                 : `El precio que te puedo dar es el del programa: ${svc.name} cuesta ${price}. Lo de la ${s.callLabel} te lo concreta ${trainerFirst}; prefiero no decirte nada inexacto.`
             } ${offerAsk || '¿Qué te parece?'}`;
-          else if (state.priceShared)
+            shorter = [`${callFree ? `La ${s.callLabel} no tiene coste; el programa, ${price}.` : `El precio del programa es ${price}.`} ${offerAsk || '¿Qué te parece?'}`];
+          } else if (state.priceShared)
             // Vuelve a preguntarlo: el mismo importe con otras palabras (con suficientes variantes para no repetir
             // ninguna de las últimas respuestas, que el control de calidad rechazaría).
             text = fresh(
@@ -916,12 +920,31 @@ export function goalPhrase(goal: string): string | null {
   // Hasta la primera coma o punto (no los decimales: “1,5 kilos”).
   g = g.split(/,(?!\d)|\.(?!\d)|[;:!?¡¿()\n]/)[0].trim();
   if (g.length < 4 || RX_GOAL_NOT_QUOTABLE.test(g)) return null;
-  return lowerFirst(trimGoal(g));
+  return lowerFirst(trimGoal(toSecondPerson(g)));
 }
 
-/** «¿Qué te gustaría conseguir?» → «¿qué te gustaría conseguir?» (para ponerla tras “Y cuéntame, ”). */
-function lowerQuestion(q: string): string {
-  return q.replace(/^(¿?)(\p{Lu})/u, (_, mark: string, letter: string) => `${mark}${letter.toLowerCase()}`);
+/**
+ * Lo dijo el lead, pero lo cita KAI: «ponerme en forma» → «ponerte en forma», «perder mi barriga» → «perder tu
+ * barriga», «que me quede bien la ropa» → «que te quede bien la ropa».
+ */
+function toSecondPerson(g: string): string {
+  const swap: Record<string, string> = { me: 'te', mi: 'tu', mis: 'tus', mí: 'ti', conmigo: 'contigo' };
+  return g
+    .replace(/^(\p{L}+(?:ar|er|ir|ír))me(?!\p{L})/u, '$1te')
+    .replace(/(?<!\p{L})(me|mi|mis|mí|conmigo)(?!\p{L})/giu, (w: string) => {
+      const t = swap[w.toLowerCase()];
+      return w.charAt(0) === w.charAt(0).toUpperCase() ? cap(t) : t;
+    });
+}
+
+/**
+ * «¿Qué te gustaría conseguir?» → «¿qué te gustaría conseguir?» (para ponerla tras “Y cuéntame, ”). Sin la «y» del
+ * principio («¿Y qué crees…?» → «¿qué crees…?»): «Y cuéntame, ¿y qué crees…?» suena mal.
+ */
+export function lowerQuestion(q: string): string {
+  return q
+    .replace(/^(¿?)\s*y\s+(?=\S)/i, '$1')
+    .replace(/^(¿?)(\p{Lu})/u, (_, mark: string, letter: string) => `${mark}${letter.toLowerCase()}`);
 }
 
 /** «de» + etiqueta de un horario, con la contracción obligatoria: «del lunes 12 a las 19:00», «de mañana a las 10:00». */
