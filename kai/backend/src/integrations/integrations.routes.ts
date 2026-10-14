@@ -3,16 +3,18 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { env, integrationAvailability, isProduction, publicApiUrl, publicAppUrl } from '../config/env.js';
 import { parse, uuidParam } from '../lib/http.js';
-import { badRequest, errorMessage, unavailable } from '../lib/errors.js';
+import { AppError, badRequest, errorMessage, unavailable } from '../lib/errors.js';
 import { decrypt, decryptJson, encrypt, randomToken, signPayload, verifySignedPayload } from '../lib/crypto.js';
 import { requireTenant } from '../auth/guards.js';
 import { getDb } from '../database/client.js';
 import { businesses, calendarConnections } from '../database/schema.js';
 import { audit, logError } from '../audit/audit.service.js';
 import { aiModeInfo } from '../ai/providers/index.js';
+import { logger } from '../lib/logger.js';
 import type { ChannelConfig } from '../lib/domain.js';
 import { disconnectConnection, listConnections, updateConnectionConfig, upsertConnection } from './connections.service.js';
 import { friendlyMetaError, graphRequest } from './meta/graph.js';
+import { inspectMetaToken, otherAppTokenMessage, subscribeInstagramAccount, subscribeWhatsAppAccount, whatsappBusinessAccountFor } from './meta/connect.js';
 import {
   getCalendarConnection,
   listCalendarConnections,
@@ -37,14 +39,34 @@ const ChannelConfigSchema = z.object({
   firstContactChannel: z.enum(['whatsapp', 'none']).optional(),
 });
 
-/** Comprueba con Meta que el token y el identificador son válidos antes de guardar nada. */
-async function verifyMetaAccount(channel: 'whatsapp' | 'instagram' | 'meta_lead_ads', id: string, token: string, config: ChannelConfig) {
+/**
+ * Comprueba con Meta que el token y el identificador son válidos antes de guardar nada, que el token es de la app de
+ * Meta de KAI (los avisos de otra app no se pueden recibir: llegarían firmados con otro secreto) y suscribe la cuenta
+ * a la app para que Meta envíe sus mensajes al webhook de KAI.
+ */
+async function verifyMetaAccount(
+  channel: 'whatsapp' | 'instagram' | 'meta_lead_ads',
+  id: string,
+  token: string,
+  config: ChannelConfig,
+): Promise<{ displayName: string; phoneNumber?: string; wabaId?: string }> {
+  const host = channel === 'instagram' ? (config.apiHost ?? 'graph.instagram.com') : 'graph.facebook.com';
+  // Los tokens de «Inicio de sesión con Instagram» no se pueden consultar con debug_token.
+  const info = host === 'graph.facebook.com' ? await inspectMetaToken(token) : null;
+  const otherApp = otherAppTokenMessage(info);
+  if (otherApp) throw badRequest(otherApp);
   if (channel === 'whatsapp') {
     const r = await graphRequest<{ display_phone_number?: string; verified_name?: string }>('graph.facebook.com', id, token, { query: { fields: 'display_phone_number,verified_name' } });
-    return { displayName: [r.verified_name, r.display_phone_number].filter(Boolean).join(' · '), phoneNumber: r.display_phone_number };
+    // Sin esta suscripción, Meta no avisa a KAI de los mensajes de un número que no es de la propia app.
+    const wabaId = await whatsappBusinessAccountFor(id, token, info, config.wabaId);
+    if (wabaId) await subscribeWhatsAppAccount(wabaId, token);
+    else logger.warn('integrations.whatsapp_waba_unknown', { phoneNumberId: id });
+    return { displayName: [r.verified_name, r.display_phone_number].filter(Boolean).join(' · '), phoneNumber: r.display_phone_number, ...(wabaId ? { wabaId } : {}) };
   }
   if (channel === 'instagram') {
-    const r = await graphRequest<{ username?: string; name?: string }>(config.apiHost ?? 'graph.instagram.com', id, token, { query: { fields: 'username,name' } });
+    const r = await graphRequest<{ username?: string; name?: string }>(host, id, token, { query: { fields: 'username,name' } });
+    // Activa los avisos de mensajes de la cuenta (con la API antigua de Facebook se activan en la página).
+    if (host === 'graph.instagram.com') await subscribeInstagramAccount(token);
     return { displayName: r.username ? `@${r.username}` : (r.name ?? 'Instagram') };
   }
   const page = await graphRequest<{ name?: string }>('graph.facebook.com', id, token, { query: { fields: 'name' } });
@@ -66,6 +88,8 @@ export async function integrationsRoutes(app: FastifyInstance) {
       endpoints: {
         metaWebhookUrl: `${api}/api/webhooks/meta`,
         metaVerifyTokenConfigured: Boolean(env.META_VERIFY_TOKEN),
+        /** Identificador de la app de Meta de KAI (es público): el que hay que elegir al generar los tokens. */
+        metaAppId: env.META_APP_ID ?? null,
         leadsWebhookUrl: `${api}/api/webhooks/leads/${biz.publicKey}`,
         publicFormUrl: `${api}/api/public/forms/${biz.publicKey}`,
         publicKey: biz.publicKey,
@@ -88,12 +112,14 @@ export async function integrationsRoutes(app: FastifyInstance) {
       }),
       request.body,
     );
-    let verified: { displayName: string; phoneNumber?: string } = { displayName: body.displayName ?? body.channel };
+    let verified: { displayName: string; phoneNumber?: string; wabaId?: string } = { displayName: body.displayName ?? body.channel };
     if (!(body.skipVerification && !isProduction())) {
       try {
         verified = await verifyMetaAccount(body.channel, body.externalAccountId, body.accessToken, body.config);
       } catch (err) {
         await logError('integrations.verify_meta', err, { channel: body.channel }, ctx.businessId, 'warn');
+        // Las comprobaciones de KAI (p. ej. token de otra app) ya traen su explicación.
+        if (err instanceof AppError) throw err;
         throw badRequest(`Meta no ha aceptado los datos: ${friendlyMetaError(err)}`);
       }
     }
@@ -102,7 +128,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
       externalAccountId: body.externalAccountId,
       displayName: body.displayName || verified.displayName,
       accessToken: body.accessToken,
-      config: { ...body.config, ...(verified.phoneNumber ? { phoneNumber: verified.phoneNumber } : {}) },
+      config: { ...body.config, ...(verified.phoneNumber ? { phoneNumber: verified.phoneNumber } : {}), ...(verified.wabaId ? { wabaId: verified.wabaId } : {}) },
       replacesConnectionId: body.replacesConnectionId,
     });
     return { connection };

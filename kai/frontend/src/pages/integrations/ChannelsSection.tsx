@@ -57,9 +57,9 @@ const DEFS: Record<MetaChannel, ChannelDef> = {
       </>
     ),
     idLabel: 'ID de la cuenta profesional de Instagram',
-    idHint: 'Es un número largo que aparece junto a tu cuenta en el panel de tu app de Meta. No es tu nombre de usuario.',
+    idHint: 'Es un número largo que aparece junto a tu cuenta en el panel de la app de Meta de KAI. No es tu nombre de usuario.',
     idPlaceholder: 'Ej.: 17841400000000000',
-    tokenHint: 'El token de acceso que generas en tu app de Meta para tu cuenta de Instagram. Suele caducar pasados unos 60 días: cuando caduque, genera otro y pégalo con «Editar datos».',
+    tokenHint: 'El token de acceso que generas en la app de Meta de KAI para tu cuenta de Instagram. Suele caducar pasados unos 60 días: cuando caduque, genera otro y pégalo con «Editar datos».',
     activityLabel: 'Último mensaje recibido',
     disconnectMessage:
       'KAI dejará de recibir y de contestar los mensajes directos de esta cuenta de Instagram. Tus leads y conversaciones no se borran y podrás volver a conectarla cuando quieras.',
@@ -249,7 +249,7 @@ function ApiHostPicker({ value, onChange }: { value: NonNullable<ChannelConfig['
     {
       value: 'graph.instagram.com',
       title: 'Inicio de sesión con Instagram (recomendado)',
-      text: 'Generaste el token en tu app de Meta, en Instagram → «Configuración de la API con inicio de sesión de Instagram».',
+      text: 'Generaste el token en la app de Meta de KAI, en Instagram → «Configuración de la API con inicio de sesión de Instagram».',
     },
     {
       value: 'graph.facebook.com',
@@ -598,32 +598,66 @@ function LeadAdsSettings({ row, whatsapp, canManage }: { row: ChannelRow; whatsa
 
 // ───────────── Guías ─────────────
 
-function WhatsAppGuide() {
+/**
+ * KAI usa UNA sola app de Meta (la que configura quien administra KAI, con META_APP_ID y META_APP_SECRET): Meta firma
+ * cada aviso con el secreto de la app del token, así que con un token de otra app no llegaría ningún mensaje (el
+ * servidor lo rechaza al conectar). El entrenador no crea ninguna app ni configura webhooks: KAI suscribe sola cada
+ * cuenta al conectarla.
+ */
+function KaiAppNote({ appId }: { appId: string | null }) {
+  return (
+    <Callout tone="info" icon={Info}>
+      <strong>No crees ninguna app de Meta ni configures ningún webhook.</strong> KAI recibe tus mensajes a través de su propia app de Meta
+      {appId ? (
+        <>
+          {' '}
+          (identificador <code className="code-inline">{appId}</code>)
+        </>
+      ) : null}
+      , que configura una sola vez quien administra KAI. Genera siempre los tokens eligiendo esa app: si usas otra, KAI no aceptará el token, porque no te
+      llegaría ningún mensaje.
+    </Callout>
+  );
+}
+
+/** Paso común: acceso a la app de Meta de KAI. */
+function KaiAppAccessStep({ appId, business }: { appId: string | null; business?: boolean }) {
+  return (
+    <>
+      <h4 className="intg-guide-h">1. Consigue acceso a la app de Meta de KAI</h4>
+      <Steps>
+        <li>
+          Pide a quien administra KAI que te añada como <UiLabel>Desarrollador</UiLabel> de la app de Meta de KAI{appId ? <> ({appId})</> : null}. Te
+          llegará una invitación: acéptala en <ExtLink href="https://developers.facebook.com/requests">Meta for Developers → Solicitudes</ExtLink>.
+        </li>
+        {business && (
+          <li>
+            Pídele también que comparta la app con tu portfolio empresarial (tu cuenta de Business Manager). Para eso necesita su identificador: lo ves en{' '}
+            <ExtLink href="https://business.facebook.com/settings/info">Configuración del negocio → Información del negocio</ExtLink>. Cuando lo haga, la app
+            de KAI aparecerá en <UiLabel>Configuración del negocio</UiLabel> → <UiLabel>Cuentas</UiLabel> → <UiLabel>Apps</UiLabel>.
+          </li>
+        )}
+        <li>Si administras tú KAI, la app es la que creaste al configurarlo: sáltate este paso.</li>
+      </Steps>
+    </>
+  );
+}
+
+function WhatsAppGuide({ appId }: { appId: string | null }) {
   return (
     <Guide icon={BookOpen}>
       <p className="small muted">Necesitas un ordenador y unos 20 minutos. Solo hay que hacerlo una vez.</p>
-      <h4 className="intg-guide-h">1. Crea la app y añade WhatsApp</h4>
+      <KaiAppNote appId={appId} />
+      <KaiAppAccessStep appId={appId} business />
+      <h4 className="intg-guide-h">2. Añade tu número y copia su identificador</h4>
       <Steps>
         <li>
-          Entra en <ExtLink href="https://developers.facebook.com/apps">Meta for Developers</ExtLink> con tu cuenta de Facebook y pulsa{' '}
-          <UiLabel>Crear app</UiLabel>.
+          Entra en <ExtLink href="https://developers.facebook.com/apps">Meta for Developers</ExtLink>, abre la app de KAI y, en el menú de la izquierda, ve
+          a <UiLabel>WhatsApp</UiLabel> → <UiLabel>Configuración de la API</UiLabel> (API Setup).
         </li>
         <li>
-          Cuando te pregunte el tipo de app, elige <UiLabel>Empresa</UiLabel> (Business) y vincúlala a tu portfolio empresarial (tu cuenta de Business
-          Manager). Si te pregunta por el caso de uso, puedes elegir directamente el de WhatsApp.
-        </li>
-        <li>
-          En el panel de la app, busca el producto <UiLabel>WhatsApp</UiLabel> y pulsa <UiLabel>Configurar</UiLabel>.
-        </li>
-      </Steps>
-      <h4 className="intg-guide-h">2. Copia el identificador del número</h4>
-      <Steps>
-        <li>
-          En el menú de la izquierda, ve a <UiLabel>WhatsApp</UiLabel> → <UiLabel>Configuración de la API</UiLabel> (API Setup).
-        </li>
-        <li>
-          Añade tu número de empresa con <UiLabel>Añadir número de teléfono</UiLabel> y verifícalo con el código que te llegará por SMS o llamada. Si ese
-          número ya está en la aplicación de WhatsApp, Meta te indicará los pasos para pasarlo a la API.
+          Añade tu número de empresa con <UiLabel>Añadir número de teléfono</UiLabel>, eligiendo tu portfolio empresarial, y verifícalo con el código que te
+          llegará por SMS o llamada. Si ese número ya está en la aplicación de WhatsApp, Meta te indicará los pasos para pasarlo a la API.
         </li>
         <li>
           Elige tu número en el desplegable: justo debajo verás <UiLabel>Identificador del número de teléfono</UiLabel> (Phone number ID). Ese es el número
@@ -641,33 +675,30 @@ function WhatsAppGuide() {
           <UiLabel>Añadir</UiLabel>. Ponle un nombre (por ejemplo, KAI) y el rol <UiLabel>Administrador</UiLabel>.
         </li>
         <li>
-          Con ese usuario seleccionado, pulsa <UiLabel>Asignar activos</UiLabel>: en <UiLabel>Apps</UiLabel> elige tu app y en{' '}
+          Con ese usuario seleccionado, pulsa <UiLabel>Asignar activos</UiLabel>: en <UiLabel>Apps</UiLabel> elige la app de KAI y en{' '}
           <UiLabel>Cuentas de WhatsApp</UiLabel> tu cuenta, ambas con control total.
         </li>
         <li>
-          Pulsa <UiLabel>Generar nuevo token</UiLabel>, elige tu app, en caducidad marca <UiLabel>Nunca</UiLabel> y activa estos permisos:{' '}
+          Pulsa <UiLabel>Generar nuevo token</UiLabel>, elige la app de KAI, en caducidad marca <UiLabel>Nunca</UiLabel> y activa estos permisos:{' '}
           <code className="code-inline">whatsapp_business_messaging</code> y <code className="code-inline">whatsapp_business_management</code>.
         </li>
         <li>Copia el token (empieza por «EAA…») y pégalo en KAI. Meta solo lo enseña una vez: si lo pierdes, genera otro.</li>
       </Steps>
-      <h4 className="intg-guide-h">4. Activa los avisos (webhook)</h4>
-      <Steps>
-        <li>
-          En tu app, ve a <UiLabel>WhatsApp</UiLabel> → <UiLabel>Configuración</UiLabel> y, en <UiLabel>Webhook</UiLabel>, pulsa <UiLabel>Editar</UiLabel>.
-        </li>
-        <li>Pega la dirección y el token de verificación del recuadro «Webhook de Meta» de esta página y pulsa «Verificar y guardar».</li>
-        <li>
-          En <UiLabel>Campos del webhook</UiLabel>, pulsa <UiLabel>Administrar</UiLabel> y suscríbete a <code className="code-inline">messages</code>.
-        </li>
-      </Steps>
+      <h4 className="intg-guide-h">4. Conecta</h4>
+      <p className="small muted">
+        Pulsa «Conectar WhatsApp Business» y pega el identificador y el token. KAI comprueba con Meta que son correctos y que el token es de su app, y activa
+        él mismo los avisos de tus mensajes. No tienes que configurar ningún webhook.
+      </p>
     </Guide>
   );
 }
 
-function InstagramGuide() {
+function InstagramGuide({ appId }: { appId: string | null }) {
   return (
     <Guide icon={BookOpen}>
-      <h4 className="intg-guide-h">1. Prepara tu cuenta de Instagram</h4>
+      <KaiAppNote appId={appId} />
+      <KaiAppAccessStep appId={appId} />
+      <h4 className="intg-guide-h">2. Prepara tu cuenta de Instagram</h4>
       <Steps>
         <li>
           Tu cuenta debe ser profesional. En la app de Instagram: <UiLabel>Configuración</UiLabel> → <UiLabel>Tipo de cuenta y herramientas</UiLabel> →{' '}
@@ -679,15 +710,11 @@ function InstagramGuide() {
           mensajes directos.
         </li>
       </Steps>
-      <h4 className="intg-guide-h">2. Crea la app y conecta tu cuenta</h4>
+      <h4 className="intg-guide-h">3. Conecta tu cuenta en la app de KAI</h4>
       <Steps>
         <li>
-          Entra en <ExtLink href="https://developers.facebook.com/apps">Meta for Developers</ExtLink> y crea una app de tipo <UiLabel>Empresa</UiLabel> (o usa
-          la misma que para WhatsApp).
-        </li>
-        <li>
-          Añade el producto <UiLabel>Instagram</UiLabel> y entra en <UiLabel>Configuración de la API con inicio de sesión de Instagram</UiLabel> (API setup with
-          Instagram login).
+          Entra en <ExtLink href="https://developers.facebook.com/apps">Meta for Developers</ExtLink>, abre la app de KAI y ve a <UiLabel>Instagram</UiLabel>{' '}
+          → <UiLabel>Configuración de la API con inicio de sesión de Instagram</UiLabel> (API setup with Instagram login).
         </li>
         <li>
           En <UiLabel>Generar tokens de acceso</UiLabel>, pulsa <UiLabel>Añadir cuenta</UiLabel>, inicia sesión con tu Instagram profesional y acepta los
@@ -702,39 +729,31 @@ function InstagramGuide() {
         </li>
       </Steps>
       <p className="small muted">
-        ¿Usas el método antiguo, con tu Instagram vinculado a una página de Facebook y un token de Facebook? Entonces elige{' '}
-        <strong>Inicio de sesión con Facebook</strong> (<code className="code-inline">graph.facebook.com</code>) al conectar.
+        Al conectar, KAI activa él mismo los avisos de tus mensajes: no tienes que configurar ningún webhook. ¿Usas el método antiguo, con tu Instagram
+        vinculado a una página de Facebook y un token de Facebook? Entonces elige <strong>Inicio de sesión con Facebook</strong> (
+        <code className="code-inline">graph.facebook.com</code>) al conectar y pide a quien administra KAI que active los avisos de mensajes de tu página.
       </p>
-      <h4 className="intg-guide-h">3. Activa los avisos (webhook)</h4>
-      <Steps>
-        <li>
-          En esa misma pantalla, en <UiLabel>Configurar webhooks</UiLabel>, pega la dirección y el token de verificación del recuadro «Webhook de Meta» de
-          esta página y pulsa «Verificar y guardar».
-        </li>
-        <li>
-          Suscríbete al campo <code className="code-inline">messages</code> y activa la suscripción a webhooks de tu cuenta (el interruptor que aparece junto a
-          ella).
-        </li>
-      </Steps>
     </Guide>
   );
 }
 
-function LeadAdsGuide() {
+function LeadAdsGuide({ appId }: { appId: string | null }) {
   return (
     <Guide icon={BookOpen}>
       <p className="small muted">
-        Necesitas ser administrador de la página de Facebook desde la que publicas los anuncios y tener una app de Meta (puede ser la misma que para
-        WhatsApp). Con estos pasos conseguirás a la vez el ID de la página y un token de página que no caduca.
+        Necesitas ser administrador de la página de Facebook desde la que publicas los anuncios. Con estos pasos conseguirás a la vez el ID de la página y
+        un token de página que no caduca.
       </p>
-      <h4 className="intg-guide-h">1. Genera un token con los permisos necesarios</h4>
+      <KaiAppNote appId={appId} />
+      <KaiAppAccessStep appId={appId} />
+      <h4 className="intg-guide-h">2. Genera un token con los permisos necesarios</h4>
       <Steps>
         <li>
           Abre el <ExtLink href="https://developers.facebook.com/tools/explorer/">Explorador de la API Graph</ExtLink> (una herramienta de Meta para
           desarrolladores; no hace falta saber programar).
         </li>
         <li>
-          A la derecha, en <UiLabel>Meta App</UiLabel>, elige tu app. En <UiLabel>Permissions</UiLabel> añade:{' '}
+          A la derecha, en <UiLabel>Meta App</UiLabel>, elige la app de KAI. En <UiLabel>Permissions</UiLabel> añade:{' '}
           <code className="code-inline">leads_retrieval</code>, <code className="code-inline">pages_manage_metadata</code>,{' '}
           <code className="code-inline">pages_show_list</code> y <code className="code-inline">pages_read_engagement</code>.
         </li>
@@ -742,7 +761,7 @@ function LeadAdsGuide() {
           Pulsa <UiLabel>Generate Access Token</UiLabel>; en la ventana de Facebook, marca tu página y acepta.
         </li>
       </Steps>
-      <h4 className="intg-guide-h">2. Haz que no caduque</h4>
+      <h4 className="intg-guide-h">3. Haz que no caduque</h4>
       <Steps>
         <li>
           Copia el token, pégalo en el <ExtLink href="https://developers.facebook.com/tools/debug/accesstoken/">Depurador de tokens de acceso</ExtLink> y pulsa{' '}
@@ -757,26 +776,22 @@ function LeadAdsGuide() {
           <code className="code-inline">access_token</code> es el <strong>token de página</strong>. Copia ambos en KAI.
         </li>
       </Steps>
-      <h4 className="intg-guide-h">3. Activa los avisos (webhook)</h4>
+      <h4 className="intg-guide-h">4. Conecta</h4>
       <Steps>
         <li>
-          En tu app, añade el producto <UiLabel>Webhooks</UiLabel>, elige el objeto <UiLabel>Page</UiLabel> (página) y pulsa{' '}
-          <UiLabel>Suscribirse a este objeto</UiLabel>.
-        </li>
-        <li>Pega la dirección y el token de verificación del recuadro «Webhook de Meta» de esta página.</li>
-        <li>
-          Suscríbete al campo <code className="code-inline">leadgen</code>. KAI suscribe tu página a la app automáticamente al conectarla.
+          Pulsa «Conectar Meta Lead Ads» y pega el ID de la página y el token. KAI comprueba que el token es de su app y suscribe tu página para recibir los
+          contactos de tus anuncios. No tienes que configurar ningún webhook.
         </li>
         <li>
           Si en tu Business Manager tienes restringido el acceso a los clientes potenciales (<UiLabel>Configuración del negocio</UiLabel> →{' '}
-          <UiLabel>Integraciones</UiLabel> → <UiLabel>Acceso a clientes potenciales</UiLabel>), da acceso también a tu app.
+          <UiLabel>Integraciones</UiLabel> → <UiLabel>Acceso a clientes potenciales</UiLabel>), da acceso también a la app de KAI.
         </li>
       </Steps>
     </Guide>
   );
 }
 
-const GUIDES: Record<MetaChannel, () => ReactNode> = {
+const GUIDES: Record<MetaChannel, (props: { appId: string | null }) => ReactNode> = {
   whatsapp: WhatsAppGuide,
   instagram: InstagramGuide,
   meta_lead_ads: LeadAdsGuide,
@@ -816,7 +831,19 @@ function AccountBox({ row, def }: { row: ChannelRow; def: ChannelDef }) {
   );
 }
 
-function ChannelCard({ def, rows, whatsapp, canManage }: { def: ChannelDef; rows: ChannelRow[]; whatsapp: ChannelRow | undefined; canManage: boolean }) {
+function ChannelCard({
+  def,
+  rows,
+  whatsapp,
+  canManage,
+  appId,
+}: {
+  def: ChannelDef;
+  rows: ChannelRow[];
+  whatsapp: ChannelRow | undefined;
+  canManage: boolean;
+  appId: string | null;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [modal, setModal] = useState<{ existing: ChannelRow | null } | null>(null);
@@ -867,7 +894,7 @@ function ChannelCard({ def, rows, whatsapp, canManage }: { def: ChannelDef; rows
       )}
 
       <div className="mt-16">
-        <GuideComp />
+        <GuideComp appId={appId} />
       </div>
 
       {modal && <ConnectChannelModal def={def} existing={modal.existing} onClose={() => setModal(null)} />}
@@ -893,9 +920,13 @@ function MetaWebhookCard({ data }: { data: IntegrationsResponse }) {
     <Card title="Webhook de Meta" icon={Webhook}>
       <div className="col gap-12">
         <p className="small muted">
-          Un <strong>webhook</strong> es la dirección a la que Meta avisa a KAI cada vez que te llega un mensaje o un lead. Se configura una sola vez en tu
-          app de Meta y sirve para los tres canales.
+          Un <strong>webhook</strong> es la dirección a la que Meta avisa a KAI cada vez que llega un mensaje o un lead. Lo configura{' '}
+          <strong>una sola vez quien administra KAI</strong>, en la app de Meta de KAI, y sirve para todos los negocios y los tres canales. Si no administras
+          KAI, no tienes que hacer nada aquí: al conectar cada canal, KAI se suscribe solo.
         </p>
+        {endpoints.metaAppId ? (
+          <CopyField label="Identificador de la app de Meta de KAI" value={endpoints.metaAppId} what="Identificador de la app copiado" />
+        ) : null}
         <CopyField label="URL de devolución de llamada (Callback URL)" value={endpoints.metaWebhookUrl} what="Dirección del webhook copiada" />
         <div className="field">
           <span className="label">Token de verificación (Verify token)</span>
@@ -931,24 +962,26 @@ function MetaWebhookCard({ data }: { data: IntegrationsResponse }) {
           <ul className="intg-list small">
             <li>
               <WhatsAppIcon size={14} /> <span>
-                <strong>WhatsApp:</strong> en tu app → WhatsApp → Configuración → Webhook, el campo <code className="code-inline">messages</code>.
+                <strong>WhatsApp:</strong> en la app de KAI → WhatsApp → Configuración → Webhook, el campo <code className="code-inline">messages</code>.
               </span>
             </li>
             <li>
               <InstagramIcon size={14} /> <span>
-                <strong>Instagram:</strong> en tu app → Instagram → Configuración de la API con inicio de sesión de Instagram → Configurar webhooks, el campo{' '}
+                <strong>Instagram:</strong> en la app de KAI → Instagram → Configuración de la API con inicio de sesión de Instagram → Configurar webhooks, el
+                campo{' '}
                 <code className="code-inline">messages</code>.
               </span>
             </li>
             <li>
               <Megaphone size={14} aria-hidden /> <span>
-                <strong>Lead Ads:</strong> en tu app → Webhooks → objeto «Page» (página), el campo <code className="code-inline">leadgen</code>.
+                <strong>Lead Ads:</strong> en la app de KAI → Webhooks → objeto «Page» (página), el campo <code className="code-inline">leadgen</code>.
               </span>
             </li>
           </ul>
         </div>
         <Callout tone="info" icon={KeyRound}>
-          La app de Meta que uses debe ser la misma cuyo «secreto de la app» está configurado en el servidor de KAI (<code className="code-inline">META_APP_SECRET</code>).
+          La app de Meta de KAI es la misma cuyo «secreto de la app» está configurado en el servidor (<code className="code-inline">META_APP_SECRET</code>) y
+          los tokens de todos los canales tienen que ser de ella: KAI rechaza los de otras apps al conectar, porque sus mensajes no le llegarían.
           Mientras la app esté en modo desarrollo, Meta solo envía los mensajes de personas con un rol en la app (administradores o testers). Para usarla con
           clientes reales hay que pasar la revisión de la app de Meta (App Review) con los permisos de cada guía, verificar el negocio en Business Manager y
           ponerla en modo «Activo» (Live).
@@ -966,13 +999,14 @@ export function ChannelsSection({ data, canManage }: { data: IntegrationsRespons
   return (
     <div className="intg-section">
       <p className="intg-lead">
-        WhatsApp, Instagram y los anuncios con formulario pertenecen a <strong>Meta</strong> (la empresa de Facebook). Para conectarlos necesitas una
-        «app» en Meta for Developers: es solo un permiso para que KAI pueda leer y enviar mensajes en tu nombre. Cada tarjeta tiene una guía paso a paso.
+        WhatsApp, Instagram y los anuncios con formulario pertenecen a <strong>Meta</strong> (la empresa de Facebook). KAI se conecta a ellos con su propia
+        «app» de Meta, que configura una sola vez quien administra KAI: tú no tienes que crear ninguna app ni configurar webhooks. Solo das acceso a tu cuenta
+        y pegas aquí los datos. Cada tarjeta tiene una guía paso a paso.
       </p>
       <div className="grid-split">
         <div className="col gap-16">
           {(['whatsapp', 'instagram', 'meta_lead_ads'] as const).map((c) => (
-            <ChannelCard key={c} def={DEFS[c]} rows={byChannel(c)} whatsapp={whatsapp} canManage={canManage} />
+            <ChannelCard key={c} def={DEFS[c]} rows={byChannel(c)} whatsapp={whatsapp} canManage={canManage} appId={data.endpoints.metaAppId ?? null} />
           ))}
         </div>
         <div className="intg-aside">

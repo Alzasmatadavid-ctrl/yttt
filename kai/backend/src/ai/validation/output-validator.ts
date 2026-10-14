@@ -8,8 +8,9 @@
  *   - enlaces: solo los permitidos
  *   - promesas de resultados, consejos médicos (fármacos, dosis, diagnósticos), presión, frases robóticas,
  *     seguimiento genérico
- *   - cifras de autoridad (años, clientes, kilos que perdió alguien, % de éxito) y testimonios que no estén en el
- *     perfil del entrenador ni los haya dicho el lead
+ *   - cifras de autoridad (años, clientes, “cientos de clientes”, kilos que perdió alguien, % de éxito, descuentos)
+ *     y testimonios que no estén en el perfil del entrenador; con lo que ha dicho el lead (`leadText`), también
+ *     cualquier cifra de kilos o % que no salga de sus datos ni de sus mensajes
  * Son patrones: cubren las formas habituales, no todas. Lo demás lo revisa la capa 2.
  * Capa 2 (opcional, IA rápida): ¿responde a lo último que dijo? ¿suena humano? ¿inventa algo?
  *
@@ -36,7 +37,8 @@ export interface ValidationContext {
   factsText: string;
   /**
    * Lo que ha contado el lead (sus mensajes, su cualificación, su memoria). KAI puede repetir sus cifras sin que
-   * cuenten como inventadas: “esos 10 kilos”, “tu amigo que perdió 15 kilos”.
+   * cuenten como inventadas: “esos 10 kilos”, “tu amigo que perdió 15 kilos”. Si se pasa, también se comprueba
+   * cualquier cifra de kilos o de % (sin ello no se puede saber si la dijo el lead).
    */
   leadText?: string;
   isFollowUp?: boolean;
@@ -206,32 +208,83 @@ function numbersIn(text: string): Set<number> {
   return out;
 }
 
-/** Aproximación delante de la cifra: “más de 500”, “casi quince”. */
-const ABOUT = String.raw`(?:mas de\s+|casi\s+|unos\s+|unas\s+|hasta\s+|cerca de\s+|nada menos que\s+)?`;
+/** Aproximación delante de la cifra: “más de 500”, “casi quince”, “de media 8”. */
+const ABOUT = String.raw`(?:(?:mas de|casi|unos|unas|hasta|cerca de|alrededor de|aproximadamente|nada menos que|de media|una media de|en promedio|un promedio de)\s+)*`;
+
 /**
- * Cifras de autoridad o resultados de terceros. Solo valen si están en los datos del negocio o las ha dicho el lead.
- * No cuentan las del propio lead (“esos 10 kilos”, “quieres bajar 3 tallas”, “a tus 40 años”).
+ * Tipo de cifra:
+ *  - `authority`: datos del entrenador (clientes, años de experiencia, % de éxito, descuentos). Solo valen si están
+ *    en sus datos: que el lead pregunte “¿tienes 500 clientes?” no los hace ciertos.
+ *  - `result`: kilos, tallas o % de alguien. Valen si están en los datos del negocio o los ha dicho el lead
+ *    (“esos 10 kilos”, “tu amigo perdió 15 kilos”), salvo que se atribuyan a clientes del entrenador.
  */
-const RX_CLAIMS: RegExp[] = [
-  // Clientes o casos: “300 personas”, “más de doscientos clientes”.
-  new RegExp(String.raw`(?<num>${NUM})\s+(?:clientes|clientas|alumnos|alumnas|personas|transformaciones|casos de exito|historias de exito|atletas|deportistas)\b`, 'g'),
+type ClaimKind = 'authority' | 'result';
+const PEOPLE = 'clientes|clientas|alumnos|alumnas|personas|hombres|mujeres|transformaciones|casos de exito|historias de exito|atletas|deportistas';
+/** Número de clientes o casos: “300 personas”, “más de doscientos clientes”. */
+const RX_PEOPLE_COUNT = new RegExp(String.raw`(?<num>${NUM})\s+(?:${PEOPLE})\b`, 'g');
+/** Cifras de autoridad o resultados de terceros (se comprueban siempre). */
+const RX_CLAIMS: { rx: RegExp; kind: ClaimKind }[] = [
+  { kind: 'authority', rx: RX_PEOPLE_COUNT },
   // Experiencia: “10 años de experiencia”, “quince años entrenando”, “desde hace 8 años ayudo…”.
-  new RegExp(
-    String.raw`(?<num>${NUM})\s+anos?\s+(?:que\s+)?(?:de (?:experiencia|trayectoria|carrera|profesion)|en (?:el sector|esto|este mundo|el mundo del fitness)|entrenando|ayudando|trabajando|dedicad[oa]s?|dedicandome|dedicandose|me dedico|nos dedicamos|se dedica|entreno|entrena|entrenamos|ayudo|ayuda|ayudamos|trabajo|trabaja|trabajamos|como (?:entrenador|entrenadora|coach|nutricionista|preparador|preparadora|profesional))\b`,
-    'g',
-  ),
+  {
+    kind: 'authority',
+    rx: new RegExp(
+      String.raw`(?<num>${NUM})\s+anos?\s+(?:que\s+)?(?:de (?:experiencia|trayectoria|carrera|profesion)|en (?:el sector|esto|este mundo|el mundo del fitness)|entrenando|ayudando|trabajando|dedicad[oa]s?|dedicandome|dedicandose|me dedico|nos dedicamos|se dedica|entreno|entrena|entrenamos|ayudo|ayuda|ayudamos|trabajo|trabaja|trabajamos|como (?:entrenador|entrenadora|coach|nutricionista|preparador|preparadora|profesional))\b`,
+      'g',
+    ),
+  },
   // “Llevo 10 años…” (lo dice el entrenador o su equipo, no el lead).
-  new RegExp(String.raw`\b(?:llevo|llevamos)\s+(?:ya\s+)?${ABOUT}(?<num>${NUM})\s+anos?\b`, 'g'),
-  // Resultados de otros (testimonios): “perdió 12 kilos”, “han bajado 3 tallas”, “500 kilos perdidos”.
-  new RegExp(
-    String.raw`\b(?:perdio|perdieron|perdi|perdimos|ha perdido|han perdido|he perdido|bajo|bajaron|ha bajado|han bajado|he bajado|se quito|se quitaron|me quite|se ha quitado|se han quitado|elimino|eliminaron|ha eliminado|han eliminado|redujo|redujeron|ha reducido|han reducido|(?:consiguio|consiguieron|logro|lograron) (?:perder|bajar|quitarse))\s+${ABOUT}(?<num>${NUM})\s*(?:kilos?|kg|kgs|centimetros|cm|tallas?|%|por ciento|puntos)`,
-    'g',
-  ),
-  new RegExp(String.raw`(?<num>${NUM})\s*(?:kilos|kg) perdidos`, 'g'),
+  { kind: 'authority', rx: new RegExp(String.raw`\b(?:llevo|llevamos)\s+(?:ya\s+)?${ABOUT}(?<num>${NUM})\s+anos?\b`, 'g') },
+  // Resultados de otros (testimonios): “perdió 12 kilos”, “han bajado de media 3 tallas”, “500 kilos perdidos”.
+  {
+    kind: 'result',
+    rx: new RegExp(
+      String.raw`\b(?:perdio|perdieron|perdi|perdimos|ha perdido|han perdido|he perdido|bajo|bajaron|ha bajado|han bajado|he bajado|se quito|se quitaron|me quite|se ha quitado|se han quitado|elimino|eliminaron|ha eliminado|han eliminado|redujo|redujeron|ha reducido|han reducido|(?:consiguio|consiguieron|logro|lograron) (?:perder|bajar|quitarse))\s+${ABOUT}(?<num>${NUM})\s*(?:kilos?|kg|kgs|centimetros|cm|tallas?|%|por ciento|puntos)`,
+      'g',
+    ),
+  },
+  { kind: 'result', rx: new RegExp(String.raw`(?<num>${NUM})\s*(?:kilos|kg) perdidos`, 'g') },
   // Estadísticas de éxito: “el 95% de mis clientes”, “una tasa de éxito del 90%”.
-  new RegExp(String.raw`(?<num>${NUM})\s*(?:%|por ciento)\s+(?:de (?:exito|efectividad|eficacia|satisfaccion|acierto)|de (?:mis|nuestros|nuestras|sus|los|las) (?:clientes|clientas|alumnos|alumnas|personas|casos)|de la gente)`, 'g'),
-  new RegExp(String.raw`\b(?:exito|efectividad|eficacia|satisfaccion|acierto)\s+(?:es\s+)?(?:del?|de un)\s+(?<num>${NUM})\s*(?:%|por ciento)`, 'g'),
+  {
+    kind: 'authority',
+    rx: new RegExp(String.raw`(?<num>${NUM})\s*(?:%|por ciento)\s+(?:de (?:exito|efectividad|eficacia|satisfaccion|acierto)|de (?:mis|nuestros|nuestras|sus|los|las) (?:${PEOPLE})|de la gente)`, 'g'),
+  },
+  { kind: 'authority', rx: new RegExp(String.raw`\b(?:exito|efectividad|eficacia|satisfaccion|acierto)\s+(?:es\s+)?(?:del?|de un)\s+(?<num>${NUM})\s*(?:%|por ciento)`, 'g') },
+  // Descuentos (ofertas inventadas): “un 20% de descuento”, “descuento del 30%”.
+  { kind: 'authority', rx: new RegExp(String.raw`(?<num>${NUM})\s*(?:%|por ciento)\s+(?:de )?(?:descuento|dto|rebaja)\b`, 'g') },
+  { kind: 'authority', rx: new RegExp(String.raw`\b(?:descuento|rebaja)\s+(?:del?|de un)\s+(?<num>${NUM})\s*(?:%|por ciento)`, 'g') },
 ];
+/**
+ * Cualquier cifra de kilos o de % (“mucha gente pierde 2 o 3 kilos el primer mes”). Solo se comprueban si se sabe lo
+ * que ha dicho el lead (`leadText`): sin eso, repetir su objetivo (“esos 10 kilos”) parecería inventado.
+ * “100%” no cuenta (“100% online”).
+ */
+const RX_CLAIMS_ANY: { rx: RegExp; kind: ClaimKind; generic: true }[] = [
+  { kind: 'result', generic: true, rx: new RegExp(String.raw`(?<num>${NUM})\s*(?:kilos?|kg|kgs)\b`, 'g') },
+  { kind: 'result', generic: true, rx: new RegExp(String.raw`(?<num>${NUM})\s*(?:%|por ciento)`, 'g') },
+];
+/** Cifras vagas de autoridad (“cientos de clientes”): valen si los datos del negocio dicen esa palabra o una cifra de clientes así. */
+const RX_VAGUE_CROWD = new RegExp(String.raw`\b(?<w>decenas|cientos|centenares|miles)\s+de\s+(?:${PEOPLE})\b`, 'g');
+const VAGUE_MIN: Record<string, number> = { decenas: 20, cientos: 200, centenares: 200, miles: 2000 };
+
+/**
+ * La cifra habla del lead o de alguien suyo (“si llevas 10 años entrenando”, “tu amigo perdió 15 kilos”): no es un dato
+ * del entrenador y no se puede dar por inventada.
+ */
+const RX_LEAD_SIDE =
+  /\b(?:llevas|lleves|llevabas|llevais|lleveis|sois|seais|tienes|tengas|teneis|tengais|perdiste|perdisteis|bajaste|bajasteis|si (?:ya )?(?:lleva|llevan|tiene|tienen)|usted(?:es)? (?:lleva|llevan|tiene|tienen)|(?:lleva|llevan|tiene|tienen) usted(?:es)?)\b|\btus? (?:amig|herman|prim|pareja|mujer|marido|novi|padre|madre|compan|vecin|cunad|soci|jefe|hij|famil|conocid)\w*/;
+/** Hasta dónde se mira hacia atrás para saber si la cifra es del lead (“tienes delante a Álex, que lleva 15 años…” no lo es). */
+const LEAD_SIDE_REACH = 40;
+/** La cifra se atribuye a clientes del entrenador (“mis alumnos han perdido…”, “una clienta mía…”): solo valen sus datos. */
+const RX_TRAINER_SIDE =
+  /\b(?:(?:mis|nuestr[oa]s|sus) (?:clientes|clientas|alumnos|alumnas|chicos|chicas)|(?:mi|nuestr[oa]) (?:cliente|clienta|alumno|alumna)|(?:cliente|clienta|alumno|alumna)s? (?:mio|mia|mios|mias|nuestr[oa]s?)|(?:uno|una|otro|otra) de (?:mis|nuestr[oa]s|sus))\b/;
+
+/** La parte de la frase que va antes de una posición (para saber de quién se habla). */
+function clauseBefore(text: string, index: number): string {
+  const before = text.slice(Math.max(0, index - 100), index);
+  const cut = Math.max(...[...before.matchAll(/[.!?\n;:]/g)].map((m) => m.index! + 1), 0);
+  return before.slice(cut);
+}
 
 /** Anécdota de un cliente concreto con su resultado: “una clienta mía perdió…”, “uno de mis alumnos consiguió…”. */
 const RX_TESTIMONIAL =
@@ -266,8 +319,11 @@ const RX_PRICE_VERB = new RegExp(
   'g',
 );
 
-/** Importe en letras con la moneda: “ciento cincuenta euros”, “dos mil pesos” (en plural: “un peso saludable” no es un importe). */
-const RX_PRICE_WORDS = new RegExp(String.raw`(?<w>${NUM_WORDS})\s+(?<c>euros?|dolares|pesos|soles|francos)\b`, 'g');
+/**
+ * Importe en letras con la moneda: “ciento cincuenta euros”, “dos mil pesos”, “15 mil pesos” (en plural: “un peso
+ * saludable” no es un importe).
+ */
+const RX_PRICE_WORDS = new RegExp(String.raw`(?<w>(?<![\d.,])\d{1,3}\s+mil\b|${NUM_WORDS})\s+(?<c>euros?|dolares|pesos|soles|francos)\b`, 'g');
 
 const DOLLAR_LIKE = ['USD', 'MXN', 'ARS', 'COP', 'CLP', 'CAD', 'AUD', 'UYU', 'DOP', 'NZD'];
 
@@ -333,7 +389,7 @@ function findPrices(f: string, original: string): PriceMention[] {
     const index = m.index!;
     const end = index + m[0].length;
     if (out.some((p) => index < p.end && p.index < end)) continue;
-    out.push({ index, end, text: original.slice(index, end), cents: wordsToNumber(m.groups!.w) * 100, currencies: currenciesFor(m.groups!.c) });
+    out.push({ index, end, text: original.slice(index, end), cents: numberValue(m.groups!.w) * 100, currencies: currenciesFor(m.groups!.c) });
   }
   for (const m of f.matchAll(RX_PRICE_VERB)) {
     const amount = m.groups!.a3;
@@ -612,9 +668,25 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
 
   // Cifras de autoridad / testimonios que no estén en los datos reales del entrenador ni los haya dicho el lead.
   const factsText = normalize(ctx.factsText);
-  const known = numbersIn(`${factsText}\n${normalize(ctx.leadText ?? '')}`);
-  const claim = RX_CLAIMS.flatMap((rx) => [...n.matchAll(rx)]).find((m) => !known.has(numberValue(m.groups!.num)));
-  if (claim) issues.push(`Afirma “${claim[0].trim()}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
+  const facts = numbersIn(factsText);
+  const withLead = ctx.leadText === undefined ? facts : new Set([...facts, ...numbersIn(normalize(ctx.leadText))]);
+  const rules: { rx: RegExp; kind: ClaimKind; generic?: true }[] = ctx.leadText === undefined ? RX_CLAIMS : [...RX_CLAIMS, ...RX_CLAIMS_ANY];
+  const claim = rules
+    .flatMap(({ rx, kind, generic }) => [...n.matchAll(rx)].map((m) => ({ m, kind, generic })))
+    .find(({ m, kind, generic }) => {
+      const value = numberValue(m.groups!.num);
+      const clause = clauseBefore(n, m.index!);
+      if (RX_LEAD_SIDE.test(clause.slice(-LEAD_SIDE_REACH))) return false; // habla del lead o de alguien suyo
+      if (generic && value === 100 && /%|por ciento/.test(m[0])) return false; // “100% online” (pero no “el 100% de mis clientes”)
+      const known = kind === 'authority' || RX_TRAINER_SIDE.test(clause) ? facts : withLead;
+      return !known.has(value);
+    });
+  const crowd = [...factsText.matchAll(RX_PEOPLE_COUNT)].map((m) => numberValue(m.groups!.num));
+  const vague = [...n.matchAll(RX_VAGUE_CROWD)].find(
+    (m) => !RX_LEAD_SIDE.test(clauseBefore(n, m.index!).slice(-LEAD_SIDE_REACH)) && !factsText.includes(m.groups!.w) && !crowd.some((v) => v >= VAGUE_MIN[m.groups!.w]),
+  );
+  if (claim) issues.push(`Afirma “${claim.m[0].trim()}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
+  else if (vague) issues.push(`Afirma “${vague[0]}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
   else if (RX_TESTIMONIAL.test(n) && !RX_REAL_CASES.test(factsText))
     issues.push('Cuenta el caso de un cliente que no aparece en el perfil del entrenador. No inventes testimonios ni resultados de clientes.');
 

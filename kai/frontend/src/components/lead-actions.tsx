@@ -6,8 +6,9 @@ import { Check, Minus } from 'lucide-react';
 import { LEAD_STATUSES, type LeadQualification, type LeadStatus } from '@shared';
 import { api, errorText } from '../lib/api';
 import { dayLabel, parseOptionalAmount, timeOnly } from '../lib/format';
-import { useBusinessCurrency } from '../lib/business';
-import { Button, Field, Input, Modal, Select, Spinner, useToast } from './ui';
+import { useBusinessCurrency, useBusinessSettings } from '../lib/business';
+import { Button, Callout, Field, Input, Modal, Select, Spinner, useToast } from './ui';
+import { bookedCallNotice, cannotNotifyReason } from './book-call-notice';
 import type { QualificationRule } from '../lib/types';
 
 export function StatusSelect({ leadId, status, onChanged }: { leadId: string; status: LeadStatus; onChanged?: () => void }) {
@@ -86,15 +87,32 @@ interface SlotsResponse {
   slots: { id: string; start: string; end: string; label: string }[];
 }
 
-export function BookCallModal({ open, onClose, leadId, conversationId }: { open: boolean; onClose: () => void; leadId: string; conversationId?: string | null }) {
+export function BookCallModal({
+  open,
+  onClose,
+  leadId,
+  conversationId,
+  optedOut = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  leadId: string;
+  conversationId?: string | null;
+  optedOut?: boolean;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
+  const settings = useBusinessSettings();
   const [selected, setSelected] = useState<string | null>(null);
   const slots = useQuery({ queryKey: ['slots'], queryFn: () => api.get<SlotsResponse>('/agenda/slots'), enabled: open });
+  // Sin conversación con KAI (lead creado a mano) o dado de baja, KAI no puede enviarle la confirmación ni los recordatorios.
+  const noNotify = cannotNotifyReason({ hasConversation: Boolean(conversationId), optedOut });
   const book = useMutation({
-    mutationFn: (start: string) => api.post('/agenda/appointments', { leadId, start, conversationId: conversationId ?? null }),
-    onSuccess: () => {
-      toast('Llamada agendada. KAI enviará la confirmación y los recordatorios.');
+    mutationFn: (start: string) => api.post<{ willNotify?: boolean }>('/agenda/appointments', { leadId, start, conversationId: conversationId ?? null }),
+    onSuccess: (res, start) => {
+      // El aviso dice lo que KAI va a enviar de verdad (no promete recordatorios que no saldrán).
+      const notice = bookedCallNotice({ start, hasConversation: Boolean(conversationId), optedOut, automations: settings.data?.automations, willNotify: res?.willNotify });
+      toast(notice.text, notice.tone);
       void qc.invalidateQueries();
       onClose();
     },
@@ -121,6 +139,11 @@ export function BookCallModal({ open, onClose, leadId, conversationId }: { open:
         </>
       }
     >
+      {noNotify && (
+        <div style={{ marginBottom: 12 }}>
+          <Callout tone="warning">{noNotify} Si agendas la llamada, avísale tú.</Callout>
+        </div>
+      )}
       {slots.isLoading && <Spinner />}
       {slots.error && <p className="error-text">{errorText(slots.error)}</p>}
       {slots.data?.provider === 'calendly' && <p className="muted small">Con Calendly conectado, la reserva la confirma el lead desde el enlace que le envía KAI.</p>}

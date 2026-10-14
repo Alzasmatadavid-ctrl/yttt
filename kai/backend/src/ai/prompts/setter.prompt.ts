@@ -125,7 +125,7 @@ export function buildSetterTurnContext(input: {
     ? `Tiene una ${biz.settings.callLabel} agendada: ${DateTime.fromJSDate(upcoming.startsAt).setZone(tz).setLocale('es').toFormat("cccc d 'de' LLLL 'a las' HH:mm")}${leadZoneNote(upcoming.startsAt, tz, leadPhone, now)}${upcoming.meetingUrl ? ` (enlace: ${upcoming.meetingUrl})` : ''}.`
     : 'No tiene ninguna llamada agendada.';
   const zoneNote = foreign
-    ? `\n- Zona horaria: el lead escribe desde un número ${foreign.country ? `de ${foreign.country}` : 'de otro país'} y allí es otra hora. Al dar o confirmar un horario, di siempre que es hora de ${zonePlace(tz)}${foreign.country && foreign.timezone ? ` y, si quieres, su hora en ${foreign.country} tal como aparece arriba (“en ${foreign.country}, a las …”)` : ''}. No conviertas tú las horas.`
+    ? `\n- Zona horaria: el lead escribe desde un número ${foreign.country ? `de ${foreign.country}` : 'de otro país'} y allí es otra hora. Al dar o confirmar un horario, di siempre que es hora de ${zonePlace(tz)}${foreign.country && foreign.timezone ? ` y, si quieres, su hora en ${foreign.country} tal como aparece en la etiqueta del horario (“en ${foreign.country}, a las …”). Si una etiqueta no trae su hora, no la calcules tú` : '. No conviertas tú las horas'}.`
     : '';
 
   return `# Contexto de este momento

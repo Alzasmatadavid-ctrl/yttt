@@ -173,7 +173,7 @@ kai/
 | `EADDRINUSE: address already in use :::3000` | Ya tienes KAI abierto en otra terminal. Ciérralo con `Ctrl + C` o reinicia el ordenador. |
 | La web dice que no conecta con el servidor | Mira la terminal: el servidor (`[servidor]`) debe decir `✔ KAI escuchando en el puerto 3000`. Si muestra un error de configuración, revisa tu `.env`. |
 | KAI responde de forma muy básica | Estás en modo simulado. Añade `ANTHROPIC_API_KEY` en `.env` y reinicia (`Ctrl + C` y `npm run dev`). |
-| No llegan los mensajes de WhatsApp/Instagram | El webhook de Meta necesita una dirección pública (no funciona con `localhost`). Ver [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md). |
+| No llegan los mensajes de WhatsApp/Instagram | El webhook de Meta necesita una dirección pública (no funciona con `localhost`). Ver [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md). Si en **Administración → Registros → Errores** aparece `webhook.meta.invalid_signature`, esa cuenta envía sus avisos desde otra app de Meta: todos los canales tienen que usar la app de KAI ([docs/INTEGRACIONES.md · Meta](docs/INTEGRACIONES.md#2-meta-whatsapp-instagram-y-lead-ads)). |
 | `npm run dev` dice `✖ KAI ya está arrancado en otra terminal` | Ya tienes KAI abierto en otra terminal: usa ese o ciérralo con `Ctrl + C` antes de arrancarlo otra vez. |
 | `npm run db:seed` dice `✖ KAI está arrancado y está usando la base de datos de tu ordenador` | Para KAI con `Ctrl + C`, vuelve a ejecutar el comando y arráncalo otra vez con `npm run dev`. |
 | La cuenta demo no funciona (“contraseña incorrecta”) o ha desaparecido al reiniciar | Se creó con KAI arrancado y se perdió. Para KAI (`Ctrl + C`), ejecuta `npm run db:seed -- --reset` y vuelve a arrancarlo con `npm run dev`. |

@@ -502,7 +502,7 @@ export default function LeadDetail() {
       </div>
 
       <OptOutDialog lead={lead} open={optOutOpen} onClose={() => setOptOutOpen(false)} />
-      <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversation?.id} />
+      <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversation?.id} optedOut={lead.optedOut} />
       <OutcomeModal open={Boolean(outcomeFor)} appointmentId={outcomeFor} onClose={() => setOutcomeFor(null)} />
       <Modal
         open={cancelFor !== null}

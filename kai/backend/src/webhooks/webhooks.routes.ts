@@ -9,6 +9,46 @@ import { handleMetaWebhook } from './meta.webhook.js';
 import { handleCalendlyEvent, verifyCalendlyRequest } from './calendly.webhook.js';
 import { businessByPublicKey, ExternalLeadSchema, ingestFromForm, publicFormQuotaExceeded, verifyLeadWebhookAuth } from './leads.webhook.js';
 import { listPublicPlans } from '../plans/plans.service.js';
+import { businessIdForMetaAccounts } from '../integrations/connections.service.js';
+import { AttemptLimiter } from '../lib/throttle.js';
+
+/** Identificadores de cuenta de un aviso de Meta (entry.id y, en WhatsApp, el phone_number_id), solo números y pocos. */
+export function metaAccountIds(body: unknown): string[] {
+  const ids = new Set<string>();
+  const entries = (body as { entry?: unknown })?.entry;
+  for (const e of Array.isArray(entries) ? entries.slice(0, 5) : []) {
+    const entry = e as { id?: unknown; changes?: unknown };
+    if (entry?.id != null) ids.add(String(entry.id));
+    for (const c of Array.isArray(entry?.changes) ? entry.changes.slice(0, 5) : []) {
+      const phone = (c as { value?: { metadata?: { phone_number_id?: unknown } } })?.value?.metadata?.phone_number_id;
+      if (phone != null) ids.add(String(phone));
+    }
+  }
+  return [...ids].filter((id) => /^\d{1,32}$/.test(id)).slice(0, 5);
+}
+
+// Avisos con firma no válida: se registran (una vez por hora y cuenta, y como mucho 30 por hora en total) para que
+// quien administra KAI vea qué cuenta tiene mal la app de Meta, sin que nadie pueda llenar los registros a propósito.
+const badSignaturePerAccount = new AttemptLimiter({ max: 1, windowMs: 3600_000, maxKeys: 1000 });
+const badSignatureTotal = new AttemptLimiter({ max: 30, windowMs: 3600_000 });
+
+async function logBadMetaSignature(body: unknown, hasSignature: boolean) {
+  const accounts = metaAccountIds(body);
+  if (badSignaturePerAccount.hit(accounts.join(',') || '-') > 1 || badSignatureTotal.hit('all') > 30) return;
+  const businessId = accounts.length ? await businessIdForMetaAccounts(accounts) : null;
+  const object = (body as { object?: unknown })?.object;
+  await logError(
+    'webhook.meta.invalid_signature',
+    new Error(
+      hasSignature
+        ? 'Aviso de Meta rechazado: su firma no coincide con META_APP_SECRET. Esa cuenta está conectada a otra app de Meta (o el secreto del servidor no es el de la app de KAI) y sus mensajes no llegan a KAI.'
+        : 'Aviso de Meta rechazado: llega sin firma (X-Hub-Signature-256).',
+    ),
+    { object: typeof object === 'string' ? object.slice(0, 40) : null, accounts },
+    businessId,
+    'warn',
+  );
+}
 
 export async function webhookRoutes(app: FastifyInstance) {
   // ───────────── Meta (WhatsApp, Instagram, Lead Ads) ─────────────
@@ -24,7 +64,10 @@ export async function webhookRoutes(app: FastifyInstance) {
   app.post('/webhooks/meta', { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } }, async (request, reply) => {
     const signature = request.headers['x-hub-signature-256'] as string | undefined;
     if (env.META_APP_SECRET) {
-      if (!verifyMetaSignature(request.rawBody, signature)) return reply.code(401).send({ error: 'invalid_signature' });
+      if (!verifyMetaSignature(request.rawBody, signature)) {
+        await logBadMetaSignature(request.body, Boolean(signature)).catch(() => undefined);
+        return reply.code(401).send({ error: 'invalid_signature' });
+      }
     } else if (isProduction()) {
       return reply.code(503).send({ error: 'META_APP_SECRET no configurado' });
     }

@@ -18,6 +18,8 @@ export interface IntegrationsResponse {
   endpoints: {
     metaWebhookUrl: string;
     metaVerifyTokenConfigured: boolean;
+    /** Identificador de la app de Meta de KAI (null si el servidor no tiene META_APP_ID). */
+    metaAppId?: string | null;
     leadsWebhookUrl: string;
     publicFormUrl: string;
     publicKey: string;

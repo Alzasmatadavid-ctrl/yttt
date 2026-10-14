@@ -52,13 +52,18 @@ Ajustes opcionales (ya vienen bien configurados):
 
 Las tres integraciones usan **una sola app de Meta** (la tuya, como propietario de KAI).
 
+- **Lo haces tú, como propietario (una vez):** crear la app (2.1), configurar el webhook (2.2), dar acceso a cada entrenador (2.3) y pasar la revisión de Meta (2.7).
+- **Lo hace cada entrenador:** conectar su WhatsApp, su Instagram y sus anuncios (2.4 a 2.6) con tokens **de tu app**. Los entrenadores **no crean ninguna app ni configuran ningún webhook**: así se lo explican también las guías de la pantalla Integraciones.
+
+Meta firma cada aviso con el secreto de la app a la que pertenece el token. Con un token de otra app, el canal se podría conectar y enviar mensajes, pero los avisos llegarían firmados con otro secreto y KAI los rechazaría: **no entraría ningún mensaje**. Por eso KAI comprueba al conectar que el token es de tu app (`META_APP_ID`) y, si no, lo rechaza explicando por qué. Si aun así llegan avisos con una firma que no coincide, quedan en **Administración → Registros → Errores** como `webhook.meta.invalid_signature`, con la cuenta y el negocio afectados.
+
 ### 2.1. Crear la app de Meta (una vez)
 
 1. Entra en <https://developers.facebook.com> → **Mis apps → Crear app**.
 2. Tipo de app: **Empresa** (Business). Asóciala a tu Business Manager.
 3. En el panel de la app, añade los productos **WhatsApp**, **Instagram** y **Webhooks**.
 4. En **Configuración de la app → Básica** copia:
-   - **Identificador de la app** → `META_APP_ID`
+   - **Identificador de la app** → `META_APP_ID` (KAI lo usa para comprobar que los tokens de los entrenadores son de tu app, y la pantalla Integraciones se lo muestra para que la elijan al generarlos)
    - **Clave secreta de la app** → `META_APP_SECRET`
 5. Inventa una palabra secreta larga (por ejemplo `kai-verifica-7f3a9c`) y ponla en `META_VERIFY_TOKEN`.
 6. Reinicia KAI.
@@ -78,12 +83,23 @@ Meta necesita una dirección **pública** para avisar a KAI de cada mensaje nuev
 
 KAI comprueba la firma de cada aviso con `META_APP_SECRET`, así que nadie puede enviar mensajes falsos.
 
-### 2.3. Conectar WhatsApp (cada entrenador)
+Este webhook es de la app y sirve para todos los negocios. Cada cuenta (número de WhatsApp, cuenta de Instagram, página de Facebook) se suscribe a la app **sola, al conectarla en KAI**: el entrenador no tiene que tocarlo.
 
-1. En la app de Meta → **WhatsApp → Configuración de la API**, añade y verifica el número de teléfono del negocio.
+### 2.3. Dar acceso a cada entrenador (tú, como propietario)
+
+Para generar sus tokens, el entrenador necesita acceso a tu app:
+
+1. En el panel de la app → **Roles de la app → Roles**, añádele como **Desarrollador** (le llegará una invitación que acepta en <https://developers.facebook.com/requests>).
+2. Para WhatsApp, comparte además la app con su **portfolio empresarial** (Business Manager): en **Configuración del negocio → Cuentas → Apps**, elige la app y asígnala como socio al identificador del portfolio del entrenador (lo ve en **Configuración del negocio → Información del negocio**). Así podrá crear su token permanente con un usuario del sistema de su propio negocio.
+
+Si lo prefieres, haz tú los pasos de 2.4 a 2.6 junto con el entrenador (él tendrá que recibir el código de verificación del número o iniciar sesión con su Instagram).
+
+### 2.4. Conectar WhatsApp (cada entrenador)
+
+1. En la app de Meta **de KAI** → **WhatsApp → Configuración de la API**, añade el número de teléfono del negocio (eligiendo el portfolio empresarial del entrenador) y verifícalo.
 2. Copia el **Identificador del número de teléfono** (Phone number ID, solo números).
-3. Crea un **token permanente**: en Business Manager → **Configuración del negocio → Usuarios del sistema** → crea un usuario del sistema (Administrador) → **Generar token** con los permisos `whatsapp_business_messaging` y `whatsapp_business_management`. Asígnale la cuenta de WhatsApp en **Activos**.
-4. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **WhatsApp Business** → **Conectar WhatsApp Business**: pega el identificador y el token. KAI lo comprueba con Meta antes de guardarlo.
+3. Crea un **token permanente**: en Business Manager → **Configuración del negocio → Usuarios del sistema** → crea un usuario del sistema (Administrador) → asígnale la **app de KAI** y la cuenta de WhatsApp en **Activos** → **Generar token** eligiendo la app de KAI, con los permisos `whatsapp_business_messaging` y `whatsapp_business_management`.
+4. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **WhatsApp Business** → **Conectar WhatsApp Business**: pega el identificador y el token. KAI lo comprueba con Meta antes de guardarlo (también que el token es de la app de KAI) y suscribe la cuenta de WhatsApp Business a la app (`POST /{waba-id}/subscribed_apps`) para recibir sus mensajes.
 
 **Plantillas (importante).** WhatsApp solo permite escribir libremente durante las 24 h siguientes al último mensaje del lead. Fuera de esa ventana hay que usar **plantillas aprobadas** por Meta. Créalas en **WhatsApp Manager → Plantillas de mensajes** (categoría *Utilidad* para recordatorios, *Marketing* para seguimientos). Después, en KAI → **Integraciones → WhatsApp, Instagram y anuncios**, en la tarjeta **WhatsApp Business** (ya conectada) busca el apartado **Plantillas para escribir fuera de las 24 horas**, escribe el nombre y el idioma de cada una y pulsa **Guardar plantillas**:
 
@@ -98,30 +114,30 @@ Ejemplo de plantilla de recordatorio: *“Hola {{1}}, te recuerdo tu llamada de 
 
 Si falta una plantilla y la ventana está cerrada, KAI **no envía nada** y te deja un aviso. Nunca se salta las reglas de WhatsApp.
 
-### 2.4. Conectar Instagram (cada entrenador)
+### 2.5. Conectar Instagram (cada entrenador)
 
-Requisitos: cuenta de Instagram **profesional** (empresa o creador).
+Requisitos: cuenta de Instagram **profesional** (empresa o creador) y acceso a la app de KAI (2.3).
 
-1. En la app de Meta → **Instagram → Configuración de la API con inicio de sesión de Instagram**.
+1. En la app de Meta **de KAI** → **Instagram → Configuración de la API con inicio de sesión de Instagram**.
 2. Añade la cuenta de Instagram y genera un **token de acceso** con los permisos `instagram_business_basic` e `instagram_business_manage_messages`.
 3. Copia el **ID de la cuenta de Instagram** (solo números).
 4. En la app de Instagram del entrenador: **Configuración → Mensajes y respuestas a historias → Herramientas de mensajes → Permitir acceso a los mensajes** (activado).
-5. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **Instagram** → **Conectar Instagram**: pega el ID y el token.
+5. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **Instagram** → **Conectar Instagram**: pega el ID y el token. KAI activa la suscripción de la cuenta a los avisos de mensajes (`POST /me/subscribed_apps`).
 
-Si usas la API antigua con página de Facebook, en el formulario, en «¿Cómo has creado el token? (servidor de la API)», elige **Inicio de sesión con Facebook** (`graph.facebook.com`) en lugar de **Inicio de sesión con Instagram (recomendado)**.
+Si usas la API antigua con página de Facebook, en el formulario, en «¿Cómo has creado el token? (servidor de la API)», elige **Inicio de sesión con Facebook** (`graph.facebook.com`) en lugar de **Inicio de sesión con Instagram (recomendado)**. En ese caso, los avisos de mensajes se activan en la página de Facebook vinculada (campo `messages` del objeto **Page**, `POST /{page-id}/subscribed_apps`), y el token también tiene que ser de la app de KAI.
 
 Notas:
 - Igual que WhatsApp, Instagram solo permite responder durante 24 h desde el último mensaje del lead. Cuando el entrenador responde a mano desde KAI, se usa la etiqueta de “agente humano” (hasta 7 días).
 - Si el entrenador responde desde la app de Instagram, KAI lo detecta y se pausa en esa conversación para no pisarle.
 
-### 2.5. Conectar Meta Lead Ads (cada entrenador)
+### 2.6. Conectar Meta Lead Ads (cada entrenador)
 
 1. Necesitas el **ID de la página de Facebook** asociada a los anuncios (Página → Información → ID de la página).
-2. Genera un token de página (o de usuario del sistema) con los permisos `leads_retrieval`, `pages_manage_metadata`, `pages_show_list` y `pages_read_engagement`.
+2. Genera un token de página (o de usuario del sistema) **de la app de KAI** con los permisos `leads_retrieval`, `pages_manage_metadata`, `pages_show_list` y `pages_read_engagement`.
 3. En KAI → **Integraciones → WhatsApp, Instagram y anuncios**, tarjeta **Meta Lead Ads** → **Conectar Meta Lead Ads**: pega el ID y el token. KAI suscribe la página automáticamente al aviso `leadgen`.
 4. En la misma tarjeta eliges qué hacer con cada lead nuevo: **Escribirle por WhatsApp (recomendado)**, que usa la plantilla de «Primer contacto» (hace falta WhatsApp conectado y que el formulario del anuncio pida el teléfono), o **Solo guardarlo en KAI**.
 
-### 2.6. Revisión de la app (para clientes reales)
+### 2.7. Revisión de la app (para clientes reales)
 
 Mientras la app de Meta está en **modo desarrollo** solo funciona con cuentas que sean administradoras o testers de la app. Para usarla con entrenadores reales tienes que pasar la **revisión de la app** de Meta (App Review) pidiendo los permisos anteriores y verificar tu negocio en Business Manager.
 

@@ -209,6 +209,10 @@ export function startupWarnings(): string[] {
   if (adminProblem) out.push(adminProblem);
   if (isProduction() && !emailConfigured())
     out.push('Email sin configurar (EMAIL_PROVIDER=resend y RESEND_API_KEY): no se enviarán emails de recuperación de contraseña ni invitaciones.');
+  if (env.META_APP_SECRET && !env.META_APP_ID)
+    out.push(
+      'Falta META_APP_ID (identificador de la app de Meta): KAI no puede comprobar al conectar que los tokens de WhatsApp, Instagram y Lead Ads son de su app. Con un token de otra app, los mensajes de esa cuenta no llegarían.',
+    );
   return out;
 }
 

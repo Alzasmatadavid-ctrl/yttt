@@ -487,7 +487,7 @@ function LeadPanel({ conversationId, overlayOpen, onClose }: { conversationId: s
         </dl>
       </div>
       <Button onClick={() => navigate(`/app/leads/${lead.id}`)}>Ver ficha completa</Button>
-      <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversationId} />
+      <BookCallModal open={booking} onClose={() => setBooking(false)} leadId={lead.id} conversationId={conversationId} optedOut={lead.optedOut} />
     </aside>
   );
 }

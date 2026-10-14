@@ -1,4 +1,4 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { channelConnections } from '../database/schema.js';
 import { decryptJson, encryptJson } from '../lib/crypto.js';
@@ -149,4 +149,23 @@ export async function markConnectionError(id: string, error: string) {
 
 export async function touchConnection(id: string) {
   await getDb().update(channelConnections).set({ lastEventAt: new Date() }).where(eq(channelConnections.id, id));
+}
+
+/**
+ * Negocio con una conexión de Meta cuyo identificador (número, cuenta de Instagram, página o cuenta de WhatsApp Business)
+ * está entre estos, o null. Sirve para dejar constancia de a quién afectan los avisos de Meta rechazados.
+ */
+export async function businessIdForMetaAccounts(ids: string[]): Promise<string | null> {
+  if (!ids.length) return null;
+  const [row] = await getDb()
+    .select({ businessId: channelConnections.businessId })
+    .from(channelConnections)
+    .where(
+      and(
+        ne(channelConnections.status, 'disconnected'),
+        or(inArray(channelConnections.externalAccountId, ids), inArray(sql<string>`${channelConnections.config}->>'wabaId'`, ids)),
+      ),
+    )
+    .limit(1);
+  return row?.businessId ?? null;
 }

@@ -62,17 +62,19 @@ Documento técnico para quien mantenga o amplíe KAI.
    4. **Casos especiales**: baja → despedida y nunca más; salud → mensaje prudente fijo + escalado; humano/enfado/negociación → escalado con aviso “KAI necesita tu intervención”.
    5. **Estrategia** (`ai/setter/strategy.ts`): decide la siguiente acción (saludar, preguntar X, tratar objeción, contextualizar o dar precio, proponer llamada, ofrecer huecos, reservar…).
    6. **Agente** (`ai/setter/agents.ts`): redacta el mensaje (LLM con herramientas `get_available_slots`, `book_call`, `reschedule_call`, `cancel_call`, `request_human`, o por reglas).
-   7. **Control de calidad** (`ai/validation/output-validator.ts`): una sola pregunta, longitud, sin markdown ni frases robóticas, sin promesas de resultados ni consejos médicos, sin presión, horas y precios **solo** si existen de verdad, enlaces permitidos, sin repetir mensajes. Opcionalmente, un segundo modelo revisa el tono. Hasta 3 regeneraciones; si no, respuesta por reglas; si tampoco, escalado a humano.
+   7. **Control de calidad** (`ai/validation/output-validator.ts`): una sola pregunta, longitud, sin markdown ni frases robóticas, sin promesas de resultados ni consejos médicos, sin presión, horas y precios **solo** si existen de verdad, enlaces permitidos, sin repetir mensajes. Con IA, un segundo modelo (juez) revisa también si responde a lo último, si inventa algo o si presiona; si no responde, el borrador no se aprueba. Hasta 3 regeneraciones; si no, respuesta por reglas; si tampoco, escalado a humano.
    8. **Envío** (`crm/messaging.service.ts`): respeta la ventana de 24 h (fuera de ella usa plantillas aprobadas o no envía), registra el resultado y programa el siguiente seguimiento.
 
 ## Reglas que el código garantiza (no solo el prompt)
 
 | Regla | Dónde se impone |
 |---|---|
-| Nunca inventar horarios | El agente solo recibe huecos calculados por `calendar/` y el validador rechaza cualquier hora que no esté en la lista. La reserva vuelve a comprobar el hueco. |
-| Nunca inventar precios | El validador rechaza importes que no coincidan con el servicio configurado. |
-| Nunca inventar datos | El validador rechaza cifras (años, clientes, kilos…) que no estén en los datos del negocio. |
-| Nunca prometer resultados ni diagnosticar | Validador + mensaje médico fijo + escalado. |
+| Nunca inventar horarios | El agente solo recibe huecos calculados por `calendar/` y el validador rechaza cualquier hora que no esté en la lista (y el día debe coincidir). La reserva vuelve a comprobar el hueco. |
+| Horas claras para leads de otro país | Si el prefijo del WhatsApp del lead es de otro país, el contexto de la IA da cada hora con la zona del entrenador y, si se conoce, la hora del lead («mañana a las 18:00 (hora de España; en México, a las 10:00)»; `lib/time.ts`). El validador comprueba cada hora en la zona que nombre el mensaje («en México, a las 10:00»). |
+| Nunca inventar precios | El validador rechaza importes, en cifras o en letras («ciento cincuenta euros»), que no coincidan con un servicio configurado o que vayan en otra moneda. |
+| Nunca inventar datos | El validador rechaza las cifras del entrenador que no estén en sus datos: número de clientes («300 personas», «cientos de clientes»), años de experiencia («llevo 10 años»), % de éxito, descuentos y resultados de clientes («una clienta mía perdió 12 kilos»). Si el motor le pasa lo que ha dicho el lead, también cualquier cifra de kilos o % que no salga de sus datos ni de sus mensajes. KAI sí puede repetir las cifras del lead («esos 10 kilos», «si llevas 10 años entrenando»). Son patrones de las formas habituales: lo que se escape lo revisa el juez con IA. |
+| Nunca prometer resultados, diagnosticar ni presionar | El validador rechaza las formas habituales de prometer («te lo prometo», «vas a perder la barriga seguro»), de dar consejo médico (fármacos, dosis, «suena a resistencia a la insulina») y de presionar («me quedan dos plazas», «decide hoy», «la oferta caduca esta noche»). Además, mensaje médico fijo + escalado. |
+| Revisión con IA (juez) | Con IA, un segundo modelo revisa cada borrador (primer mensaje, respuestas y seguimientos): ¿responde a lo último?, ¿inventa?, ¿presiona? Si el juez no responde, el borrador no se aprueba: se usa el motor de reglas (textos fijos que también pasan el validador) o se escala. |
 | Una pregunta por mensaje | Validador. |
 | No acosar | Seguimientos limitados, horas de descanso y cancelación automática si el lead responde, se da de baja o un humano interviene. |
 | Transparencia | Presentación como asistente en el primer mensaje (por defecto) y nunca niega ser un bot. |
