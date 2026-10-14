@@ -84,6 +84,8 @@ export async function scheduleNoReplyFollowUp(businessId: string, leadId: string
     .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)))
     .limit(1);
   if (!lead || lead.optedOut || CLOSED_STATUSES.includes(lead.status) || CALL_STATUSES.includes(lead.status)) return null;
+  // Al lead que no encaja (p. ej. un menor) no se le persigue con seguimientos.
+  if (lead.signals.fit === 'no') return null;
 
   // Ya hay uno programado → no duplicar.
   const [pending] = await db

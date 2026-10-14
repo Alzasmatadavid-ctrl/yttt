@@ -11,6 +11,7 @@ import { DateTime } from 'luxon';
 import type { ConversationState, LeadQualification, LeadSignals, OfferedSlot } from '../../lib/domain.js';
 import type { SetterState } from '../setter/strategy.js';
 import { fold, normalize } from '../../lib/text.js';
+import { leadZone } from '../../lib/time.js';
 import type { LLMProvider } from '../providers/types.js';
 import type { BusinessContext, LeadRow, MessageRow } from '../context/context.js';
 import { buildAnalysisSystemPrompt, formatTranscript } from '../prompts/analysis.prompt.js';
@@ -277,6 +278,8 @@ const RX_SCHEDULE_PREFERENCE =
   /\b(?:mejor|prefiero|preferiria|puede ser|podria ser|podemos|podriamos|si puede ser|seria posible|en vez de|en lugar de|me (?:iria|vendria|va|viene|encaja|cuadra|pilla) mejor)\b|\b(?:me )?(?:podeis|puedes|podrias|podriais|puede|podria) llamar(?:me)?\b|\b(?:llamame|llamadme|llameme)\b|\by si (?:la |lo )?(?:hacemos|hago|dejamos|ponemos|pasamos|movemos|es|fuera)\b/;
 /** Dice que lo prefiere a lo que tiene (“mejor el miércoles”, “prefiero el jueves”, “en vez de…”): pide un cambio. */
 const RX_PREFERS_CHANGE = /\b(?:mejor|prefiero|preferiria|en vez de|en lugar de|otro|otra)\b/;
+/** Pide que le llamen, preguntando (“¿me podéis llamar?”, “¿me llamas mañana?”). */
+const RX_CALL_ASK = /\b(?:puedes|podeis|podrias|podriais|puede|podria) llamar(?:me|nos)?\b|\bme (?:llamas|llamais|llama)\b/;
 /** Habla de la llamada (no de una cita con el médico): con un día u hora, y sin preguntar, es pedir ese horario. */
 const RX_CALL_WORD = /\b(?:llamada|videollamada|llamar(?:me|nos)?|llamame|llamadme)\b/;
 /** El mensaje es solo un día u hora (“El viernes”, “Mañana por la tarde”, “El jueves a las 18:00”). */
@@ -344,6 +347,17 @@ function isGoalNonAnswer(n: string): boolean {
   return !n.replace(RX_GOAL_FILLERS, ' ').replace(/[^a-z0-9ñ\s]/g, ' ').trim();
 }
 
+/**
+ * Objetivo para la ficha del CRM: la frase concreta (“perder unos 10 kilos”) aunque como respuesta a «¿qué te
+ * gustaría conseguir?» se guarde el mensaje entero (“Hola, pues me gustaría perder unos 10 kilos, sobre todo la tripa”).
+ * Si no hay una frase reconocible, el mensaje tal cual (recortado).
+ */
+function goalSummaryOf(value: string): string {
+  const nfc = value.normalize('NFC').trim();
+  const m = QUAL_PATTERNS.goal.exec(fold(nfc));
+  return (m ? nfc.slice(m.index, m.index + m[0].length).trim() : nfc).slice(0, 160);
+}
+
 /** Hora concreta del mensaje en formato HH:mm (“a las 9 de la mañana” → 09:00, “a las 6 de la tarde” → 18:00). */
 function resolvePreferredTime(n: string): string | null {
   const m = /\ba las (\d{1,2})(?:[:.](\d{2}))?\b(\s*y media)?|\b(\d{1,2}):(\d{2})\b/.exec(n);
@@ -358,7 +372,7 @@ function resolvePreferredTime(n: string): string | null {
 const QUAL_PATTERNS: Record<string, RegExp> = {
   goal: /(perder|bajar|quitar(me)?|eliminar|soltar)\s+(?:de\s+)?(?:(?:unos|unas|algo de|un poco de|un par de|algun|algunos|al menos|por lo menos|mas de|como|entre|esos|estos|los|mis|la|el|mi)\s+)?((?:\d+(?:[.,]\d+)?(?:\s*(?:-|a|o)\s*\d+)?\s*)?(kg|kilos|kilitos)|peso|grasa|barriga|tripa|panza|michelines)|adelgazar|ganar (musculo|masa|fuerza)|definir|tonificar|ponerme (en forma|fuerte)|estar en forma|recomposicion|mejorar (mi )?(fisico|salud|forma)|verme mejor/,
   problem:
-    /no tengo tiempo|falta de tiempo|constancia|no soy constante|me cuesta|no se (que|como)|ansiedad|picoteo|lo dejo|abandono|me aburro|no veo resultados|desorganiz|trabajo mucho|horarios|como fatal|ceno mal/,
+    /no tengo tiempo|falta de tiempo|no saco tiempo|no encuentro (el )?tiempo|constancia|no soy constante|me cuesta|no se (que|como)|ansiedad|picoteo|lo dejo|abandono|me aburro|no veo resultados|desorganiz|no me organiz|trabajo mucho|horarios|como fatal|ceno mal/,
   motivation: /boda|verano|vacaciones|salud|mis hijos|mi hija|mi hijo|verme bien|sentirme bien|autoestima|el medico me|confianza|seguridad|espejo|ropa|playa|cumple/,
   previous_attempts: /he probado|probe|he hecho|hice|dieta|keto|ayuno|gimnasio|gym|app|otro entrenador|crossfit|nutricionista|contar calorias/,
   frustration: /frustr|harto|cansado de|nunca (me )?funciona|no me funcion|rebote|vuelvo a coger|recupero el peso|me desanimo/,
@@ -547,7 +561,11 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // El objetivo es lo que más pesa (resúmenes, mensajes, puntuación): solo se toma como objetivo lo que lo parece.
   const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== 'goal' && enabledKeys.has(k) && rx.test(n));
   // Muletillas, risas o “no sé, la verdad” no son un objetivo (la ficha lo mostraría como objetivo y como «Encaje: sí»).
-  const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || (!aboutOtherKey && !isGoalNonAnswer(n));
+  // Y si aún no se sabe su objetivo y contesta con él a otra pregunta (“Quiero perder 8 kilos” a «¿cómo es tu día a
+  // día?»), es su objetivo, no la respuesta a esa pregunta (la ficha mostraría el objetivo como su situación actual).
+  const goalInstead =
+    lastAsked !== 'goal' && !input.lead.qualification.goal?.value && QUAL_PATTERNS.goal.test(n) && !(lastAsked && QUAL_PATTERNS[lastAsked]?.test(n));
+  const answersLastAsked = lastAsked !== 'goal' ? !goalInstead : QUAL_PATTERNS.goal.test(n) || (!aboutOtherKey && !isGoalNonAnswer(n));
   // Ya es cliente (escribe desde otro número o canal): su mensaje es para el entrenador y no se cualifica.
   const existingClient = isExistingClient(n, input.biz.trainer.displayName);
   // Tampoco responde a la pregunta quien pide hablar con una persona («prefiero hablar con David directamente»),
@@ -586,14 +604,16 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     const s = sentenceWith(raw, rx);
     if (s) qualification[key] = { value: s, confidence: 0.6, updatedAt: nowIso };
   }
+  // El nivel “por defecto” de la última pregunta (urgencia media si contesta algo, compromiso o presupuesto por un
+  // “sí”) solo se usa si el lead aún no tiene esa señal: nunca rebaja ni pisa lo que ya dijo con claridad.
   const urgency = levelFrom(n, URGENCY_HIGH, URGENCY_LOW, URGENCY_MED);
   if (urgency) signals.urgency = urgency;
-  else if (lastAsked === 'urgency' && wordCount >= 2) signals.urgency = 'medium';
+  else if (lastAsked === 'urgency' && wordCount >= 2 && !input.lead.signals.urgency) signals.urgency = 'medium';
   const commitment = levelFrom(n, COMMIT_HIGH, COMMIT_LOW);
   if (commitment) signals.commitment = commitment;
-  else if (lastAsked === 'commitment' && RX.affirm.test(n)) signals.commitment = 'high';
+  else if (lastAsked === 'commitment' && RX.affirm.test(n) && !input.lead.signals.commitment) signals.commitment = 'high';
   if (BUDGET_NO.test(n)) signals.budget = 'no';
-  else if (BUDGET_YES.test(n) || (lastAsked === 'budget' && RX.affirm.test(n))) signals.budget = 'yes';
+  else if (BUDGET_YES.test(n) || (lastAsked === 'budget' && RX.affirm.test(n) && !input.lead.signals.budget)) signals.budget = 'yes';
   else if (BUDGET_MAYBE.test(n)) signals.budget = 'maybe';
   let fitFromGoal = false;
   if (UNDERAGE.test(n)) signals.fit = 'no';
@@ -702,8 +722,11 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   const callDeclined = Boolean((input.state as SetterState).callDeclinedAt);
   const callWasProposed = !callDeclined && lastAboutCall;
   const positive = RX.affirm.test(n) || /quiero empezar|cuanto antes|adelante|vamos alla|me interesa|claro que si|me apunto|hagamosla|cuando quieras|me parece genial|me parece perfecto/.test(n);
-  // Mencionar la llamada cuenta como un sí, salvo que vaya negada (“no tengo tiempo para una llamada”).
-  const mentionsCall = RX.callYes.test(n) && !RX_CALL_NEGATED.test(n.replace(RX_NOT_A_NEGATION, ' '));
+  // Mencionar la llamada cuenta como un sí, salvo que vaya negada (“no tengo tiempo para una llamada”) o que solo
+  // pregunte por ella (“¿cuánto dura la llamada y para qué es?”): eso es una duda que hay que resolver, no un sí.
+  // Pedirla en forma de pregunta (“¿hacemos la llamada?”, “¿me podéis llamar?”) sí cuenta.
+  const onlyAsksAboutCall = onlyQuestion && !RX.callRequest.test(n) && !RX_CALL_ASK.test(n);
+  const mentionsCall = RX.callYes.test(n) && !RX_CALL_NEGATED.test(n.replace(RX_NOT_A_NEGATION, ' ')) && !onlyAsksAboutCall;
   const wantsCall =
     !declinesCall &&
     (callDeclined
@@ -728,7 +751,11 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
 
   // Horarios ofrecidos: ¿elige uno, los rechaza (“el lunes no puedo”, “ninguna me va bien”, “¿no tienes otro día?”) o
   // habla de otra cosa (“gracias”, otro tema)? Repetir los mismos horarios a quien no puede o ya no los quiere es un bucle.
-  const selectedSlotId = matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage });
+  let selectedSlotId = matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage });
+  // Lead de otro país: la etiqueta del horario le da también su hora (“18:00, hora de España; en México, a las
+  // 10:00”), así que “a las 10” puede ser la suya. Primero cuenta la hora del negocio (la que va delante).
+  const leadTz = leadZone(input.lead.whatsappId ?? input.lead.phone, tz, input.now)?.timezone;
+  if (!selectedSlotId && leadTz && RX_EXPLICIT_TIME.test(n)) selectedSlotId = matchOfferedSlot(n, offered, leadTz, input.now, lastOfferIds, { offerIsLastMessage });
   const latestOffer = lastOfferIds.map((id) => offered.find((o) => o.id === id)).filter((s): s is OfferedSlot => Boolean(s));
   const offeredDays = new Set(latestOffer.map((s) => DateTime.fromISO(s.start).setZone(tz).toISODate()));
   const rejectsOffer =
@@ -778,7 +805,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     },
     objectionKey,
     leadName: nameMatch?.[1] ?? null,
-    goalSummary: qualification.goal?.value?.slice(0, 160) ?? null,
+    goalSummary: qualification.goal ? goalSummaryOf(qualification.goal.value) : null,
     preferredDate,
     preferredPartOfDay,
     selectedSlotId,

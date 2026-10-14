@@ -5,7 +5,7 @@
  */
 import { DateTime } from 'luxon';
 import type { ConversationState } from '../../lib/domain.js';
-import { humanSlotLabel } from '../../lib/time.js';
+import { humanSlotLabel, leadZone } from '../../lib/time.js';
 import { partOfDay } from '../../calendar/availability.js';
 import type { LeadAnalysis } from '../analysis/analyzer.js';
 import type { BusinessContext, LeadContext, ObjectionRow, RuleRow } from '../context/context.js';
@@ -57,6 +57,8 @@ export interface Directive {
     partOfDay: 'morning' | 'afternoon' | 'evening' | 'any';
     /** Días (YYYY-MM-DD) que no se le deben ofrecer: dice que no puede o acaba de rechazar los horarios de ese día. */
     excludeDates?: string[];
+    /** Hora que pide (“a las 10” → "10:00"): se le ofrecen primero los huecos más cercanos a ella. */
+    time?: string;
   };
   /** offer_slots/reschedule: acaba de rechazar los horarios ofrecidos (“el lunes no puedo”): nada de “Genial” ni “Perfecto”. */
   afterRejection?: boolean;
@@ -147,16 +149,29 @@ function sameAsBooked(analysis: LeadAnalysis, startsAt: Date, tz: string): boole
  * Consulta de agenda según lo que pide, sin los días que ha descartado: el que dice que no puede (“el lunes no
  * puedo”) o, si rechaza la oferta sin decir cuál (“ninguna me va bien”, “¿no tienes otro día?”), los de esa oferta.
  */
-function slotQueryFor(analysis: LeadAnalysis | null, offer: { start: string }[], tz: string): NonNullable<Directive['slotQuery']> {
+function slotQueryFor(analysis: LeadAnalysis | null, offer: { start: string }[], tz: string, foreignLead = false): NonNullable<Directive['slotQuery']> {
   const excluded = new Set<string>();
   if (analysis?.excludedDate) excluded.add(analysis.excludedDate);
   if (analysis?.rejectsOffer && !analysis.excludedDate && !analysis.preferredDate) for (const s of offer) excluded.add(localDate(s.start, tz)!);
   if (analysis?.preferredDate) excluded.delete(analysis.preferredDate);
   return {
     date: analysis?.preferredDate ?? null,
-    partOfDay: analysis?.preferredPartOfDay ?? 'any',
+    partOfDay: analysis?.preferredPartOfDay ?? partOfDayOfTime(analysis?.preferredTime, foreignLead),
     ...(excluded.size ? { excludeDates: [...excluded].sort() } : {}),
+    // Con un lead de otro país, “a las 10” puede ser su hora: no se busca por ella.
+    ...(analysis?.preferredTime && !foreignLead ? { time: analysis.preferredTime } : {}),
   };
+}
+
+/**
+ * Franja de una hora concreta que pide sin decir la franja (“¿me podéis llamar a las 10?” → mañana), con los mismos
+ * cortes que la agenda. Entre la 1 y las 7 no se sabe si es de mañana o de tarde, y si escribe desde otro país la
+ * hora puede ser la suya: entonces 'any' (se le ofrecen los huecos más cercanos).
+ */
+function partOfDayOfTime(time: string | null | undefined, foreignLead: boolean): NonNullable<Directive['slotQuery']>['partOfDay'] {
+  const h = time ? Number(time.split(':')[0]) : NaN;
+  if (foreignLead || Number.isNaN(h) || (h >= 1 && h < 8)) return 'any';
+  return h < 14 ? 'morning' : h < 19 ? 'afternoon' : 'evening';
 }
 
 /** Instrucción adicional para la IA cuando el lead ha descartado días u horarios. */
@@ -168,11 +183,11 @@ function exclusionNote(query: NonNullable<Directive['slotQuery']>, rejected: boo
   return parts.length ? ` ${parts.join(' ')}` : '';
 }
 
-function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean, now: Date): Directive {
-  // Etiquetas recalculadas ahora: “mañana” de ayer es “hoy”.
+function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean, now: Date, leadPhone?: string | null): Directive {
+  // Etiquetas recalculadas ahora: “mañana” de ayer es “hoy”. Con un lead de otro país, con su hora también.
   return {
     kind: 'clarify_slot',
-    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${humanSlotLabel(s.start, timezone, now)}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
+    instruction: `Ya le ofreciste estos horarios: ${slots.map((s) => `“${humanSlotLabel(s.start, timezone, now, { leadPhone })}”`).join(' o ')}. No vuelvas a consultar la agenda: pregúntale de forma natural (y distinta a tu mensaje anterior) cuál le viene mejor, o si prefiere otro día.`,
     answerQuestionFirst,
   };
 }
@@ -180,6 +195,9 @@ function clarifyDirective(slots: { start: string; id: string }[], timezone: stri
 export function decideDirective(input: StrategyInput): Directive {
   const { biz, leadCtx, state, analysis } = input;
   const lead = leadCtx.lead;
+  // Horas que lee el lead: si escribe desde otro país, con la zona del negocio y su hora (“18:00, hora de España; en México, a las 10:00”).
+  const leadPhone = lead.whatsappId ?? lead.phone;
+  const foreignLead = Boolean(leadZone(leadPhone, biz.business.timezone, input.now ?? new Date()));
   const flags = analysis?.flags;
   const answerQuestionFirst = Boolean(flags?.asksQuestion);
   const now = input.now ?? new Date();
@@ -203,7 +221,7 @@ export function decideDirective(input: StrategyInput): Directive {
   // 1) Ha elegido uno de los horarios ofrecidos → reservar.
   if (analysis?.selectedSlotId && offered.some((s) => s.id === analysis.selectedSlotId)) {
     const slot = offered.find((s) => s.id === analysis.selectedSlotId)!;
-    const label = humanSlotLabel(slot.start, biz.business.timezone, now);
+    const label = humanSlotLabel(slot.start, biz.business.timezone, now, { leadPhone });
     return {
       kind: 'book_slot',
       slotId: slot.id,
@@ -229,7 +247,7 @@ export function decideDirective(input: StrategyInput): Directive {
   // 2) Ya tiene una llamada agendada.
   if (leadCtx.upcomingAppointment) {
     const appt = leadCtx.upcomingAppointment;
-    const when = humanSlotLabel(appt.startsAt, biz.business.timezone, now);
+    const when = humanSlotLabel(appt.startsAt, biz.business.timezone, now, { leadPhone });
     // Da el día (u hora) de la llamada que ya tiene sin pedir cambiarla (“Vale, el lunes”): no es moverla.
     const confirmsBooked = Boolean(analysis?.rescheduleImplicit) && sameAsBooked(analysis!, appt.startsAt, tz);
     const apptDate = localDate(appt.startsAt, tz);
@@ -270,7 +288,7 @@ export function decideDirective(input: StrategyInput): Directive {
     // ofrecidos → preguntarle cuál le viene mejor. Si habla de otra cosa (“gracias”, otro tema), no se le repite la oferta.
     if (offer.length && !flags?.asksPrice && analysis?.aboutSchedule !== false) {
       if (newPreference || analysis?.rejectsOffer || (wantsReschedule && !offerFitsPreference)) {
-        const slotQuery = slotQueryFor(analysis, offer, tz);
+        const slotQuery = slotQueryFor(analysis, offer, tz, foreignLead);
         return {
           kind: 'reschedule',
           needsSlots: true,
@@ -280,10 +298,10 @@ export function decideDirective(input: StrategyInput): Directive {
           answerQuestionFirst,
         };
       }
-      return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
+      return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now, leadPhone);
     }
     if (wantsReschedule || flags?.wantsCancel) {
-      const slotQuery = slotQueryFor(analysis, [], tz);
+      const slotQuery = slotQueryFor(analysis, [], tz, foreignLead);
       return {
         kind: 'reschedule',
         needsSlots: true,
@@ -370,8 +388,8 @@ export function decideDirective(input: StrategyInput): Directive {
   // nunca los mismos (repetírselos sería un bucle).
   const rejectsOffer = Boolean(analysis?.rejectsOffer) && offer.length > 0 && !callDeclined;
   if ((flags?.wantsCall || rejectsOffer) && !flags?.declinesCall) {
-    if (offer.length && !newPreference && !rejectsOffer) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
-    const slotQuery = slotQueryFor(analysis, rejectsOffer ? offer : [], tz);
+    if (offer.length && !newPreference && !rejectsOffer) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now, leadPhone);
+    const slotQuery = slotQueryFor(analysis, rejectsOffer ? offer : [], tz, foreignLead);
     return {
       kind: 'offer_slots',
       needsSlots: true,
@@ -421,8 +439,8 @@ export function decideDirective(input: StrategyInput): Directive {
     }
     if (!nextRule) return keepTalking(answerQuestionFirst);
   } else if (readyForCall && state.callProposedAt) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
-    const slotQuery = slotQueryFor(analysis, [], tz);
+    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now, leadPhone);
+    const slotQuery = slotQueryFor(analysis, [], tz, foreignLead);
     return {
       kind: 'offer_slots',
       needsSlots: true,

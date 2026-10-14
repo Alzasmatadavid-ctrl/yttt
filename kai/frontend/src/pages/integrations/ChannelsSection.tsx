@@ -399,7 +399,7 @@ function WhatsAppSettings({ row, canManage }: { row: ChannelRow; canManage: bool
       </Callout>
       <div className="intg-vars small">
         <strong>Variables:</strong> en el texto de la plantilla escribe <code className="code-inline">{'{{1}}'}</code> donde quieras el nombre del lead (KAI lo
-        rellena solo). En la plantilla de recordatorio añade también <code className="code-inline">{'{{2}}'}</code> para la fecha y hora de la llamada. Usa
+        rellena solo; si no sabe su nombre, pone un 👋 y el lead lee «Hola 👋, …»). En la plantilla de recordatorio añade también <code className="code-inline">{'{{2}}'}</code> para la fecha y hora de la llamada. Usa
         exactamente esas variables: si la plantilla tiene otras, WhatsApp rechazará el envío.
       </div>
       <div className="col gap-12">

@@ -8,7 +8,7 @@
  * {entrenador} y {enlace}. Si lo deja vacío, se usa el texto por defecto de KAI.
  */
 import { DateTime } from 'luxon';
-import { formatInZone, humanSlotLabel } from '../lib/time.js';
+import { formatInZone, humanSlotLabel, leadZoneNote } from '../lib/time.js';
 import { firstName, pick, hashString } from '../lib/text.js';
 import type { AiTone, AutomationConfig } from '../lib/domain.js';
 
@@ -20,6 +20,8 @@ interface Ctx {
   timezone: string;
   meetingUrl?: string | null;
   tone: AiTone;
+  /** WhatsApp (o teléfono) del lead: si es de otro país, las horas llevan la zona del negocio y la suya. */
+  leadPhone?: string | null;
 }
 
 /** Cierre de frase: el emoji hace de separador; sin emojis, un punto (“…a las 18:00. Si necesitas…”). */
@@ -166,7 +168,7 @@ export function renderMessageTemplate(template: string, c: Partial<Ctx> & Pick<C
   const values: Record<string, string> = {
     nombre: firstName(c.leadName),
     fecha: c.startsAt ? dayLabel(c.startsAt, tz, reference) : '',
-    hora: c.startsAt ? formatInZone(c.startsAt, tz, 'HH:mm') : '',
+    hora: c.startsAt ? formatInZone(c.startsAt, tz, 'HH:mm', { leadPhone: c.leadPhone }) : '',
     llamada: c.callLabel,
     entrenador: c.trainerName ?? '',
     enlace: c.meetingUrl ?? '',
@@ -207,7 +209,7 @@ export function confirmationText(c: Ctx, custom?: string | null): string {
   const template = customTemplate('confirmation', custom);
   if (template) return renderMessageTemplate(template, c);
   const name = firstName(c.leadName);
-  const when = formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm");
+  const when = formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm", { leadPhone: c.leadPhone });
   return withName(
     name,
     `${tuUsted(c.tone, 'te', 'le')} confirmo la ${c.callLabel} con ${c.trainerName} el ${when}${end(c.tone, '✅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ${tuUsted(c.tone, 'Si necesitas cambiarla, dímelo por aquí.', 'Si necesita cambiarla, dígamelo por aquí.')}`,
@@ -221,7 +223,7 @@ export function reminderText(c: Ctx, kind: '24h' | '1h', custom?: string | null)
   const seed = hashString(`${c.leadName}${c.startsAt.toISOString()}${kind}`);
   const usted = isUsted(c.tone);
   if (kind === '24h') {
-    const label = humanSlotLabel(c.startsAt, c.timezone, new Date());
+    const label = humanSlotLabel(c.startsAt, c.timezone, new Date(), { leadPhone: c.leadPhone });
     // “Buenas” es demasiado coloquial para quien trata al lead de usted.
     const opener = pick(usted ? ['¡Hola', 'Hola'] : ['¡Hola', 'Hola', 'Buenas'], seed);
     const body = usted
@@ -230,9 +232,11 @@ export function reminderText(c: Ctx, kind: '24h' | '1h', custom?: string | null)
     return `${opener}${name ? ` ${name}` : ''}! ${body}${end(c.tone, '📅')}${c.meetingUrl ? ` Enlace: ${c.meetingUrl}` : ''} ${usted ? '¿Le sigue viniendo bien?' : '¿Te sigue viniendo bien?'}`;
   }
   const time = formatInZone(c.startsAt, c.timezone, 'HH:mm');
+  // Lead de otro país: “(a las 18:00, hora de España; en México, a las 10:00)”, sin paréntesis dentro de otros.
+  const zone = leadZoneNote(c.startsAt, c.timezone, c.leadPhone).replace(/^\s*\(|\)$/g, '');
   return withName(
     name,
-    `en una hora (a las ${time}) es la ${c.callLabel} con ${c.trainerName}${end(c.tone, '🙌')}${c.meetingUrl ? ` ${usted ? 'Le' : 'Te'} dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`,
+    `en una hora (a las ${time}${zone ? `, ${zone}` : ''}) es la ${c.callLabel} con ${c.trainerName}${end(c.tone, '🙌')}${c.meetingUrl ? ` ${usted ? 'Le' : 'Te'} dejo el enlace: ${c.meetingUrl}` : ' ¡Hablamos enseguida!'}`,
   );
 }
 
@@ -249,6 +253,6 @@ export function noShowText(c: Pick<Ctx, 'leadName' | 'callLabel' | 'tone'> & Par
 }
 
 /** Parámetros extra para plantillas de WhatsApp de recordatorio: {{2}} = fecha y hora. */
-export function reminderTemplateParams(c: Pick<Ctx, 'startsAt' | 'timezone'>): string[] {
-  return [formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm")];
+export function reminderTemplateParams(c: Pick<Ctx, 'startsAt' | 'timezone' | 'leadPhone'>): string[] {
+  return [formatInZone(c.startsAt, c.timezone, "cccc d 'de' LLLL 'a las' HH:mm", { leadPhone: c.leadPhone })];
 }

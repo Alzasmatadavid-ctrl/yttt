@@ -186,6 +186,8 @@ const RX_BARE_ACK =
   /^(?:(?:ok(?:ey|i|a)?|okay|vale|va|venga|si|sip|ya|aja|aham?|bueno|claro|genial|perfecto|de acuerdo|entendido|guay|bien|ja(?:ja)*|je(?:je)*|ji(?:ji)*|mm+|hm+|ah|oh|eh)[\s,.!…]*)+$/;
 /** Empieza diciendo que no o dudando: «No», «Que no», «Mmm, no estoy seguro», «Ni idea»… (texto ya normalizado). */
 const RX_SAYS_NO = /^(?:(?:pues|que|uf+|buf+|mm+|hm+|bueno|la verdad(?: es que)?|sinceramente)[\s,.!…]+)*(?:no(?![a-zñ])|nop\b|nah\b|ni idea|tampoco|para nada|en absoluto|lo dudo)/;
+/** Dice que no puede (un día, una hora): «el lunes no puedo», «a esa hora no me va bien», «imposible» (texto normalizado). */
+const RX_CANT_MAKE = /\bno (?:puedo|podre|podria|voy a poder|llego|me (?:va|viene|encaja|cuadra|pilla|sirve))\b|\bimposible\b|\bme (?:va|viene|pilla) (?:fatal|mal)\b/;
 
 /** Directivas en las que se responde antes a una pregunta del lead que el texto principal no cubre. */
 const ANSWERS_QUESTIONS = ['greet_and_ask', 'ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'];
@@ -297,6 +299,8 @@ export class RuleBasedSetterAgent implements SetterAgent {
     const trainer = biz.trainer.displayName || 'el entrenador';
     const assistant = s.assistantName || 'KAI';
     const emoji = (e: string) => (s.tone.emojiUsage === 'none' ? '' : ` ${e}`);
+    // Horas que lee el lead: si escribe desde otro país, con la zona del negocio y su hora (“18:00 (hora de España; en México, a las 10:00)”).
+    const slotLabel = (start: string | Date) => humanSlotLabel(start, biz.business.timezone, input.now, { leadPhone: lead.whatsappId ?? lead.phone });
     const seed = hashString(`${lead.id}:${input.convCtx.history.length}:${input.feedback.length}`);
     const pendingText = input.convCtx.pendingInbound.map((m) => m.content.toLowerCase()).join(' ');
     // Felicitar o reconocer un acontecimiento solo la primera vez: repetirlo en cada mensaje suena a robot.
@@ -333,6 +337,8 @@ export class RuleBasedSetterAgent implements SetterAgent {
     // usa el reconocimiento propio de esa variable.
     const bareAck = Boolean(np) && (RX_BARE_ACK.test(np) || !/[\p{L}\p{N}]/u.test(np));
     const leadSaysNo = RX_SAYS_NO.test(np);
+    // No puede en lo que se le propone, aunque no empiece por «no» («El lunes no puedo», «a esa hora imposible»).
+    const leadCantMake = leadSaysNo || RX_CANT_MAKE.test(np);
     const askedKey = state.lastAskedKey;
     const answeredAsked = Boolean(askedKey) && Boolean(lead.qualification[askedKey!]?.value || (lead.signals as Record<string, unknown>)[askedKey!]);
     // Vuelve a hacer la misma pregunta porque no la ha contestado: se reformula (repetirla tal cual suena a robot).
@@ -426,11 +432,15 @@ export class RuleBasedSetterAgent implements SetterAgent {
       if (/\b(bot|robot|ia|inteligencia artificial|persona real|una persona|humano|maquina|automatic\w*|automatizad\w*|asistente|chatgpt)\b/.test(q)) return null;
       if (/\b(llamada|videollamada|llamais|llamas|llamara|llamaras|llamarme|zoom|meet|telefono)\b/.test(q)) {
         if (/\b(cuesta|precio|coste|costo|pagar|paga|gratis|gratuit[ao]|cobr\w*)\b/.test(q)) return null;
-        if (/\bpara que\b|\ben que consiste\b|\bde que (?:va|trata)\b|\bque (?:se hace|hacemos|haremos|vemos|veremos|se habla|hablamos|hablaremos)\b/.test(q)) {
-          // La de reassure_call ya explica para qué es la llamada.
-          return directive.kind === 'reassure_call' ? null : `La ${s.callLabel} es para que ${trainer} conozca tu caso y veáis si tiene sentido trabajar juntos.${callFacts ? ` ${callFacts}` : ''}`;
-        }
-        if (/\bcuanto (?:dura|tiempo|rato)\b|\bduracion\b|\bcuantos minutos\b/.test(q)) return `La ${s.callLabel} dura ${s.callDurationMinutes} minutos.`;
+        const asksDuration = /\bcuanto (?:dura|tiempo|rato)\b|\bduracion\b|\bcuantos minutos\b/.test(q);
+        const asksPurpose = /\bpara que\b|\ben que consiste\b|\bde que (?:va|trata)\b|\bque (?:se hace|hacemos|haremos|vemos|veremos|se habla|hablamos|hablaremos)\b/.test(q);
+        // La de reassure_call ya explica para qué es la llamada: solo falta la duración, si la pregunta.
+        if (asksPurpose && directive.kind !== 'reassure_call')
+          return asksDuration
+            ? `La ${s.callLabel} dura ${s.callDurationMinutes} minutos y es para que ${trainer} conozca tu caso y veáis si tiene sentido trabajar juntos.`
+            : `La ${s.callLabel} es para que ${trainer} conozca tu caso y veáis si tiene sentido trabajar juntos.${callFacts ? ` ${callFacts}` : ''}`;
+        if (asksDuration) return `La ${s.callLabel} dura ${s.callDurationMinutes} minutos.`;
+        if (asksPurpose) return null;
         return callFacts || `Los detalles de la ${s.callLabel} te los concreta ${trainerFirst}; prefiero no decirte nada inexacto.`;
       }
       if (/\b(online|on line|presencial(?:es)?|en persona|a distancia|semipresencial|hibrido|en remoto|desde casa)\b|\bdonde (?:es|seria|entrenas|entrenais|entrenamos|estais|estas|se entrena)\b/.test(q)) {
@@ -587,7 +597,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
             return t;
           };
           // Ya tiene horarios ofrecidos (y aún no ha elegido): se retoman en vez de volver a proponerle la llamada.
-          const offerLabels = recentOffer(state, input.now, biz.minNoticeMinutes ?? 0).map((o) => humanSlotLabel(o.start, biz.business.timezone, input.now));
+          const offerLabels = recentOffer(state, input.now, biz.minNoticeMinutes ?? 0).map((o) => slotLabel(o.start));
           const offerAsk = offerLabels.length ? (offerLabels.length === 1 ? `¿Te viene bien ${offerLabels[0]}?` : `¿Te viene mejor ${joinLabels(offerLabels)}?`) : '';
           // «¿Y tiene algún coste?» justo después de proponerle la llamada (u ofrecerle horarios) pregunta por la llamada.
           // Que la llamada es gratis solo se dice si el entrenador lo ha puesto en su descripción; si no, se aclara
@@ -664,12 +674,23 @@ export class RuleBasedSetterAgent implements SetterAgent {
           ...(current && shift === 'later' ? { later_than: current.startsAt.toISOString() } : {}),
           ...(current && shift === 'earlier' ? { earlier_than: current.startsAt.toISOString() } : {}),
           ...(fromNextDay ? { later_than: fromNextDay.toUTC().toISO() } : {}),
+          // Días que ha dicho que no puede o cuyos horarios acaba de rechazar: no se le vuelven a ofrecer.
+          ...(directive.slotQuery?.excludeDates?.length ? { exclude_dates: directive.slotQuery.excludeDates } : {}),
+          // Hora concreta que pide («a las 10»): los huecos más cercanos a ella.
+          ...(directive.slotQuery?.time ? { near_time: directive.slotQuery.time } : {}),
         });
-        const data = JSON.parse(r.content) as { slots?: { label: string }[]; note?: string };
+        const data = JSON.parse(r.content) as { slots?: { label: string }[]; note?: string; calendar_unavailable?: boolean };
         const labels = (data.slots ?? []).map((x) => x.label);
+        // Acaba de rechazar los horarios ofrecidos («el lunes no puedo», «ninguna me va bien») o dice que no: sin “Perfecto”.
+        const afterNo = leadCantMake || Boolean(directive.afterRejection);
         // Variantes: si vuelve a pedir la llamada (p. ej. tras cancelarla), los horarios pueden ser los mismos de antes y
-        // el mismo texto se rechazaría por repetido. Si acaba de decir que no («el lunes no puedo»), sin “Perfecto”.
-        if (labels.length === 0) {
+        // el mismo texto se rechazaría por repetido.
+        if (data.calendar_unavailable) {
+          // El calendario conectado no responde: no es que no haya huecos. La conversación pasa al entrenador.
+          text = `Ahora mismo no puedo consultar la agenda. Lo reviso con ${trainer} y te escribimos con opciones en cuanto podamos.`;
+        } else if (labels.length === 0 && directive.afterRejection) {
+          text = `Vaya, ahora mismo no me quedan otros huecos libres. Lo reviso con ${trainer} y te escribo con más opciones, ¿vale?`;
+        } else if (labels.length === 0) {
           text = firstFresh([
             `Ahora mismo no veo huecos libres en la agenda. Lo reviso con ${trainer} y te escribo con opciones, ¿vale?`,
             `Ahora mismo no me aparecen huecos libres. Lo reviso con ${trainer} y te digo opciones en cuanto pueda, ¿vale?`,
@@ -683,7 +704,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
           const noneThatDay = data.note
             ? [`Ese día no me quedan huecos, pero ${options}`, `Ese día lo tengo completo, pero ${propose}`, `Para ese día no me queda nada libre, pero ${free}`]
             : null;
-          const openers = leadSaysNo ? ['Sin problema.', 'Vale.', 'De acuerdo.'] : ['Perfecto.', 'Genial.', 'Vale.'];
+          const openers = afterNo ? ['Sin problema.', 'Vale.', 'De acuerdo.'] : ['Perfecto.', 'Genial.', 'Vale.'];
           text =
             directive.kind === 'reschedule'
               ? firstFresh(
@@ -724,14 +745,14 @@ export class RuleBasedSetterAgent implements SetterAgent {
         const labels = ids
           .map((id) => (state.offeredSlots ?? []).find((x) => x.id === id))
           .filter((x): x is NonNullable<typeof x> => Boolean(x) && slotStillBookable(x!.start, input.now, biz.minNoticeMinutes ?? 0))
-          .map((x) => humanSlotLabel(x.start, biz.business.timezone, input.now));
+          .map((x) => slotLabel(x.start));
         if (!labels.length) {
           text = '¿Qué día y franja te vendría mejor para la llamada?';
           break;
         }
         const options = joinLabels(labels);
-        // Si duda o dice que no, nada de “¡Genial!”.
-        const variants = leadSaysNo
+        // Si duda, dice que no o que no puede algún día, nada de “¡Genial!”.
+        const variants = leadCantMake
           ? [`Sin problema. Dime si te encaja ${options} o si prefieres que miremos otro día.`, `Vale, sin prisa. Cuando lo mires, dime si te va ${options} o prefieres otro día.`]
           : [
               `¡Genial! Entonces, ¿te va mejor ${options}?`,
@@ -747,8 +768,11 @@ export class RuleBasedSetterAgent implements SetterAgent {
         // Si la reserva ya se hizo en este turno (p. ej. al reintentar la redacción), no se repite.
         const done = input.toolbox.records.find((x) => x.ok && (x.name === 'book_call' || x.name === 'reschedule_call'));
         const r = done ? { content: JSON.stringify(done.result), isError: false } : await input.toolbox.run(tool, { slot_id: directive.slotId });
-        const data = JSON.parse(r.content) as { error?: string; label?: string; booking_url?: string; meeting_url?: string | null; mode?: string };
-        if (r.isError) {
+        const data = JSON.parse(r.content) as { error?: string; label?: string; booking_url?: string; meeting_url?: string | null; mode?: string; calendar_unavailable?: boolean };
+        if (r.isError && data.calendar_unavailable) {
+          // El calendario conectado no responde: el hueco no se ha ocupado, es que no se puede reservar ahora.
+          text = `Vaya, ahora mismo no puedo acceder a la agenda para confirmártelo. Se lo paso a ${trainer} para que lo revise y te escriba enseguida.`;
+        } else if (r.isError) {
           const again = await input.toolbox.run('get_available_slots', { date: null, part_of_day: 'any' });
           const slots = (JSON.parse(again.content) as { slots?: { label: string }[] }).slots ?? [];
           text = slots.length
@@ -765,28 +789,39 @@ export class RuleBasedSetterAgent implements SetterAgent {
       case 'post_booking': {
         // Neutro: no da por hecho que el lead ha dicho que sí a nada.
         const appt = leadCtx.upcomingAppointment;
-        const when = appt ? humanSlotLabel(appt.startsAt, biz.business.timezone, input.now) : null;
-        text = when
-          ? botNotes.length
-            ? `La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`
-            : leadAsks
-              ? // Acaba de preguntar algo (se le responde antes): nada de “cualquier duda, me la preguntas”.
-                fresh([
-                  `La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
-                  `Recuerda que la ${s.callLabel} es ${when}; si necesitas moverla, me lo dices por aquí.`,
-                ])
-              : fresh([
-                `Entendido. Si te surge algo y necesitas mover la ${s.callLabel} (${when}), dímelo sin problema.`,
-                `Aquí estoy para lo que necesites. La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
-                `Gracias por escribir. Cualquier duda antes de la ${s.callLabel} (${when}), me la preguntas por aquí.`,
-              ])
-          : fresh(['Vale, cualquier cosa me dices.', 'Entendido. Aquí me tienes para lo que necesites.']);
+        const when = appt ? slotLabel(appt.startsAt) : null;
+        if (!when) text = fresh(['Vale, cualquier cosa me dices.', 'Entendido. Aquí me tienes para lo que necesites.']);
+        else if (botNotes.length) text = `La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`;
+        else if (directive.keepsBooking)
+          // Desiste de moverla («déjala como está») o confirma el día que ya tiene: se le confirma, sin más.
+          text = fresh([
+            `Perfecto, la dejamos como estaba: ${when}. Si te surge algo, me lo dices por aquí.`,
+            `De acuerdo, mantenemos la ${s.callLabel} ${when}. Cualquier cosa, me dices.`,
+          ]);
+        else if (onlyThanks)
+          text = fresh([
+            `Gracias a ti. Recuerda: la ${s.callLabel} es ${when}. Si te surge algo, me lo dices por aquí.`,
+            `A ti. La ${s.callLabel} sigue en pie ${when}; cualquier cosa, me dices.`,
+          ]);
+        else if (leadAsks)
+          // Acaba de preguntar algo (se le responde antes): nada de “cualquier duda, me la preguntas”.
+          text = fresh([
+            `La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
+            `Recuerda que la ${s.callLabel} es ${when}; si necesitas moverla, me lo dices por aquí.`,
+          ]);
+        else
+          text = fresh([
+            `Entendido. Si te surge algo y necesitas mover la ${s.callLabel} ${ofLabel(when)}, dímelo sin problema.`,
+            `Aquí estoy para lo que necesites. La ${s.callLabel} sigue en pie ${when}; si tienes que moverla, me dices.`,
+            // A un «vale» u «ok» no se le contesta «Gracias por escribir».
+            ...(bareAck ? [] : [`Gracias por escribir. Cualquier duda antes de la ${s.callLabel} ${ofLabel(when)}, me la preguntas por aquí.`]),
+          ]);
         shorter = ['Cualquier otra duda, me dices.'];
         break;
       }
       case 'confirm_cancel': {
         const appt = leadCtx.upcomingAppointment;
-        const when = appt ? ` ${ofLabel(humanSlotLabel(appt.startsAt, biz.business.timezone, input.now))}` : '';
+        const when = appt ? ` ${ofLabel(slotLabel(appt.startsAt))}` : '';
         // Dos variantes: si vuelve a decir que no la quiere más adelante, no se repite el mismo mensaje.
         text = fresh([
           `Sin problema. ¿Quieres que cancele la ${s.callLabel}${when} o prefieres que la movamos a otro día?`,
@@ -851,7 +886,7 @@ export class RuleBasedSetterAgent implements SetterAgent {
     // [recordatorio de salud] [respuesta a su pregunta] [qué incluye] [texto principal]. Si no cabe en el máximo del
     // tono, se acortan las partes opcionales.
     const greets = directive.kind === 'greet_and_ask' || Boolean(input.firstMessage);
-    const answersIncludes = ['ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'].includes(directive.kind);
+    const answersIncludes = ['greet_and_ask', 'ask_qualification', 'continue_without_call', 'reassure_call', 'post_booking', 'propose_call'].includes(directive.kind);
     const parts: MessagePart[] = [
       { key: 'hello', options: greets ? [`${greeting}${name ? ` ${name}` : ''}!${intro ? ` ${intro}` : ''}`] : [] },
       { key: 'thanks', options: directive.kind === 'greet_and_ask' ? [`Gracias por escribir${emoji('👋')}`, ''] : [] },

@@ -49,7 +49,11 @@ function describeEvent(e: Profile['events'][number]) {
   if (e.type === 'handoff') return String(e.data.detail ?? e.data.reason ?? '');
   if (e.type === 'opted_out') {
     const reason = typeof e.data.reason === 'string' ? e.data.reason : '';
+    // Ya estaba de baja: el equipo dio por vistos sus mensajes, o solo contestó «gracias» a la despedida.
+    if (e.data.acknowledged) return 'El equipo revisó sus mensajes: sigue de baja';
+    if (e.data.courtesy) return 'Contestó con un mensaje de cortesía: sigue de baja';
     if (e.data.manual) return reason ? `Baja manual del equipo · ${reason}` : 'Baja manual del equipo';
+    if (e.data.repeated) return 'Volvió a pedir en la conversación que no le escriban';
     return 'Lo pidió el propio lead en la conversación';
   }
   return '';
@@ -543,6 +547,11 @@ export default function LeadDetail() {
             {cancelFor.calendarProvider === 'google' && (
               <p className="muted small" style={{ margin: 0 }}>
                 También se borrará de tu Google Calendar y, si el lead estaba invitado al evento, Google le enviará un email de cancelación.
+              </p>
+            )}
+            {cancelFor.calendarProvider === 'calendly' && (
+              <p className="muted small" style={{ margin: 0 }}>
+                También se cancelará en tu Calendly y Calendly avisará al lead por email. Si no se puede, te avisaremos para que la canceles tú desde Calendly.
               </p>
             )}
             <Callout tone="warning">

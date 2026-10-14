@@ -13,7 +13,7 @@ import { aiSettings, appointments, businesses, conversations, followUps, leads, 
 import { CALL_STATUSES, CLOSED_STATUSES } from '../lib/domain.js';
 import { errorMessage } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import { addDays, isWithinQuietHours, shiftOutOfQuietHours } from '../lib/time.js';
+import { addDays, formatInZone, isWithinQuietHours, shiftOutOfQuietHours } from '../lib/time.js';
 import { logError } from '../audit/audit.service.js';
 import { env } from '../config/env.js';
 import {
@@ -37,6 +37,7 @@ import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { appointmentMessageEnabled, getAutomation } from './reminders.js';
 import { configuredMessage, confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
 import { requestOutcomeAlert, syncAppointmentWithCalendar } from '../calendar/calendar.service.js';
+import { createAlert } from '../crm/alerts.service.js';
 import { rollupAnalyticsForAll } from '../analytics/analytics.service.js';
 import { purgeExpiredSessions } from '../auth/sessions.js';
 import { retryFailedLeadgenEvents } from '../webhooks/meta.webhook.js';
@@ -64,6 +65,26 @@ async function quietHoursEnd(businessId: string, quietHours?: { start: string; e
  */
 const REMINDER_24H_MIN_LEAD_MS = 2 * 3600_000;
 const REMINDER_1H_MIN_LEAD_MS = 15 * 60_000;
+
+/**
+ * La confirmación o un recordatorio de la llamada no se pueden enviar porque el lead no tiene ninguna conversación con
+ * KAI (p. ej. se creó a mano y se le agendó desde la Agenda): se avisa al entrenador para que se lo diga él. Un solo
+ * aviso por llamada. Con Calendly no hace falta: Calendly ya le envía sus emails.
+ */
+async function alertNoConversation(businessId: string, ctx: NonNullable<Awaited<ReturnType<typeof appointmentContext>>>) {
+  if (ctx.appointment.calendarProvider === 'calendly') return;
+  await createAlert({
+    businessId,
+    type: 'delivery_blocked',
+    title: 'Mensaje no enviado',
+    body:
+      `KAI no puede enviar a ${ctx.lead.name || 'este lead'} la confirmación ni los recordatorios de la ${ctx.textCtx.callLabel} del ` +
+      `${formatInZone(ctx.appointment.startsAt, ctx.textCtx.timezone)}: no tiene ninguna conversación con KAI (WhatsApp, Instagram o el chat). Avísale tú.`,
+    leadId: ctx.lead.id,
+    appointmentId: ctx.appointment.id,
+    dedupeByTitle: true,
+  });
+}
 
 async function appointmentContext(businessId: string, appointmentId: string) {
   const db = getDb();
@@ -107,6 +128,7 @@ async function appointmentContext(businessId: string, appointmentId: string) {
       timezone: row.business.timezone,
       meetingUrl: row.appointment.meetingUrl,
       tone: settings?.tone ?? DEFAULT_TONE,
+      leadPhone: row.lead.whatsappId ?? row.lead.phone,
     },
   };
 }
@@ -136,6 +158,8 @@ const handlers: Record<string, Handler> = {
     if (!lead || lead.optedOut) return markFollowUp(fu.id, 'cancelled', { note: 'Lead no disponible o dado de baja' });
     if (lead.lastInboundAt && lead.lastInboundAt > fu.createdAt) return markFollowUp(fu.id, 'cancelled', { note: 'El lead respondió' });
     if (CLOSED_STATUSES.includes(lead.status) || CALL_STATUSES.includes(lead.status)) return markFollowUp(fu.id, 'cancelled', { note: `Etapa ${lead.status}` });
+    // Programado antes de saberse que no encaja (p. ej. dijo después que es menor): no se le persigue.
+    if (lead.signals.fit === 'no') return markFollowUp(fu.id, 'cancelled', { note: 'El lead no encaja' });
     if (!(await conversationIsActiveForKai(businessId, fu.conversationId))) return markFollowUp(fu.id, 'skipped', { note: 'KAI pausado en la conversación' });
     // Piloto automático en pausa: KAI no escribe a nadie por su cuenta (ni se encadena el siguiente paso).
     if (!(await autopilotEnabled(businessId))) return markFollowUp(fu.id, 'skipped', { note: 'Piloto automático en pausa' });
@@ -148,8 +172,10 @@ const handlers: Record<string, Handler> = {
     const steps = automation.config.steps ?? [];
     const step = steps[fu.step - 1];
     if (!step) return markFollowUp(fu.id, 'cancelled', { note: 'Paso no configurado' });
-    // Horario de descanso: el mismo seguimiento se pasa a cuando termine (sin redactarlo ahora).
-    const deferTo = await quietHoursEnd(businessId, automation.config.quietHours);
+    // Horario de descanso: el mismo seguimiento se pasa a cuando termine (sin redactarlo ahora). Salvo que se fuerce
+    // (el simulador: el entrenador lo está probando y quiere verlo ya).
+    const forced = Boolean((job.payload as { forceNow?: boolean }).forceNow);
+    const deferTo = forced ? null : await quietHoursEnd(businessId, automation.config.quietHours);
     if (deferTo) {
       const next = await scheduleJob({ businessId, type: 'followup', runAt: deferTo, payload: job.payload, dedupeKey: `followup:${fu.id}` });
       await getDb().update(followUps).set({ scheduledFor: deferTo, jobId: next.id }).where(eq(followUps.id, fu.id));
@@ -183,7 +209,7 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const ctx = await appointmentContext(businessId, (job.payload as { appointmentId: string }).appointmentId);
     // Lead dado de baja: no se le escribe (sendMessage también lo bloquearía, pero dejaría un aviso de «no enviado»).
-    if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || !ctx.conversationId || ctx.lead.optedOut) return;
+    if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.appointment.confirmationSentAt || ctx.lead.optedOut) return;
     if (ctx.appointment.startsAt.getTime() <= Date.now()) return; // la llamada ya empezó: no tiene sentido confirmarla
     const automation = await getAutomation(businessId, 'appointment_reminders');
     // El entrenador la desactivó después de reservar: los trabajos ya programados tampoco se envían.
@@ -193,6 +219,8 @@ const handlers: Record<string, Handler> = {
     }
     // Borrada o movida en Google Calendar: no se confirma la hora antigua (si se movió, se reprograma con la nueva).
     if ((await syncAppointmentWithCalendar(businessId, ctx.appointment)) !== 'unchanged') return;
+    // Sin conversación con KAI no hay por dónde escribirle: que lo sepa el entrenador.
+    if (!ctx.conversationId) return alertNoConversation(businessId, ctx);
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
@@ -209,7 +237,7 @@ const handlers: Record<string, Handler> = {
     const businessId = job.businessId!;
     const { appointmentId, kind } = job.payload as { appointmentId: string; kind: '24h' | '1h' };
     const ctx = await appointmentContext(businessId, appointmentId);
-    if (!ctx || ctx.appointment.status !== 'scheduled' || !ctx.conversationId || ctx.lead.optedOut) return;
+    if (!ctx || ctx.appointment.status !== 'scheduled' || ctx.lead.optedOut) return;
     if (kind === '24h' && ctx.appointment.reminder24hSentAt) return;
     if (kind === '1h' && ctx.appointment.reminder1hSentAt) return;
     // Trabajo ejecutado tarde: si ya no queda margen, el recordatorio sería falso o inútil.
@@ -225,6 +253,7 @@ const handlers: Record<string, Handler> = {
     }
     // Borrada o movida en Google Calendar: no se recuerda la hora antigua (si se movió, ya hay recordatorios nuevos).
     if ((await syncAppointmentWithCalendar(businessId, ctx.appointment)) !== 'unchanged') return;
+    if (!ctx.conversationId) return alertNoConversation(businessId, ctx);
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,

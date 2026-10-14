@@ -225,6 +225,8 @@ class CopilotTools {
         const f: LeadFilters = {
           temperature: temperatures,
           status: statuses,
+          // Tampoco los que pidieron la baja: no se les puede escribir (si vuelven a escribir, salen como pendientes).
+          excludeOptedOut: Boolean(temperatures?.length || noReplyHours !== undefined),
           source: (input.sources as LeadSource[] | null) ?? undefined,
           noReplyHours,
           createdFrom: input.created_within_days ? new Date(Date.now() - Number(input.created_within_days) * 86_400_000) : undefined,

@@ -9,7 +9,7 @@ import { formatInZone, humanSlotLabel, shiftOutOfQuietHours } from '../lib/time.
 import { audit, logError } from '../audit/audit.service.js';
 import { applyPipelineEvent, recordLeadEvent, setLeadStatus, type Actor } from '../crm/leads.service.js';
 import { createAlert, resolveAlertsFor } from '../crm/alerts.service.js';
-import { cancelAppointmentJobs, getAutomation, scheduleAppointmentJobs } from '../automation/reminders.js';
+import { appointmentMessageEnabled, cancelAppointmentJobs, getAutomation, scheduleAppointmentJobs } from '../automation/reminders.js';
 import { scheduleJob } from '../automation/jobs.js';
 import { clampSlotRange, computeFreeSlots, pickOfferSlots, slotId, type AvailabilityConfig, type Interval, type PartOfDay, type Slot } from './availability.js';
 import { getCalendarConnection, googleAccessToken, markCalendarHealthy, reportCalendarFailure, type CalendlyCredentials } from './connections.js';
@@ -127,11 +127,15 @@ export async function getFreeSlots(
   return { slots, config, provider: connection?.provider ?? 'internal' };
 }
 
-/** Huecos para ofrecer al lead (2–3 opciones), ya etiquetados en su idioma y zona horaria. */
+/**
+ * Huecos para ofrecer al lead (2–3 opciones), ya etiquetados en español con la hora del negocio. Si el lead escribe
+ * desde otro país (prefijo de su WhatsApp), la etiqueta lo aclara y da también su hora (“mañana a las 18:00 (hora de
+ * España; en México, a las 10:00)”).
+ */
 export async function getOfferableSlots(
   businessId: string,
-  lead: { id: string; name: string; email: string | null; isTest?: boolean },
-  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date } = {},
+  lead: { id: string; name: string; email: string | null; isTest?: boolean; whatsappId?: string | null; phone?: string | null },
+  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date; excludeDates?: string[]; nearTime?: string } = {},
 ): Promise<{ offered: OfferedSlot[]; timezone: string; provider: string }> {
   const { slots, config, provider } = await getFreeSlots(businessId, undefined, { includeTestLeads: Boolean(lead.isTest) });
   const picked = pickOfferSlots(slots, config.timezone, opts) as SlotWithUrl[];
@@ -139,7 +143,7 @@ export async function getOfferableSlots(
     id: s.id,
     start: s.start.toISOString(),
     end: s.end.toISOString(),
-    label: humanSlotLabel(s.start, config.timezone),
+    label: humanSlotLabel(s.start, config.timezone, new Date(), { leadPhone: lead.whatsappId ?? lead.phone }),
     ...(s.url ? { bookingUrl: calendlyPrefilledUrl(s.url, { name: lead.name, email: lead.email, leadId: lead.id }) } : {}),
   }));
   return { offered, timezone: config.timezone, provider };
@@ -327,6 +331,29 @@ export async function afterBooked(businessId: string, appointment: Appointment, 
     entityId: appointment.id,
     metadata: { startsAt: appointment.startsAt.toISOString(), provider: appointment.calendarProvider },
   });
+}
+
+/**
+ * ¿Le escribirá KAI al lead por esta cita (confirmación o algún recordatorio)? Solo si tiene una conversación con KAI,
+ * no está dado de baja y el entrenador tiene activado alguno de esos mensajes. Lo usa la Agenda para no prometer al
+ * entrenador avisos que no van a salir.
+ */
+export async function appointmentWillNotify(businessId: string, leadId: string): Promise<boolean> {
+  const db = getDb();
+  const [lead] = await db
+    .select({ optedOut: leads.optedOut })
+    .from(leads)
+    .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)))
+    .limit(1);
+  if (!lead || lead.optedOut) return false;
+  const [conv] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.leadId, leadId)))
+    .limit(1);
+  if (!conv) return false;
+  const reminders = await getAutomation(businessId, 'appointment_reminders');
+  return (['confirmation', 'reminder24h', 'reminder1h'] as const).some((k) => appointmentMessageEnabled(reminders, k));
 }
 
 export async function getAppointment(businessId: string, id: string): Promise<Appointment> {

@@ -123,11 +123,13 @@ export function partOfDay(d: Date, tz: string): Exclude<PartOfDay, 'any'> {
 export function pickOfferSlots(
   slots: Slot[],
   tz: string,
-  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date } = {},
+  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date; excludeDates?: string[]; nearTime?: string } = {},
 ): Slot[] {
   const count = Math.min(Math.max(opts.count ?? 2, 1), 5);
   let pool = slots;
   if (opts.date) pool = pool.filter((s) => DateTime.fromJSDate(s.start).setZone(tz).toISODate() === opts.date);
+  // Días que el lead ha dicho que no puede (“el lunes no puedo”) o cuyos horarios acaba de rechazar.
+  if (opts.excludeDates?.length) pool = pool.filter((s) => !opts.excludeDates!.includes(DateTime.fromJSDate(s.start).setZone(tz).toISODate() ?? ''));
   // «Una hora más tarde» / «un poco antes» que la llamada que ya tiene: solo horarios posteriores (o anteriores).
   if (opts.after) pool = pool.filter((s) => s.start.getTime() > opts.after!.getTime());
   if (opts.before) pool = pool.filter((s) => s.start.getTime() < opts.before!.getTime());
@@ -135,7 +137,18 @@ export function pickOfferSlots(
     const filtered = pool.filter((s) => partOfDay(s.start, tz) === opts.partOfDay);
     if (filtered.length) pool = filtered;
   }
-  if (pool.length <= count) return pool;
+  // Pide una hora concreta (“¿me podéis llamar a las 10?”): primero los huecos más cercanos a esa hora (y, a igual
+  // distancia, los más próximos en el calendario).
+  const near = /^(\d{1,2}):(\d{2})$/.exec(opts.nearTime ?? '');
+  if (near) {
+    const target = Number(near[1]) * 60 + Number(near[2]);
+    const distance = (s: Slot) => {
+      const local = DateTime.fromJSDate(s.start).setZone(tz);
+      return Math.abs(local.hour * 60 + local.minute - target);
+    };
+    pool = [...pool].sort((a, b) => distance(a) - distance(b) || a.start.getTime() - b.start.getTime());
+  }
+  if (pool.length <= count) return near ? pool.sort((a, b) => a.start.getTime() - b.start.getTime()) : pool;
   const chosen: Slot[] = [];
   const seenKeys = new Set<string>();
   // 1ª pasada: franjas distintas (día + parte del día).

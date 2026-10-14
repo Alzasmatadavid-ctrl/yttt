@@ -52,8 +52,9 @@ function AlertsMenu() {
   const resolve = useMutation({
     mutationFn: (id: string) => api.post(`/alerts/${id}/resolve`, { status: 'dismissed' }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['alerts'] });
-      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // Descartar algunos avisos (p. ej. «Un lead dado de baja te ha vuelto a escribir») también saca la conversación de
+      // «Pendientes»: se refrescan la Bandeja y sus contadores.
+      for (const key of ['alerts', 'dashboard', 'inbox', 'inbox-counts', 'conversation']) void qc.invalidateQueries({ queryKey: [key] });
     },
     onError: (e) => toast(errorText(e), 'error'),
   });

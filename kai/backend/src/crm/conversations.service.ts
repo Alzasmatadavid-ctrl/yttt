@@ -245,8 +245,10 @@ function inboxFilterCondition(filter: InboxFilter, ctx: { autopilotOn: boolean }
   switch (filter) {
     case 'new':
       return inArray(leads.status, ['new', 'contacted']);
+    // Los que pidieron la baja no son «calientes» ni «sin respuesta»: no se les puede escribir (si vuelven a escribir
+    // después de la baja, salen en «Pendientes»). Igual que en los contadores de Hoy.
     case 'hot':
-      return inArray(leads.temperature, ['caliente', 'muy_cualificado']);
+      return and(inArray(leads.temperature, ['caliente', 'muy_cualificado']), eq(leads.optedOut, false));
     case 'qualified':
       return inArray(leads.status, ['qualified', 'call_proposed']);
     case 'pending':
@@ -257,7 +259,7 @@ function inboxFilterCondition(filter: InboxFilter, ctx: { autopilotOn: boolean }
     case 'booked':
       return inArray(leads.status, ['call_booked', 'reminder_sent']);
     case 'no_reply':
-      return sql`${leads.lastOutboundAt} is not null and (${leads.lastInboundAt} is null or ${leads.lastInboundAt} < ${leads.lastOutboundAt}) and ${leads.lastOutboundAt} < now() - interval '24 hours' and ${leads.status} not in ('client','lost')`;
+      return sql`${leads.lastOutboundAt} is not null and (${leads.lastInboundAt} is null or ${leads.lastInboundAt} < ${leads.lastOutboundAt}) and ${leads.lastOutboundAt} < now() - interval '24 hours' and ${leads.status} not in ('client','lost') and ${leads.optedOut} = false`;
     case 'clients':
       return eq(leads.status, 'client');
     default:

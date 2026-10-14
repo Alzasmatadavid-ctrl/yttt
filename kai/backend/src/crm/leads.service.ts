@@ -267,6 +267,8 @@ export interface LeadFilters {
   minScore?: number;
   search?: string;
   noReplyHours?: number;
+  /** Sin los leads dados de baja (búsquedas de leads «por los que hay que hacer algo»: calientes, sin respuesta). */
+  excludeOptedOut?: boolean;
   createdFrom?: Date;
   createdTo?: Date;
   includeTest?: boolean;
@@ -282,6 +284,7 @@ export function leadFilterConditions(businessId: string, f: LeadFilters): SQL[] 
   if (f.temperature?.length) conds.push(inArray(leads.temperature, f.temperature));
   if (f.source?.length) conds.push(inArray(leads.source, f.source));
   if (f.minScore !== undefined) conds.push(gte(leads.score, f.minScore));
+  if (f.excludeOptedOut) conds.push(eq(leads.optedOut, false));
   if (f.createdFrom) conds.push(gte(leads.createdAt, f.createdFrom));
   if (f.createdTo) conds.push(lt(leads.createdAt, f.createdTo));
   if (f.noReplyHours !== undefined) {
@@ -519,6 +522,8 @@ export async function mergeQualification(
       updatedAt: new Date(),
     })
     .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)));
+  // Acaba de saberse que no encaja (p. ej. es menor de edad): se cancelan los seguimientos por falta de respuesta.
+  if (mergedSignals.fit === 'no' && lead.signals.fit !== 'no') await cancelPendingAutomationsForLead(businessId, leadId, ['no_reply']);
   return recomputeLeadScore(businessId, leadId);
 }
 

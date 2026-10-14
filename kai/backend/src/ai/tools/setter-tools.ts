@@ -31,7 +31,8 @@ const CALENDAR_TOOLS = ['get_available_slots', 'book_call', 'reschedule_call'];
  * un horario que el lead aún no ha visto ni cancela una llamada que el lead no ha pedido cancelar.
  */
 export interface ToolboxPolicy {
-  directive: { kind: string; slotId?: string };
+  /** `slotQuery.excludeDates`: días que el lead ha descartado (“el lunes no puedo”): get_available_slots no los ofrece. */
+  directive: { kind: string; slotId?: string; slotQuery?: { excludeDates?: string[]; time?: string } };
   /** El lead ha pedido cancelar su llamada de forma explícita (permite cancel_call al moverla). */
   leadAskedToCancel?: boolean;
 }
@@ -171,7 +172,11 @@ export class SetterToolbox {
         };
       }
       const result = calendarDown
-        ? { error: message, note: 'No se puede consultar la agenda ahora mismo. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios ni digas que el hueco está ocupado.' }
+        ? {
+            error: message,
+            calendar_unavailable: true,
+            note: 'No se puede consultar la agenda ahora mismo. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios ni digas que el hueco está ocupado.',
+          }
         : { error: message };
       this.records.push({ name, input, ok: false, result });
       return { content: JSON.stringify(result), isError: true };
@@ -212,10 +217,18 @@ export class SetterToolbox {
         // Solo los usa el motor de reglas al mover la llamada (“una hora más tarde”, “un poco antes”).
         const instant = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v) : undefined);
         const shift = { after: instant(input.later_than), before: instant(input.earlier_than) };
-        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2, ...shift });
+        // Días que el lead ha dicho que no puede (o cuyos horarios acaba de rechazar): no se le vuelven a ofrecer, la
+        // pida la IA o el motor de reglas (este los pasa también en `exclude_dates`).
+        const excludeDates = [...(this.policy?.directive.slotQuery?.excludeDates ?? []), ...(Array.isArray(input.exclude_dates) ? input.exclude_dates : [])].filter(
+          (d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d),
+        );
+        // Hora concreta que pide el lead (“a las 10”): primero los huecos más cercanos a ella.
+        const nearRaw = typeof input.near_time === 'string' ? input.near_time : this.policy?.directive.slotQuery?.time;
+        const nearTime = nearRaw && /^\d{1,2}:\d{2}$/.test(nearRaw) ? nearRaw : undefined;
+        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2, ...shift, excludeDates, nearTime });
         let note: string | undefined;
         if (offered.length === 0 && date) {
-          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2, ...shift }));
+          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2, ...shift, excludeDates, nearTime }));
           note = 'No hay huecos ese día; estas son las alternativas más cercanas.';
         }
         if (offered.length === 0) return { slots: [], note: 'No hay huecos libres en los próximos días. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios.' };
@@ -250,7 +263,7 @@ export class SetterToolbox {
         if (this.biz.calendarProvider === 'calendly') {
           if (!slot.bookingUrl) throw new AppError(400, 'no_link', 'No hay enlace de reserva para ese horario.');
           this.bookingUrl = slot.bookingUrl;
-          this.linkLabel = humanSlotLabel(slot.start, business.timezone);
+          this.linkLabel = humanSlotLabel(slot.start, business.timezone, new Date(), this.leadTime());
           return { mode: 'link', label: this.linkLabel, booking_url: slot.bookingUrl, instructions: 'Envía este enlace al lead para que confirme la reserva en un clic. Aún NO está confirmada.' };
         }
         const appt = await bookAppointment({
@@ -264,7 +277,7 @@ export class SetterToolbox {
         });
         this.booked = appt;
         await updateConversationState(business.id, this.conversation.id, { offeredSlots: [], lastOfferIds: [], callAccepted: true });
-        return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone), meeting_url: appt.meetingUrl ?? null };
+        return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone, new Date(), this.leadTime()), meeting_url: appt.meetingUrl ?? null };
       }
       case 'reschedule_call': {
         const already = this.existingBooking();
@@ -275,13 +288,13 @@ export class SetterToolbox {
         if (!slot) throw new AppError(400, 'slot_not_offered', 'Ese slot_id no se ha ofrecido. Consulta get_available_slots primero.');
         if (this.biz.calendarProvider === 'calendly') {
           this.bookingUrl = slot.bookingUrl ?? null;
-          this.linkLabel = humanSlotLabel(slot.start, business.timezone);
+          this.linkLabel = humanSlotLabel(slot.start, business.timezone, new Date(), this.leadTime());
           return { mode: 'link', label: this.linkLabel, booking_url: slot.bookingUrl, instructions: 'Envíale el enlace para reservar el nuevo horario y dile que puede cancelar la anterior desde el email de Calendly.' };
         }
         const appt = await rescheduleAppointment(business.id, upcoming.id, new Date(slot.start), { type: 'kai' }, 'kai');
         this.booked = appt;
         await updateConversationState(business.id, this.conversation.id, { offeredSlots: [], lastOfferIds: [] });
-        return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone), meeting_url: appt.meetingUrl ?? null };
+        return { ok: true, confirmed: true, label: humanSlotLabel(appt.startsAt, business.timezone, new Date(), this.leadTime()), meeting_url: appt.meetingUrl ?? null };
       }
       case 'cancel_call': {
         if (this.cancelled) return { ok: true, cancelled: true, already_cancelled: true };
@@ -306,12 +319,18 @@ export class SetterToolbox {
   private existingBooking(): Record<string, unknown> | null {
     const tz = this.biz.business.timezone;
     if (this.booked) {
-      return { ok: true, confirmed: true, already_booked: true, label: humanSlotLabel(this.booked.startsAt, tz), meeting_url: this.booked.meetingUrl ?? null };
+      return { ok: true, confirmed: true, already_booked: true, label: humanSlotLabel(this.booked.startsAt, tz, new Date(), this.leadTime()), meeting_url: this.booked.meetingUrl ?? null };
     }
     if (this.bookingUrl && this.linkLabel) {
       return { mode: 'link', already_sent: true, label: this.linkLabel, booking_url: this.bookingUrl, instructions: 'Ya tienes el enlace de reserva de este turno: envíaselo al lead. Aún NO está confirmada.' };
     }
     return null;
+  }
+
+  /** Etiquetas de horarios que lee el lead: si escribe desde otro país, también con su hora (ver humanSlotLabel). */
+  private leadTime(): { leadPhone: string | null } {
+    const lead = this.leadCtx.lead;
+    return { leadPhone: lead.whatsappId ?? lead.phone };
   }
 
   private findOffered(id: string): OfferedSlot | null {

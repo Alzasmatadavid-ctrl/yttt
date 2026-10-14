@@ -94,7 +94,27 @@ function defaultHandoffMessage(reason: HandoffReason, trainer: string, biz: Busi
   }
 }
 
-export function buildValidationContext(biz: BusinessContext, toolbox: SetterToolbox | null, opts: { isFollowUp?: boolean } = {}): ValidationContext {
+/**
+ * Lo que ha contado el lead (sus mensajes, su cualificación, su memoria y su objetivo): KAI puede repetir sus cifras
+ * (“esos 10 kilos”) sin que cuenten como inventadas.
+ */
+function leadTextFor(leadCtx: LeadContext, convCtx?: ConversationContext): string {
+  const inbound = convCtx ? [...convCtx.history, ...convCtx.pendingInbound].filter((m) => m.direction === 'inbound').map((m) => m.content) : [];
+  return [
+    ...inbound,
+    ...Object.values(leadCtx.lead.qualification).map((v) => v?.value ?? ''),
+    ...leadCtx.memories.map((m) => m.content),
+    leadCtx.lead.goalSummary ?? '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function buildValidationContext(
+  biz: BusinessContext,
+  toolbox: SetterToolbox | null,
+  opts: { isFollowUp?: boolean; leadCtx?: LeadContext; convCtx?: ConversationContext } = {},
+): ValidationContext {
   const t = biz.trainer;
   return {
     tone: biz.settings.tone,
@@ -115,6 +135,8 @@ export function buildValidationContext(biz: BusinessContext, toolbox: SetterTool
       ...biz.services.map((s) => `${s.name} ${s.description} ${s.includes.join(' ')}${s.durationWeeks ? ` ${s.durationWeeks} semanas` : ''}`),
       `${biz.settings.callLabel} de ${biz.settings.callDurationMinutes} minutos ${biz.settings.callDescription}`,
     ].join('\n'),
+    // Con lo que ha dicho el lead, el control también comprueba cualquier cifra de kilos o % (no solo las de autoridad).
+    ...(opts.leadCtx ? { leadText: leadTextFor(opts.leadCtx, opts.convCtx) } : {}),
     isFollowUp: opts.isFollowUp,
     assistantName: biz.settings.assistantName,
     now: new Date(),
@@ -131,7 +153,9 @@ export function factsSummary(biz: BusinessContext, leadCtx: LeadContext, toolbox
   const trainer = t.displayName || 'el entrenador';
   const tz = biz.business.timezone;
   const now = new Date();
-  const times = toolbox?.allowedTimes().map((d) => humanSlotLabel(d, tz, now)).join(', ') || '(ninguno)';
+  // Con la hora del lead si escribe desde otro país: KAI puede dársela (“en México, a las 10:00”) y no es inventada.
+  const leadPhone = leadCtx.lead.whatsappId ?? leadCtx.lead.phone;
+  const times = toolbox?.allowedTimes().map((d) => humanSlotLabel(d, tz, now, { leadPhone })).join(', ') || '(ninguno)';
   return [
     `Entrenador: ${trainer}. Especialidad: ${t.specialty || '(no especificada)'}. Método: ${t.methodName || '(sin nombre)'}${t.methodDescription ? ` — ${t.methodDescription}` : ''}`,
     `Asistente: ${s.assistantName || 'KAI'}, el asistente virtual ${s.persona === 'trainer' ? `que escribe en nombre de ${trainer}` : `del equipo de ${trainer}`}`,
@@ -151,9 +175,9 @@ export function factsSummary(biz: BusinessContext, leadCtx: LeadContext, toolbox
 const JUDGE_UNAVAILABLE = 'El control de calidad con IA no respondió.';
 
 /**
- * Pasa el borrador por el juez con IA. judgeReply da por bueno el borrador si la llamada falla, así que aquí se vigila
- * la llamada: si no responde (error de la API o respuesta que no cumple el formato), se reintenta una vez y, si sigue
- * fallando, devuelve null (el borrador NO queda aprobado).
+ * Pasa el borrador por el juez con IA. Si judgeReply no obtiene veredicto lo marca como `unavailable` (y no lo bloquea);
+ * además aquí se vigila la llamada: si no responde (error de la API o respuesta que no cumple el formato), se reintenta
+ * una vez y, si sigue fallando, devuelve null (el borrador NO queda aprobado).
  */
 async function judgeWithRetry(provider: LLMProvider, businessId: string, input: Parameters<typeof judgeReply>[1]): Promise<ValidationResult | null> {
   let lastError: unknown = null;
@@ -177,7 +201,7 @@ async function judgeWithRetry(provider: LLMProvider, businessId: string, input: 
       },
     };
     const result = await judgeReply(watched, input);
-    if (!failed) return result;
+    if (!failed && !result.unavailable) return result;
   }
   await logError('ai.setter.judge', lastError ?? new Error(JUDGE_UNAVAILABLE), {}, businessId, 'warn');
   return null;
@@ -233,7 +257,7 @@ export async function generateValidatedMessage(input: {
       await logError('ai.setter.generate', err, { attempt, directive: input.directive.kind }, input.biz.business.id, 'warn');
       continue;
     }
-    const vctx = buildValidationContext(input.biz, input.toolbox, { isFollowUp: input.mode === 'follow_up' });
+    const vctx = buildValidationContext(input.biz, input.toolbox, { isFollowUp: input.mode === 'follow_up', leadCtx: input.leadCtx, convCtx: input.convCtx });
     vctx.previousMessages = input.convCtx.history
       .filter((m) => m.direction === 'outbound')
       .slice(-4)
@@ -409,6 +433,12 @@ export async function runSetterReply(businessId: string, conversationId: string,
     // (si responde “no, déjala”, la llamada sigue en pie y no debe constar como rechazada).
     if (analysis.flags.declinesCall && !leadCtx.upcomingAppointment) statePatch.callDeclinedAt = new Date().toISOString();
     else if (analysis.flags.wantsCall && (conv.state as SetterState).callDeclinedAt) statePatch.callDeclinedAt = undefined;
+    // Desiste de mover la llamada (“mejor la dejamos como estaba”): la oferta de horarios para moverla ya no vale. Así
+    // un “vale” o “la primera” posterior no la mueve a un horario que acaba de descartar.
+    if (analysis.keepsAppointment && leadCtx.upcomingAppointment) {
+      statePatch.lastOfferIds = [];
+      statePatch.offeredAt = undefined;
+    }
     conv.state = await updateConversationState(businessId, conversationId, statePatch);
     leadCtx = await loadLeadContext(businessId, lead.id);
   }

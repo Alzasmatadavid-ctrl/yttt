@@ -21,6 +21,7 @@ import {
   renderMessageTemplate,
 } from '../automation/messages.js';
 import {
+  appointmentWillNotify,
   bookAppointment,
   cancelAppointment,
   getAppointment,
@@ -92,7 +93,8 @@ export async function calendarRoutes(app: FastifyInstance) {
       bookedBy: 'human',
       actor: { type: 'user', userId: ctx.userId },
     });
-    return { appointment };
+    // La Agenda avisa al entrenador si KAI no le va a enviar al lead la confirmación ni los recordatorios.
+    return { appointment, willNotify: await appointmentWillNotify(ctx.businessId, body.leadId) };
   });
 
   app.get('/agenda/appointments/:id', async (request) => {

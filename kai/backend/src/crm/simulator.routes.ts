@@ -101,7 +101,8 @@ export async function simulatorRoutes(app: FastifyInstance) {
     const [job] = await db.select().from(scheduledJobs).where(eq(scheduledJobs.id, fu.jobId!)).limit(1);
     if (!job || job.status !== 'pending') throw badRequest('El seguimiento ya no está pendiente.');
     await db.update(scheduledJobs).set({ status: 'running', attempts: job.attempts + 1, lockedAt: new Date() }).where(eq(scheduledJobs.id, job.id));
-    await runJob({ ...job, attempts: job.attempts + 1 });
+    // forceNow: en el simulador se envía ya, aunque sea horario de descanso (un lead real lo recibiría al terminar).
+    await runJob({ ...job, attempts: job.attempts + 1, payload: { ...job.payload, forceNow: true } });
     return { ok: true };
   });
 

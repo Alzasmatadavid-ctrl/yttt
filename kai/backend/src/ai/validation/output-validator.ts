@@ -55,6 +55,8 @@ export interface ValidationContext {
 export interface ValidationResult {
   ok: boolean;
   issues: string[];
+  /** Solo el juez con IA: no respondió (error de la API o formato no válido), así que el borrador NO se ha revisado. */
+  unavailable?: boolean;
 }
 
 const RX_MARKDOWN = /\*\*|__|^#{1,6}\s|^\s*[-*•]\s+\S|^\s*\d+[.)]\s+\S/m;
@@ -741,7 +743,8 @@ En "issues" explica brevemente en español qué corregir (vacío si todo está b
     const ok = verdict.responds_to_last_message && verdict.sounds_human && !verdict.invents_information && !verdict.pressures_lead && !verdict.breaks_business_rules;
     return { ok, issues: ok ? [] : issues };
   } catch {
-    // Si el juez falla, no bloqueamos: la capa determinista ya ha pasado.
-    return { ok: true, issues: [] };
+    // Si el juez falla, no bloquea por sí mismo (la capa determinista ya ha pasado), pero lo dice: quien lo llama
+    // decide si eso basta (el setter no envía un borrador sin revisar; ver judgeWithRetry).
+    return { ok: true, issues: [], unavailable: true };
   }
 }

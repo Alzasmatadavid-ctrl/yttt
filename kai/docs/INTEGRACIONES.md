@@ -112,6 +112,8 @@ Si lo prefieres, haz tú los pasos de 2.4 a 2.6 junto con el entrenador (él ten
 
 Ejemplo de plantilla de recordatorio: *“Hola {{1}}, te recuerdo tu llamada de valoración el {{2}}. Si necesitas cambiarla, respóndeme por aquí.”*
 
+Si KAI no sabe el nombre del lead (formularios que no lo piden, contactos de WhatsApp sin nombre de perfil), `{{1}}` recibe un 👋: el lead lee *“Hola 👋, te recuerdo…”*.
+
 Si falta una plantilla y la ventana está cerrada, KAI **no envía nada** y te deja un aviso. Nunca se salta las reglas de WhatsApp.
 
 ### 2.5. Conectar Instagram (cada entrenador)
@@ -165,6 +167,10 @@ KAI consulta los huecos ocupados del calendario y crea el evento (con enlace de 
 
 **Integraciones → Calendario**, tarjeta **Google Calendar** → **Conectar Google Calendar**, y aceptar los permisos. A partir de ahí, KAI cruza su disponibilidad (**Agenda → Disponibilidad**) con los eventos que ya tenga en el calendario.
 
+Si el entrenador **mueve o borra en su Google Calendar** una llamada que agendó KAI, KAI lo detecta antes de enviar la confirmación o el siguiente recordatorio al lead: si se movió, actualiza la hora en KAI y los recordatorios salen con la nueva; si se borró, cancela también la cita en KAI y no envía nada. En los dos casos deja un aviso al entrenador (KAI no le escribe al lead para contárselo).
+
+Si Google Calendar deja de responder (permiso retirado, conexión caducada…), KAI no puede ofrecer horarios: avisa al entrenador con «Tu calendario no responde», pasa a su bandeja las conversaciones que piden una llamada y el aviso se cierra solo cuando el calendario vuelve a funcionar.
+
 ---
 
 ## 4. Calendly
@@ -175,6 +181,8 @@ Si el entrenador ya usa Calendly, KAI le ofrece los huecos reales de Calendly al
 2. En KAI → **Integraciones → Calendario**, tarjeta **Calendly**: pega el token, pulsa **Conectar Calendly** y, si tienes varios tipos de evento, elige cuál debe ofrecer KAI (por ejemplo “Llamada de valoración”).
 3. Para cambiar de cuenta o de tipo de evento, pulsa **Volver a conectar** o **Cambiar tipo de evento** y pega de nuevo el token. Si Calendly no lo acepta, no se cambia nada: sigue funcionando la conexión anterior.
 4. KAI crea automáticamente el webhook en Calendly. Necesita que KAI esté publicado (dirección pública) y un plan de Calendly que permita webhooks (Standard o superior). Si no se puede crear, la pantalla lo indica.
+
+KAI **solo registra las reservas del tipo de evento elegido** en el paso 2 (o las que se hagan desde un enlace que haya enviado KAI). Las sesiones, clases u otras citas que el entrenador tenga en Calendly no crean leads ni citas en KAI. Si el entrenador cancela desde KAI una llamada de Calendly, KAI también la cancela en Calendly (y Calendly avisa al lead por email); si no puede, deja un aviso para que la cancele él desde Calendly.
 
 > **Sin webhook, Calendly no le sirve a KAI.** KAI seguiría enviando tu enlace de reserva, pero no sabría cuándo alguien reserva o cancela: esas llamadas no aparecerían en la Agenda (y con Calendly conectado no se pueden apuntar a mano), los leads no recibirían confirmación ni recordatorios y el panel y Analítica no las contarían. Lo único que podrías hacer es pasar tú al lead a “Llamada agendada” desde su ficha. Mientras no tengas webhooks, **usa la agenda de KAI o Google Calendar**: pulsa **Desconectar** en la tarjeta de Calendly y KAI volverá a ofrecer los huecos de su propia agenda. Cuando lo soluciones, vuelve a conectar Calendly.
 

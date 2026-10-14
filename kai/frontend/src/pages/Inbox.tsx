@@ -67,6 +67,8 @@ function MessageList({ messages }: { messages: Message[] }) {
         lastDay = day;
         const failed = m.status === 'failed' || m.status === 'skipped';
         const who = m.senderType === 'kai' ? 'KAI' : m.senderType === 'human' ? 'Tú / equipo' : m.senderType === 'system' ? 'Sistema' : '';
+        // Reacción del lead a este mensaje en WhatsApp (👍, ❤️…): se guarda en el mensaje, no como un mensaje nuevo.
+        const reaction = (m.metadata?.reaction as { emoji?: unknown } | undefined)?.emoji;
         return (
           <Fragment key={m.id}>
             {showDay && <div className="day-sep">{dayLabel(m.createdAt)}</div>}
@@ -76,7 +78,10 @@ function MessageList({ messages }: { messages: Message[] }) {
                 {m.direction === 'outbound' && (m.senderType === 'kai' ? <Sparkles /> : <User />)}
                 {who && <span>{who}</span>}
                 <span>{timeOnly(m.createdAt)}</span>
-                {m.direction === 'outbound' && !failed && m.status !== 'sent' && <span>· {m.status === 'read' ? 'leído' : m.status === 'delivered' ? 'entregado' : m.status}</span>}
+                {m.direction === 'outbound' && !failed && m.status !== 'sent' && (
+                  <span>· {m.status === 'read' ? 'leído' : m.status === 'delivered' ? 'entregado' : m.status === 'queued' ? 'enviando…' : m.status}</span>
+                )}
+                {typeof reaction === 'string' && reaction && <span title="Reacción del lead">· reaccionó {reaction}</span>}
                 {failed && (
                   <span style={{ color: 'var(--danger)' }}>
                     · {m.status === 'skipped' ? 'no enviado' : 'error'}: {m.error}
@@ -128,7 +133,13 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
   const attended = useMutation({
     mutationFn: () => api.post<{ ok: boolean; changed: boolean }>(`/conversations/${conversationId}/handoff-attended`),
     onSuccess: (r) => {
-      toast(r.changed ? 'Marcado como atendido. KAI sigue en pausa en esta conversación hasta que se la devuelvas.' : 'Esta conversación ya estaba atendida.');
+      toast(
+        !r.changed
+          ? 'Esta conversación ya estaba atendida.'
+          : data?.lead.optedOut
+            ? 'Marcado como atendido. Sigue dado de baja y deja de salir en «Pendientes».'
+            : 'Marcado como atendido. KAI sigue en pausa en esta conversación hasta que se la devuelvas.',
+      );
       refreshAfterHandoff();
     },
     onError: (e) => toast(errorText(e), 'error'),
@@ -211,7 +222,8 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           </div>
         </div>
         {/* En pantallas estrechas el botón se queda solo con el icono (btn-label/btn-compact en layout.css); aria-label y title conservan el nombre. */}
-        {conv.aiEnabled && !conv.handoffActive ? (
+        {/* A un lead dado de baja no se le escribe: ni tomar el control ni devolvérselo a KAI tienen sentido. */}
+        {lead.optedOut ? null : conv.aiEnabled && !conv.handoffActive ? (
           <Button size="sm" icon={Hand} loading={takeOver.isPending} onClick={() => takeOver.mutate()} className="btn-compact" aria-label="Tomar el control" title="Tomar el control">
             <span className="btn-label">Tomar el control</span>
           </Button>
@@ -243,7 +255,7 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           </div>
         </div>
       )}
-      {!conv.handoffActive && !conv.aiEnabled && (
+      {!conv.handoffActive && !conv.aiEnabled && !lead.optedOut && (
         <div className="handoff-banner" style={{ background: 'var(--info-soft)' }}>
           <UserRound style={{ color: 'var(--info)' }} />
           <div className="grow">
@@ -298,7 +310,15 @@ function Thread({ conversationId, onBack, onTogglePanel, panelOpen }: { conversa
           <div className="grow">
             Este lead está dado de baja: no recibe mensajes de KAI ni del equipo. Si te pide que vuelvas a escribirle, puedes permitirlo desde su
             ficha, con «Volver a permitir mensajes».
+            {data.needsHumanReply && !conv.handoffActive && (
+              <div className="xs muted mt-4">Te ha vuelto a escribir. Si no hace falta hacer nada, márcalo como atendido: seguirá de baja y dejará de salir en «Pendientes».</div>
+            )}
           </div>
+          {data.needsHumanReply && !conv.handoffActive && (
+            <Button size="sm" icon={CheckCheck} loading={attended.isPending} onClick={() => attended.mutate()}>
+              Marcar como atendido
+            </Button>
+          )}
         </div>
       )}
       <MessageList messages={data.messages} />
