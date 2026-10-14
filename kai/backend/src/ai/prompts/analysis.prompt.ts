@@ -14,7 +14,10 @@ export function buildAnalysisSystemPrompt(input: AnalysisInput): string {
   const objections = biz.objections.map((o) => `- ${o.key}: “${o.label}” (ej.: ${o.triggers.slice(0, 3).join(', ')})`).join('\n');
   const latestIds = new Set(state.lastOfferIds ?? []);
   const offered =
-    (state.offeredSlots ?? []).map((s) => `- ${s.id}: ${humanSlotLabel(s.start, tz, now)}${latestIds.has(s.id) ? ' (última oferta)' : ''}`).join('\n') || '(ninguno)';
+    // Con un lead de otro país, también su hora local: puede elegir “a las 10” pensando en la suya.
+    (state.offeredSlots ?? [])
+      .map((s) => `- ${s.id}: ${humanSlotLabel(s.start, tz, now, { leadPhone: lead.whatsappId ?? lead.phone })}${latestIds.has(s.id) ? ' (última oferta)' : ''}`)
+      .join('\n') || '(ninguno)';
   const st = state as SetterState;
   const call = st.callDeclinedAt
     ? 'el lead RECHAZÓ la llamada antes: marca wants_call solo si ahora la pide de forma explícita (un “vale” o un “me interesa” sobre otra cosa no cuentan)'

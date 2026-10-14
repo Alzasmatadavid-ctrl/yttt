@@ -52,7 +52,16 @@ export interface Directive {
   slotId?: string;
   /** Consultar agenda en este turno. */
   needsSlots?: boolean;
-  slotQuery?: { date: string | null; partOfDay: 'morning' | 'afternoon' | 'evening' | 'any' };
+  slotQuery?: {
+    date: string | null;
+    partOfDay: 'morning' | 'afternoon' | 'evening' | 'any';
+    /** Días (YYYY-MM-DD) que no se le deben ofrecer: dice que no puede o acaba de rechazar los horarios de ese día. */
+    excludeDates?: string[];
+  };
+  /** offer_slots/reschedule: acaba de rechazar los horarios ofrecidos (“el lunes no puedo”): nada de “Genial” ni “Perfecto”. */
+  afterRejection?: boolean;
+  /** post_booking: desiste de mover la llamada o confirma la que tiene; sigue en pie y no se le ofrecen más horarios. */
+  keepsBooking?: boolean;
   answerQuestionFirst?: boolean;
   /** continue_without_call: el lead acaba de rechazar la llamada (se le confirma que no pasa nada) o ya lo hizo antes. */
   justDeclined?: boolean;
@@ -110,6 +119,53 @@ export function recentOffer(state: ConversationState, now: Date = new Date(), mi
   return ids
     .map((id) => (state.offeredSlots ?? []).find((s) => s.id === id))
     .filter((s): s is NonNullable<typeof s> => Boolean(s) && slotStillBookable(s!.start, now, minNoticeMinutes));
+}
+
+/** Fecha local (YYYY-MM-DD) de un instante en la zona del negocio. */
+const localDate = (instant: string | Date, tz: string) =>
+  (typeof instant === 'string' ? DateTime.fromISO(instant) : DateTime.fromJSDate(instant)).setZone(tz).toISODate();
+
+/**
+ * El día (y la hora o la franja, si las da) que menciona es el de la llamada que ya tiene (“Vale, el lunes” con la
+ * llamada el lunes, “¿me llamáis a las 18:00?” con la llamada a las 18:00): confirma la cita, no pide moverla.
+ */
+function sameAsBooked(analysis: LeadAnalysis, startsAt: Date, tz: string): boolean {
+  const booked = DateTime.fromJSDate(startsAt).setZone(tz);
+  if (!analysis.preferredDate && !analysis.preferredTime && !analysis.preferredPartOfDay) return false;
+  if (analysis.preferredDate && analysis.preferredDate !== booked.toISODate()) return false;
+  if (analysis.preferredPartOfDay && partOfDay(startsAt, tz) !== analysis.preferredPartOfDay) return false;
+  if (analysis.preferredTime) {
+    const [h, m] = analysis.preferredTime.split(':').map(Number);
+    // “a las 6” puede ser las 6:00 o las 18:00 (si no dice la franja).
+    const hourOk = h === booked.hour || (!analysis.preferredPartOfDay && h < 12 && h + 12 === booked.hour);
+    if (!hourOk || m !== booked.minute) return false;
+  }
+  return true;
+}
+
+/**
+ * Consulta de agenda según lo que pide, sin los días que ha descartado: el que dice que no puede (“el lunes no
+ * puedo”) o, si rechaza la oferta sin decir cuál (“ninguna me va bien”, “¿no tienes otro día?”), los de esa oferta.
+ */
+function slotQueryFor(analysis: LeadAnalysis | null, offer: { start: string }[], tz: string): NonNullable<Directive['slotQuery']> {
+  const excluded = new Set<string>();
+  if (analysis?.excludedDate) excluded.add(analysis.excludedDate);
+  if (analysis?.rejectsOffer && !analysis.excludedDate && !analysis.preferredDate) for (const s of offer) excluded.add(localDate(s.start, tz)!);
+  if (analysis?.preferredDate) excluded.delete(analysis.preferredDate);
+  return {
+    date: analysis?.preferredDate ?? null,
+    partOfDay: analysis?.preferredPartOfDay ?? 'any',
+    ...(excluded.size ? { excludeDates: [...excluded].sort() } : {}),
+  };
+}
+
+/** Instrucción adicional para la IA cuando el lead ha descartado días u horarios. */
+function exclusionNote(query: NonNullable<Directive['slotQuery']>, rejected: boolean, tz: string): string {
+  const days = (query.excludeDates ?? []).map((d) => DateTime.fromISO(d, { zone: tz }).setLocale('es').toFormat('cccc d'));
+  const parts: string[] = [];
+  if (rejected) parts.push('Acaba de decirte que los horarios que le ofreciste no le van: no empieces con “Genial” ni “Perfecto” (mejor algo como “Sin problema”) y no le repitas esos horarios.');
+  if (days.length) parts.push(`No le ofrezcas horarios del ${days.join(' ni del ')}: ha dicho que ese día no puede (o ya los descartó).`);
+  return parts.length ? ` ${parts.join(' ')}` : '';
 }
 
 function clarifyDirective(slots: { start: string; id: string }[], timezone: string, answerQuestionFirst: boolean, now: Date): Directive {
@@ -172,8 +228,20 @@ export function decideDirective(input: StrategyInput): Directive {
 
   // 2) Ya tiene una llamada agendada.
   if (leadCtx.upcomingAppointment) {
-    const when = humanSlotLabel(leadCtx.upcomingAppointment.startsAt, biz.business.timezone, now);
-    if (flags?.wantsCancel && !flags.wantsReschedule) {
+    const appt = leadCtx.upcomingAppointment;
+    const when = humanSlotLabel(appt.startsAt, biz.business.timezone, now);
+    // Da el día (u hora) de la llamada que ya tiene sin pedir cambiarla (“Vale, el lunes”): no es moverla.
+    const confirmsBooked = Boolean(analysis?.rescheduleImplicit) && sameAsBooked(analysis!, appt.startsAt, tz);
+    const apptDate = localDate(appt.startsAt, tz);
+    // Desiste de moverla (“mejor la dejamos como estaba”, “déjala como está”) o confirma la que tiene: la llamada sigue
+    // en pie y no se le repiten los horarios ofrecidos (si la oferta trae ese mismo día, se le pregunta cuál prefiere).
+    // Pedir cancelarla (“cancela la llamada del lunes”) nunca es mantenerla.
+    const keepsBooking =
+      !flags?.wantsCancel && (Boolean(analysis?.keepsAppointment) || (confirmsBooked && !offer.some((s) => localDate(s.start, tz) === apptDate)));
+    // Dice que el día de su llamada no puede (“el lunes no puedo hacer la llamada”): es moverla.
+    const cannotThatDay = Boolean(analysis?.excludedDate) && analysis?.excludedDate === apptDate;
+    const wantsReschedule = (Boolean(flags?.wantsReschedule) || cannotThatDay) && !keepsBooking && !confirmsBooked;
+    if (flags?.wantsCancel && !wantsReschedule) {
       return {
         kind: 'cancel_booking',
         instruction:
@@ -182,35 +250,45 @@ export function decideDirective(input: StrategyInput): Directive {
       };
     }
     // Dice que no quiere la llamada (sin pedir cancelarla ni moverla): se le pregunta antes de tocar nada.
-    if (flags?.declinesCall && !flags.wantsReschedule && !flags.wantsCancel) {
+    if (flags?.declinesCall && !wantsReschedule && !flags.wantsCancel && !keepsBooking) {
       return {
         kind: 'confirm_cancel',
         instruction: `El lead tiene la ${settings.callLabel} agendada (${when}) y dice que no quiere hacerla. NO la canceles todavía ni uses herramientas: respóndele con naturalidad y pregúntale, en UNA sola pregunta, si quiere que la canceles o prefiere moverla a otro día. Sin insistir ni presionar.`,
         answerQuestionFirst,
       };
     }
-    // Está eligiendo otra fecha para mover la llamada (ya se le ofrecieron horarios): nueva preferencia → consultar
-    // la agenda otra vez; si solo duda entre los ofrecidos → preguntarle cuál le viene mejor.
-    if (offer.length && !flags?.asksPrice) {
-      if (newPreference || (flags?.wantsReschedule && !offerFitsPreference)) {
+    if (keepsBooking && !flags?.asksPrice) {
+      return {
+        kind: 'post_booking',
+        keepsBooking: true,
+        instruction: `El lead mantiene la ${settings.callLabel} como estaba (${when}). Confírmale con naturalidad que sigue en pie ese día y a esa hora. No le ofrezcas otros horarios ni le preguntes cuál prefiere, y no uses herramientas de agenda.`,
+        answerQuestionFirst,
+      };
+    }
+    // Está eligiendo otra fecha para mover la llamada (ya se le ofrecieron horarios): nueva preferencia o rechazo de
+    // los ofrecidos (“el martes no puedo”, “ninguna me va bien”) → consultar la agenda otra vez; si solo duda entre los
+    // ofrecidos → preguntarle cuál le viene mejor. Si habla de otra cosa (“gracias”, otro tema), no se le repite la oferta.
+    if (offer.length && !flags?.asksPrice && analysis?.aboutSchedule !== false) {
+      if (newPreference || analysis?.rejectsOffer || (wantsReschedule && !offerFitsPreference)) {
+        const slotQuery = slotQueryFor(analysis, offer, tz);
         return {
           kind: 'reschedule',
           needsSlots: true,
-          slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
-          instruction:
-            'El lead está buscando otro horario para mover su llamada. Consulta get_available_slots con su preferencia y ofrécele 2 alternativas reales. Si elige una, usa reschedule_call.',
+          slotQuery,
+          ...(analysis?.rejectsOffer ? { afterRejection: true } : {}),
+          instruction: `El lead está buscando otro horario para mover su llamada. Consulta get_available_slots con su preferencia y ofrécele 2 alternativas reales. Si elige una, usa reschedule_call.${exclusionNote(slotQuery, Boolean(analysis?.rejectsOffer), tz)}`,
           answerQuestionFirst,
         };
       }
       return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
     }
-    if (flags?.wantsReschedule || flags?.wantsCancel) {
+    if (wantsReschedule || flags?.wantsCancel) {
+      const slotQuery = slotQueryFor(analysis, [], tz);
       return {
         kind: 'reschedule',
         needsSlots: true,
-        slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
-        instruction:
-          'El lead quiere mover (o no puede asistir a) su llamada. Sin dramas: consulta huecos con get_available_slots y ofrécele 2 alternativas para reprogramar (si pide otro día sin decir cuál, que no sean del mismo día de su llamada). Si elige una, usa reschedule_call. Solo usa cancel_call si pide cancelar explícitamente y no quiere otra hora.',
+        slotQuery,
+        instruction: `El lead quiere mover (o no puede asistir a) su llamada. Sin dramas: consulta huecos con get_available_slots y ofrécele 2 alternativas para reprogramar (si pide otro día sin decir cuál, que no sean del mismo día de su llamada). Si elige una, usa reschedule_call. Solo usa cancel_call si pide cancelar explícitamente y no quiere otra hora.${exclusionNote(slotQuery, false, tz)}`,
         answerQuestionFirst,
       };
     }
@@ -287,14 +365,19 @@ export function decideDirective(input: StrategyInput): Directive {
     };
   }
 
-  // 6) Quiere la llamada / propone día → consultar agenda real (o aclarar la oferta reciente).
-  if (flags?.wantsCall && !flags.declinesCall) {
-    if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
+  // 6) Quiere la llamada / propone día → consultar agenda real (o aclarar la oferta reciente). Si rechaza los horarios
+  // que se le acaban de ofrecer (“el lunes no puedo”, “ninguna me va bien”), sigue queriendo la llamada: otros horarios,
+  // nunca los mismos (repetírselos sería un bucle).
+  const rejectsOffer = Boolean(analysis?.rejectsOffer) && offer.length > 0 && !callDeclined;
+  if ((flags?.wantsCall || rejectsOffer) && !flags?.declinesCall) {
+    if (offer.length && !newPreference && !rejectsOffer) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
+    const slotQuery = slotQueryFor(analysis, rejectsOffer ? offer : [], tz);
     return {
       kind: 'offer_slots',
       needsSlots: true,
-      slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
-      instruction: `El lead quiere agendar la ${settings.callLabel}. Llama a get_available_slots${analysis?.preferredDate ? ` con date=${analysis.preferredDate}` : ''}${analysis?.preferredPartOfDay ? ` y part_of_day=${analysis.preferredPartOfDay}` : ''} y ofrécele 2 opciones con las etiquetas EXACTAS que devuelva (p. ej. “Mañana tengo las 18:00 o las 19:30. ¿Cuál te viene mejor?”). Si no hay huecos ese día, ofrece las alternativas más cercanas. Nunca inventes horarios.`,
+      slotQuery,
+      ...(rejectsOffer ? { afterRejection: true } : {}),
+      instruction: `El lead quiere agendar la ${settings.callLabel}. Llama a get_available_slots${analysis?.preferredDate ? ` con date=${analysis.preferredDate}` : ''}${analysis?.preferredPartOfDay ? ` y part_of_day=${analysis.preferredPartOfDay}` : ''} y ofrécele 2 opciones con las etiquetas EXACTAS que devuelva (p. ej. “Mañana tengo las 18:00 o las 19:30. ¿Cuál te viene mejor?”). Si no hay huecos ese día, ofrece las alternativas más cercanas. Nunca inventes horarios.${exclusionNote(slotQuery, rejectsOffer, tz)}`,
       answerQuestionFirst,
     };
   }
@@ -339,12 +422,12 @@ export function decideDirective(input: StrategyInput): Directive {
     if (!nextRule) return keepTalking(answerQuestionFirst);
   } else if (readyForCall && state.callProposedAt) {
     if (offer.length && !newPreference) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now);
+    const slotQuery = slotQueryFor(analysis, [], tz);
     return {
       kind: 'offer_slots',
       needsSlots: true,
-      slotQuery: { date: analysis?.preferredDate ?? null, partOfDay: analysis?.preferredPartOfDay ?? 'any' },
-      instruction:
-        'Ya se le propuso la llamada. Si su mensaje es una aceptación o una duda sobre ella, consulta get_available_slots y ofrece 2 horarios reales. Si habla de otra cosa, respóndele primero con naturalidad.',
+      slotQuery,
+      instruction: `Ya se le propuso la llamada. Si su mensaje es una aceptación o una duda sobre ella, consulta get_available_slots y ofrece 2 horarios reales. Si habla de otra cosa, respóndele primero con naturalidad.${exclusionNote(slotQuery, false, tz)}`,
       answerQuestionFirst,
     };
   }

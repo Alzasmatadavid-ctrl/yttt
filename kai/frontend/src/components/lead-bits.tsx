@@ -1,5 +1,5 @@
 /* Piezas visuales de leads: etapa, temperatura, puntuación, origen y avatar. */
-import { createContext, useContext, type CSSProperties } from 'react';
+import { createContext, useContext, useState, type CSSProperties } from 'react';
 import { Flame, Snowflake, Sparkles, Thermometer, Globe, Webhook, PenLine, FlaskConical, Megaphone } from 'lucide-react';
 import { DEFAULT_SCORE_BANDS, leadSourceLabel, leadStatusLabel, temperatureLabel, type LeadSource, type LeadStatus, type LeadTemperature, type ChannelKey, type ScoreBand } from '@shared';
 import { initials } from '../lib/format';
@@ -123,9 +123,12 @@ export function SourceBadge({ source }: { source: LeadSource }) {
 }
 
 export function LeadAvatar({ name, url, size = 36, channel }: { name: string; url?: string | null; size?: number; channel?: LeadSource | ChannelKey }) {
+  // La foto de Instagram es un enlace de Meta que caduca: si no carga, se muestran las iniciales (y si cambia la
+  // foto, se vuelve a intentar con la nueva).
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   return (
     <span className="avatar" style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}>
-      {url ? <img src={url} alt="" referrerPolicy="no-referrer" /> : initials(name)}
+      {url && url !== brokenUrl ? <img src={url} alt="" referrerPolicy="no-referrer" onError={() => setBrokenUrl(url)} /> : initials(name)}
       {channel && (
         <span className="channel">
           <SourceIcon source={channel} size={11} />

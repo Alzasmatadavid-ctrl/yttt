@@ -7,7 +7,7 @@
  */
 import { env, isProduction, resolveAiMode, startupWarnings } from './config/env.js';
 import { closeDatabase, initDatabase } from './database/client.js';
-import { releaseLocalDbLock, writeLocalDbLock } from './database/local-lock.js';
+import { LocalDbInUseError, releaseLocalDbLock, writeLocalDbLock } from './database/local-lock.js';
 import { bootstrapData } from './database/bootstrap.js';
 import { buildApp } from './app.js';
 import { startWorker, stopWorker } from './automation/worker.js';
@@ -17,8 +17,18 @@ import { settleBackgroundTasks } from './lib/background.js';
 for (const warning of startupWarnings()) logger.warn('config.warning', { warning });
 // La base de datos local (PGlite, sin DATABASE_URL) no admite dos procesos a la vez: mientras KAI está arrancado
 // deja su número de proceso en «<carpeta>.lock» y «npm run db:seed» / «npm run db:migrate» se niegan a abrirla
-// (lo que escribieran no lo vería el servidor y se perdería al pararlo).
-const localDbLock = writeLocalDbLock();
+// (lo que escribieran no lo vería el servidor y se perdería al pararlo). Si ya hay otro KAI arrancado con esa base
+// de datos, este no la abre ni toca su candado.
+let localDbLock: string | null;
+try {
+  localDbLock = writeLocalDbLock();
+} catch (err) {
+  if (!(err instanceof LocalDbInUseError)) throw err;
+  console.error(`\n  ${err.message}\n`);
+  process.exit(1);
+}
+// Si el arranque falla después (p. ej. el puerto ya está ocupado), el candado no se queda con un proceso muerto.
+process.on('exit', () => releaseLocalDbLock(localDbLock));
 const handle = await initDatabase();
 await bootstrapData();
 const app = await buildApp({ logger: true });

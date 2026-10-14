@@ -25,16 +25,30 @@ let current: DbHandle | null = null;
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const MIGRATIONS_FOLDER = path.join(here, 'migrations');
 
+/**
+ * Conexión de PostgreSQL para `pg`. Con «sslmode=require» (lo que dan Neon y Supabase) o un host de Neon/Supabase,
+ * cifra sin verificar el certificado (Supabase lo firma con su propia CA). pg deja que lo que viene en la URL pise la
+ * opción `ssl` y trata «sslmode=require» como verify-full, así que hay que quitarlo de la URL. Si se pide verificar
+ * («verify-full», «verify-ca» o «sslrootcert=…») o «sslmode=disable», la URL se respeta tal cual.
+ */
+export function postgresConnection(url: string): { connectionString: string; ssl?: { rejectUnauthorized: false } } {
+  const q = url.indexOf('?');
+  const base = q === -1 ? url : url.slice(0, q);
+  const params = q === -1 ? [] : url.slice(q + 1).split('&').filter(Boolean);
+  const sslmode = params.find((p) => /^sslmode=/i.test(p))?.slice('sslmode='.length).toLowerCase();
+  if (sslmode === 'disable' || sslmode === 'verify-full' || sslmode === 'verify-ca' || params.some((p) => /^sslrootcert=/i.test(p)))
+    return { connectionString: url };
+  if (sslmode !== 'require' && !/neon\.tech|supabase\.co/.test(base)) return { connectionString: url };
+  const rest = params.filter((p) => !/^sslmode=/i.test(p));
+  return { connectionString: rest.length ? `${base}?${rest.join('&')}` : base, ssl: { rejectUnauthorized: false } };
+}
+
 export async function createDatabase(opts: { url?: string; memory?: boolean } = {}): Promise<DbHandle> {
   const url = opts.url ?? env.DATABASE_URL;
   if (url && !opts.memory) {
     const { Pool } = await import('pg');
     const { drizzle } = await import('drizzle-orm/node-postgres');
-    const pool = new Pool({
-      connectionString: url,
-      max: 10,
-      ssl: /sslmode=require|neon\.tech|supabase\.co/.test(url) ? { rejectUnauthorized: false } : undefined,
-    });
+    const pool = new Pool({ ...postgresConnection(url), max: 10 });
     const db = drizzle(pool, { schema }) as unknown as Database;
     return { db, driver: 'postgres', close: () => pool.end() };
   }

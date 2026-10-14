@@ -86,16 +86,29 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-KAI queda escuchando en el puerto 3000.
+Para `POSTGRES_PASSWORD` usa una contraseña larga; puedes generarla con `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. Si la escribes tú, evita el símbolo `$` (Docker lo interpreta como una variable).
+
+KAI queda escuchando en el puerto 3000 **solo dentro del servidor** (`127.0.0.1`). Para abrirlo a internet con HTTPS, instala en la misma máquina un proxy como [Caddy](https://caddyserver.com) y pon en su archivo `Caddyfile`:
+
+```
+app.tudominio.com {
+  reverse_proxy localhost:3000
+}
+```
+
+Caddy consigue el certificado HTTPS solo (el dominio tiene que apuntar ya a la IP del servidor). Con el proxy en la misma máquina no hace falta tocar `TRUST_PROXY`.
 
 Si ya tienes PostgreSQL en otro sitio y solo quieres la imagen de KAI (sin `docker compose`), añade `DATABASE_URL` a tu `.env` y arranca así:
 
 ```bash
 docker build -t kai .
-docker run -d -p 3000:3000 --env-file .env -e NODE_ENV=production -e SERVE_FRONTEND=true kai
+docker run -d -p 127.0.0.1:3000:3000 --env-file .env -e NODE_ENV=production -e SERVE_FRONTEND=true kai
 ```
 
-Los `-e` del final aseguran el modo producción y que se sirva la web aunque tu `.env` diga otra cosa (con `--env-file`, el `.env` tiene prioridad sobre los valores de la imagen). Pon delante un proxy con HTTPS (por ejemplo Caddy: `app.tudominio.com { reverse_proxy localhost:3000 }`). Con el proxy en la misma máquina no hace falta tocar `TRUST_PROXY`; evita que el puerto 3000 quede abierto a internet sin pasar por el proxy (cortafuegos).
+Los `-e` del final aseguran el modo producción y que se sirva la web aunque tu `.env` diga otra cosa (con `--env-file`, el `.env` tiene prioridad sobre los valores de la imagen). Pon delante el mismo proxy con HTTPS (Caddy, como arriba).
+
+- Publica el puerto siempre como `127.0.0.1:3000:3000`, nunca como `3000:3000`: Docker abre los puertos publicados por su cuenta, **por delante del cortafuegos** (UFW o firewalld no los bloquean), y KAI quedaría accesible en `http://IP:3000` sin HTTPS.
+- Si la contraseña de tu `DATABASE_URL` lleva símbolos (`# / : ? % @`), la dirección deja de ser válida y KAI no arranca. Quítala de la dirección (`postgres://usuario@host:5432/kai`) y ponla aparte en el `.env` como `PGPASSWORD=tu_contraseña`.
 
 ### Supabase como base de datos
 
@@ -112,7 +125,7 @@ Copia la *connection string* de **Project Settings → Database** (modo *Session
 - [ ] Entra con la cuenta de `ADMIN_EMAIL` y comprueba que ves el panel de **Administración**.
 - [ ] Copias de seguridad de la base de datos activadas (Railway, Neon y Supabase las incluyen).
 - [ ] App de Meta revisada y aprobada, y negocio verificado en Business Manager.
-- [ ] Pantalla de consentimiento de Google publicada (o entrenadores añadidos como usuarios de prueba).
+- [ ] Pantalla de consentimiento de Google publicada (*En producción*) y verificada por Google. En modo prueba la conexión de cada entrenador caduca a los 7 días ([INTEGRACIONES.md · 3](INTEGRACIONES.md#3-google-calendar)).
 - [ ] Política de privacidad y condiciones de uso completadas: KAI incluye una plantilla en `/privacidad` y `/terminos` (archivo `frontend/src/pages/Legal.tsx`). Sustituye los datos entre [corchetes] y revísala con un profesional.
 - [ ] **No** ejecutes `npm run db:seed` en producción (los datos demo son solo para tu ordenador). Si aun así lo haces, exige `npm run db:seed -- --force`, una `DEMO_PASSWORD` propia y un `DEMO_EMAIL` que no sea el de ninguna cuenta real.
 

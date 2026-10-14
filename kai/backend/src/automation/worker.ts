@@ -9,11 +9,11 @@
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { aiSettings, appointments, businesses, conversations, leads, trainers } from '../database/schema.js';
+import { aiSettings, appointments, businesses, conversations, followUps, leads, trainers } from '../database/schema.js';
 import { CALL_STATUSES, CLOSED_STATUSES } from '../lib/domain.js';
 import { errorMessage } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import { addDays } from '../lib/time.js';
+import { addDays, isWithinQuietHours, shiftOutOfQuietHours } from '../lib/time.js';
 import { logError } from '../audit/audit.service.js';
 import { env } from '../config/env.js';
 import {
@@ -36,13 +36,26 @@ import { autopilotEnabled } from '../crm/conversations.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { appointmentMessageEnabled, getAutomation } from './reminders.js';
 import { configuredMessage, confirmationText, noShowText, reminderTemplateParams, reminderText } from './messages.js';
-import { requestOutcomeAlert } from '../calendar/calendar.service.js';
+import { requestOutcomeAlert, syncAppointmentWithCalendar } from '../calendar/calendar.service.js';
 import { rollupAnalyticsForAll } from '../analytics/analytics.service.js';
 import { purgeExpiredSessions } from '../auth/sessions.js';
 import { retryFailedLeadgenEvents } from '../webhooks/meta.webhook.js';
 import { DEFAULT_TONE } from '../lib/domain.js';
 
 type Handler = (job: Job) => Promise<void>;
+
+/**
+ * Horas de descanso al ENVIAR (al programar ya se evitan): un trabajo que se ejecuta tarde (servidor caído o
+ * dormido, reintentos…) o un horario de descanso ampliado después no deben acabar en un mensaje de madrugada.
+ * Devuelve cuándo terminan si ahora es horario de descanso; null si se puede enviar ya.
+ */
+async function quietHoursEnd(businessId: string, quietHours?: { start: string; end: string }): Promise<Date | null> {
+  if (!quietHours) return null;
+  const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  const timezone = biz?.timezone ?? 'Europe/Madrid';
+  const now = new Date();
+  return isWithinQuietHours(now, timezone, quietHours) ? shiftOutOfQuietHours(now, timezone, quietHours) : null;
+}
 
 /**
  * Márgenes para no enviar recordatorios a destiempo cuando el trabajo se ejecuta tarde
@@ -135,6 +148,14 @@ const handlers: Record<string, Handler> = {
     const steps = automation.config.steps ?? [];
     const step = steps[fu.step - 1];
     if (!step) return markFollowUp(fu.id, 'cancelled', { note: 'Paso no configurado' });
+    // Horario de descanso: el mismo seguimiento se pasa a cuando termine (sin redactarlo ahora).
+    const deferTo = await quietHoursEnd(businessId, automation.config.quietHours);
+    if (deferTo) {
+      const next = await scheduleJob({ businessId, type: 'followup', runAt: deferTo, payload: job.payload, dedupeKey: `followup:${fu.id}` });
+      await getDb().update(followUps).set({ scheduledFor: deferTo, jobId: next.id }).where(eq(followUps.id, fu.id));
+      logger.info('followup.quiet_hours', { followUpId: fu.id, deferTo: deferTo.toISOString() });
+      return;
+    }
     const hoursSilent = (Date.now() - (lead.lastOutboundAt ?? fu.createdAt).getTime()) / 3_600_000;
     const composed = await composeFollowUp(businessId, fu.conversationId, { step: fu.step, totalSteps: steps.length, angle: step.angle, hoursSilent });
     // Cuenta desactivada o límite de mensajes agotado: no es un fallo de calidad, simplemente no se envía.
@@ -170,6 +191,8 @@ const handlers: Record<string, Handler> = {
       logger.info('appointment_confirmation.disabled', { appointmentId: ctx.appointment.id });
       return;
     }
+    // Borrada o movida en Google Calendar: no se confirma la hora antigua (si se movió, se reprograma con la nueva).
+    if ((await syncAppointmentWithCalendar(businessId, ctx.appointment)) !== 'unchanged') return;
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
@@ -200,6 +223,8 @@ const handlers: Record<string, Handler> = {
       logger.info('appointment_reminder.disabled', { appointmentId, kind });
       return;
     }
+    // Borrada o movida en Google Calendar: no se recuerda la hora antigua (si se movió, ya hay recordatorios nuevos).
+    if ((await syncAppointmentWithCalendar(businessId, ctx.appointment)) !== 'unchanged') return;
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,
@@ -224,6 +249,8 @@ const handlers: Record<string, Handler> = {
     if (!ctx) return;
     const post = await getAutomation(businessId, 'post_call');
     if (post?.enabled === false) return; // desactivado después de reservar
+    // Borrada en Google Calendar: no hay resultado que pedir. Movida: el aviso se pedirá tras la nueva hora.
+    if ((await syncAppointmentWithCalendar(businessId, ctx.appointment)) !== 'unchanged') return;
     await requestOutcomeAlert(businessId, ctx.appointment, ctx.lead.name);
   },
 
@@ -245,6 +272,12 @@ const handlers: Record<string, Handler> = {
     }
     const recovery = await getAutomation(businessId, 'no_show_recovery');
     if (recovery && !recovery.enabled) return; // se desactivó después de marcar el no-show
+    const deferTo = await quietHoursEnd(businessId, recovery?.config.quietHours);
+    if (deferTo) {
+      await scheduleJob({ businessId, type: 'no_show_message', runAt: deferTo, payload: job.payload, dedupeKey: `appt:${ctx.appointment.id}:noshow` });
+      logger.info('no_show_message.quiet_hours', { appointmentId: ctx.appointment.id, deferTo: deferTo.toISOString() });
+      return;
+    }
     const sent = await sendMessage({
       businessId,
       conversationId: ctx.conversationId,

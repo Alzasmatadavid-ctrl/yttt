@@ -45,7 +45,10 @@ export interface LeadAnalysis {
   engine: 'llm' | 'heuristic';
   /** Hora concreta que pide (“a las 9 de la mañana” → "09:00"); solo la heurística. */
   preferredTime?: string | null;
-  /** Pide moverla solo porque da un día u hora (“mejor el miércoles”, “Vale, el lunes”), sin decir que quiere cambiarla. */
+  /**
+   * Pide moverla solo porque da un día u hora (“Vale, el lunes”, “¿me podéis llamar a las 9?”), sin decir que la quiere
+   * cambiar ni que lo prefiere (“mejor el miércoles” no lo es): la estrategia comprueba que no sea el de la cita.
+   */
   rescheduleImplicit?: boolean;
   /** Día que dice que NO puede (“el lunes no puedo”): nunca es su preferencia. */
   excludedDate?: string | null;
@@ -179,13 +182,16 @@ export async function analyzeWithLLM(provider: LLMProvider, input: AnalysisInput
   analysis.flags.humanRequest ||= safety.flags.humanRequest;
   analysis.flags.asksIfBot ||= safety.flags.asksIfBot;
   // Ya es cliente (escribe desde otro número o canal): es para el entrenador, no para el embudo de venta.
-  analysis.flags.outOfScope ||= RX_EXISTING_CLIENT.test(n);
+  analysis.flags.outOfScope ||= isExistingClient(n, input.biz.trainer.displayName);
   // Horarios: un día que dice que no puede nunca es su preferencia, y rechazar la oferta o desistir de mover la
   // llamada son frases muy concretas. Sin esto, KAI repetiría los mismos horarios en bucle.
   analysis.excludedDate = safety.excludedDate;
   if (analysis.preferredDate && analysis.preferredDate === safety.excludedDate) analysis.preferredDate = null;
   analysis.rejectsOffer = Boolean(safety.rejectsOffer) && !analysis.selectedSlotId;
   analysis.keepsAppointment = safety.keepsAppointment;
+  // Si solo da un día u hora (“Vale, el lunes”), la estrategia comprueba que no sea el de la llamada que ya tiene.
+  analysis.preferredTime = safety.preferredTime;
+  analysis.rescheduleImplicit = Boolean(safety.rescheduleImplicit) && analysis.flags.wantsReschedule;
   analysis.aboutSchedule =
     Boolean(safety.aboutSchedule || analysis.selectedSlotId || analysis.preferredDate || analysis.preferredPartOfDay || analysis.flags.wantsReschedule) &&
     !safety.keepsAppointment;
@@ -268,7 +274,11 @@ const RX_NOT_A_NEGATION = /\bno (?:hay|tengo) (?:ningun )?problema\b|\bno pasa n
  * podéis llamar a las 9?”, “llámame el martes”, “¿y si la hacemos el jueves?”).
  */
 const RX_SCHEDULE_PREFERENCE =
-  /\b(?:mejor|prefiero|preferiria|puede ser|podria ser|podemos|podriamos|si puede ser|seria posible|en vez de|en lugar de|me (?:iria|vendria|va|viene|encaja|cuadra|pilla) mejor)\b|\b(?:me )?(?:podeis|puedes|podrias|podriais|puede|podria) llamar(?:me)?\b|\b(?:llamame|llamadme|llameme)\b|\by si la (?:hacemos|hago|dejamos|ponemos|pasamos)\b/;
+  /\b(?:mejor|prefiero|preferiria|puede ser|podria ser|podemos|podriamos|si puede ser|seria posible|en vez de|en lugar de|me (?:iria|vendria|va|viene|encaja|cuadra|pilla) mejor)\b|\b(?:me )?(?:podeis|puedes|podrias|podriais|puede|podria) llamar(?:me)?\b|\b(?:llamame|llamadme|llameme)\b|\by si (?:la |lo )?(?:hacemos|hago|dejamos|ponemos|pasamos|movemos|es|fuera)\b/;
+/** Dice que lo prefiere a lo que tiene (“mejor el miércoles”, “prefiero el jueves”, “en vez de…”): pide un cambio. */
+const RX_PREFERS_CHANGE = /\b(?:mejor|prefiero|preferiria|en vez de|en lugar de|otro|otra)\b/;
+/** Habla de la llamada (no de una cita con el médico): con un día u hora, y sin preguntar, es pedir ese horario. */
+const RX_CALL_WORD = /\b(?:llamada|videollamada|llamar(?:me|nos)?|llamame|llamadme)\b/;
 /** El mensaje es solo un día u hora (“El viernes”, “Mañana por la tarde”, “El jueves a las 18:00”). */
 const RX_ONLY_DAY =
   /^\s*(?:(?:pues|vale|ok|y|entonces|venga)[,.]?\s+)?(?:el |este |para el |para )?(?:hoy|manana|pasado manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)(?:\s+(?:por|de) la (?:manana|tarde|noche))?(?:\s+a las \d{1,2}(?:[:.]\d{2})?)?\s*[.!?]*\s*$/;
@@ -301,12 +311,12 @@ const RX_DAY_REJECTED = new RegExp(
 );
 /** Rechaza la oferta sin decir un día (“ninguna me va bien”, “¿no tienes otro día?”, “mejor otro día”). */
 const RX_OFFER_REJECTED =
-  /\b(?:ninguna|ninguno)\b(?! (?:duda|pregunta|problema))|\b(?:tienes|teneis|tendrias|tendriais|hay|habria|queda|quedan) (?:algun |alguna |algo )?(?:otro|otra|otros|otras|mas) (?:dia|dias|hora|horas|horario|horarios|hueco|huecos|opcion|opciones|fecha|fechas)\b|\b(?:mejor|prefiero|preferiria|puede ser|podria ser|seria|podemos|podriamos) (?:en )?(?:otro|otra) (?:dia|hora|horario|momento|fecha|semana)\b|\b(?:otro|otra) (?:dia|hora|horario|fecha) (?:mejor|si puede ser|porfa|por favor)\b|^\s*¿?\s*(?:y |o )?(?:otro|otra) (?:dia|hora|horario|fecha)\s*\?|\b(?:a|para) otro dia\b|\bno me (?:va|viene|encaja|cuadra|sirve|pilla) (?:bien )?(?:ninguna|ninguno|ese dia|esa hora|esas horas|ese horario|esos horarios)\b/;
+  /\b(?:ninguna|ninguno)\b(?! (?:duda|pregunta|problema|preferencia|pega|en especial|en concreto))|\b(?:tienes|teneis|tendrias|tendriais|hay|habria|queda|quedan) (?:algun |alguna |algo )?(?:otro|otra|otros|otras|mas) (?:dia|dias|hora|horas|horario|horarios|hueco|huecos|opcion|opciones|fecha|fechas)\b|\b(?:mejor|prefiero|preferiria|puede ser|podria ser|seria|podemos|podriamos) (?:en )?(?:otro|otra) (?:dia|hora|horario|momento|fecha|semana)\b|\b(?:otro|otra) (?:dia|hora|horario|fecha) (?:mejor|si puede ser|porfa|por favor)\b|^\s*¿?\s*(?:y |o )?(?:otro|otra) (?:dia|hora|horario|fecha)\s*\?|\b(?:a|para) otro dia\b|\bno me (?:va|viene|encaja|cuadra|sirve|pilla) (?:bien )?(?:ninguna|ninguno|ese dia|esa hora|esas horas|ese horario|esos horarios)\b/;
 /** No puede en lo que se le acaba de ofrecer (“no me viene bien”, “a esa hora no puedo”, “imposible”). */
 const RX_PLAIN_SLOT_NO = /\bno (?:puedo|podre|podria|voy a poder|me (?:va|viene|encaja|cuadra|sirve|pilla|vendria|iria)(?: bien)?)\b|\bimposible\b|\bme (?:va|viene|pilla) (?:fatal|mal)\b/;
 /** Desiste de mover la llamada (“mejor la dejamos como estaba”, “déjala como está”, “no hace falta moverla”). */
 const RX_KEEP_BOOKED =
-  /\b(?:la|lo) dejamos (?:como (?:esta|estaba|estaban|la teniamos|lo teniamos)|asi|igual|tal cual)\b|\bdejal[ao](?:\s*,?\s*(?:dejal[ao]|como (?:esta|estaba)|asi|igual|tal cual))*\s*(?:[,.!]|$)|\bdejal[ao] (?:como (?:esta|estaba)|asi|igual|tal cual)\b|\bmejor no (?:la|lo) (?:muevas|movemos|movais|cambies|cambiamos)\b|\bno (?:la|lo) (?:muevas|movais|cambies|cambieis|toques)\b|\bno hace falta (?:moverla|cambiarla|moverlo|cambiarlo|mover nada|cambiar nada)\b|\b(?:mantenemos|mantengo|me quedo con|mejor) (?:la de antes|la que (?:tenia|teniamos)|la (?:hora|cita|llamada) (?:de antes|que (?:tenia|teniamos))|el (?:dia|horario) (?:de antes|que (?:tenia|teniamos)))\b|\bal final (?:si )?(?:puedo|me (?:va|viene) bien)\b/;
+  /\b(?:la|lo) dejamos (?:como (?:esta|estaba|estaban|la teniamos|lo teniamos)|asi|igual|tal cual)\b|\bdejal[ao](?:\s*,?\s*(?:dejal[ao]|como (?:esta|estaba)|asi|igual|tal cual))*\s*(?:[,.!]|$)|\bdejal[ao] (?:como (?:esta|estaba)|asi|igual|tal cual)\b|\bmejor no (?:la|lo) (?:muevas|movemos|movais|cambies|cambiamos)\b|\bno (?:la|lo) (?:muevas|movais|cambies|cambieis|toques)\b|\bno hace falta (?:moverla|cambiarla|moverlo|cambiarlo|mover nada|cambiar nada)\b|\b(?:mantenemos|mantengo|me quedo con|mejor) (?:la de antes|la que (?:tenia|teniamos)|la (?:hora|cita|llamada) (?:de antes|que (?:tenia|teniamos))|el (?:dia|horario) (?:de antes|que (?:tenia|teniamos)))\b|\bal final (?:si )?(?:puedo(?: ir| asistir| hacerla| conectarme)?|me (?:va|viene) bien)\s*(?:[,.!]|$)/;
 /** Duda entre los horarios o los va a mirar (“no sé, déjame mirarlo”, “¿cuál me recomiendas?”, “esa”). */
 const RX_ABOUT_SLOTS =
   /\b(?:dejame (?:mirarlo|verlo|pensarlo|mirar|ver|pensar)|lo miro|lo reviso|lo pienso|ya te (?:digo|confirmo)|te (?:digo|confirmo) (?:algo|luego|ahora|en un rato|mas tarde)|no (?:lo )?se|cual|esa|ese|opcion|opciones|horario|horarios|hueco|huecos|hora|horas)\b/;
@@ -317,7 +327,14 @@ const RX_BARE_ACK = /^\s*(?:si|sip|vale|ok|okey|okay|venga|claro|bueno|de acuerd
  * el entrenador, no para el embudo. Solo frases inequívocas (no “si entreno contigo…” ni “mi rutina es sedentaria”).
  */
 const RX_EXISTING_CLIENT =
-  /\bya (?:soy|era) (?:tu |vuestr[oa] )?(?:cliente|alumn[oa])\b|\bsoy (?:tu|vuestr[oa]) (?:cliente|alumn[oa])\b|\bsoy cliente (?:tuy[oa]|vuestr[oa])\b|\bya entreno con(?:tigo| vosotros)\b|\b(?:llevo|estoy) (?:\S+ ){0,3}entrenando con(?:tigo| vosotros)\b|\bentreno con(?:tigo| vosotros) desde\b|\b(?:pasame|pasadme|me pasas|me pasais|mandame|mandadme|me mandas|me mandais|enviame|me envias|me puedes (?:pasar|mandar|enviar)) (?:mi (?:rutina|dieta|pauta|planificacion|plan|entreno|tabla)|la (?:rutina|dieta|pauta|planificacion|tabla) (?:de (?:esta|la) semana|de este mes|de hoy|de manana|nueva|actualizada)|el (?:plan|entreno) (?:de (?:esta|la) semana|de este mes|de hoy|de manana|nuevo|actualizado))\b/;
+  /\bya (?:soy|era) (?:tu |vuestr[oa] )?(?:cliente|alumn[oa])\b(?!\s+(?:de|del|en)\s+(?!ti\b|vosotros\b))|\bsoy (?:tu|vuestr[oa]) (?:cliente|alumn[oa])\b|\bsoy cliente (?:tuy[oa]|vuestr[oa])\b|\bya entreno con(?:tigo| vosotros)\b|\b(?:llevo|estoy) (?:\S+ ){0,3}entrenando con(?:tigo| vosotros)\b|\bentreno con(?:tigo| vosotros) desde\b|\b(?:pasame|pasadme|me pasas|me pasais|mandame|mandadme|me mandas|me mandais|enviame|me envias|me puedes (?:pasar|mandar|enviar)) (?:mi (?:rutina|dieta|pauta|planificacion|plan|entreno|tabla)|la (?:rutina|dieta|pauta|planificacion|tabla) (?:de (?:esta|la) semana|de este mes|de hoy|de manana|nueva|actualizada)|el (?:plan|entreno) (?:de (?:esta|la) semana|de este mes|de hoy|de manana|nuevo|actualizado))\b/;
+/** Ya es cliente: las frases de RX_EXISTING_CLIENT o “(ya) soy cliente de Álex” (con el nombre del entrenador). */
+function isExistingClient(n: string, trainerName: string): boolean {
+  if (RX_EXISTING_CLIENT.test(n)) return true;
+  const name = normalize(trainerName).split(' ')[0];
+  return Boolean(name && name.length >= 3) && new RegExp(`\\bsoy (?:cliente|alumn[oa]) de ${escapeRegExp(name)}\\b`).test(n);
+}
+
 /** No responde a la pregunta del objetivo: risas, disculpas, “no sé, la verdad”, “quería info”… */
 const RX_GOAL_FILLERS =
   /\b(?:(?:ja|je|ji)+|perdona|perdon|sorry|ok|okey|vale|ya|bueno|pues|nada(?: en (?:especial|concreto|particular))?|no (?:lo )?se|ni idea|no tengo ni idea|la verdad|hola|buenas|gracias|mm+|hm+|eh|ah|uf+|si|no|solo|queria|quiero|quisiera|pedir|mas|info|informacion|saber mas|que tal|lo que sea|cualquier cosa)\b/g;
@@ -532,7 +549,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // Muletillas, risas o “no sé, la verdad” no son un objetivo (la ficha lo mostraría como objetivo y como «Encaje: sí»).
   const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || (!aboutOtherKey && !isGoalNonAnswer(n));
   // Ya es cliente (escribe desde otro número o canal): su mensaje es para el entrenador y no se cualifica.
-  const existingClient = RX_EXISTING_CLIENT.test(n);
+  const existingClient = isExistingClient(n, input.biz.trainer.displayName);
   // Tampoco responde a la pregunta quien pide hablar con una persona («prefiero hablar con David directamente»),
   // pregunta si es un bot o habla de la llamada («no quiero hacer la llamada»): la ficha mostraría eso como su
   // objetivo (y, con él, «Encaje: sí»).
@@ -649,7 +666,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // estrategia lo usa si hay cita y comprueba que no sea el mismo día y hora que ya tiene: “Vale, el lunes”).
   const asksOtherTime =
     Boolean(preferredDate || preferredPartOfDay || RX_EXPLICIT_TIME.test(nPreference)) &&
-    (RX_SCHEDULE_PREFERENCE.test(nPreference) || RX_ONLY_DAY.test(nPreference)) &&
+    (RX_SCHEDULE_PREFERENCE.test(nPreference) || RX_ONLY_DAY.test(nPreference) || (RX_CALL_WORD.test(nPreference) && !n.includes('?'))) &&
     !RX_NOT_ABOUT_CALL.test(n);
   // Desiste de moverla (“mejor la dejamos como estaba”): no es pedir otro horario.
   const keepsAppointment = RX_KEEP_BOOKED.test(n);
@@ -670,9 +687,14 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   const lastAboutCall = lastDirective
     ? CALL_DIRECTIVES.has(lastDirective) || (lastDirective !== 'continue_without_call' && lastMentionsCall)
     : Boolean(input.state.callProposedAt) || lastMentionsCall;
-  // Un “no” corto a «¿te encaja la llamada?» es rechazarla (“No”, “No, gracias”, “Que no”, “Paso”).
+  // Un “no” corto a «¿te encaja la llamada?» es rechazarla (“No”, “No, gracias”, “Que no”, “Paso”). También tras el precio
+  // si el mensaje terminaba proponiéndola («¿Te gustaría verlo con Álex en una llamada…?»).
+  const lastQuestion = lastText.includes('?') ? lastText.slice(lastText.lastIndexOf('¿') + 1) : '';
+  const lastQuestionAboutCall = /llamada/.test(lastQuestion) || Boolean(callLabel && lastQuestion.includes(callLabel));
   const askedAboutCall =
-    ['propose_call', 'reassure_call'].includes(lastDirective) || (!lastDirective && lastMentionsCall && lastText.includes('?') && !offerIsLastMessage);
+    ['propose_call', 'reassure_call'].includes(lastDirective) ||
+    (lastDirective === 'share_price' && lastQuestionAboutCall) ||
+    (!lastDirective && lastMentionsCall && lastText.includes('?') && !offerIsLastMessage);
   const declinesAfterProposal = askedAboutCall && RX_SHORT_NO.test(n);
   // Pedir cancelar la llamada (“ya no quiero la cita”) también es no querer la llamada, nunca pedirla.
   const declinesCall = RX.declineCall.test(n) || wantsCancel || declinesAfterProposal;
@@ -763,7 +785,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     summary: 'Análisis heurístico (modo simulación).',
     engine: 'heuristic',
     preferredTime,
-    rescheduleImplicit: wantsReschedule && !explicitReschedule,
+    rescheduleImplicit: wantsReschedule && !explicitReschedule && !RX_PREFERS_CHANGE.test(nPreference),
     excludedDate,
     rejectsOffer,
     keepsAppointment,

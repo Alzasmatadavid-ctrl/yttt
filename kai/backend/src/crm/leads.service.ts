@@ -28,7 +28,8 @@ import { audit } from '../audit/audit.service.js';
 import { incrementUsage, checkUsageLimit } from '../plans/plans.service.js';
 import { bandMin, computeScore, requiredCaptured, temperatureFor } from './scoring.js';
 import { nextStatus, type PipelineEvent } from './pipeline.js';
-import { createAlert } from './alerts.service.js';
+import { createAlert, resolveAlertsFor } from './alerts.service.js';
+import { scheduleAppointmentJobs } from '../automation/reminders.js';
 import { countryCodeForTimezone, samePhoneNumber, toWhatsAppId } from '../integrations/channels/phone.js';
 
 export type Lead = typeof leads.$inferSelect;
@@ -553,13 +554,50 @@ export async function markOptedOut(businessId: string, leadId: string, actor: Ac
   await recordLeadEvent(businessId, leadId, 'opted_out', actor, meta);
 }
 
-/** Alta manual (el lead vuelve a aceptar mensajes). KAI sigue pausado hasta que el entrenador lo reactive. */
+/**
+ * Alta manual (el lead vuelve a aceptar mensajes). KAI sigue pausado hasta que el entrenador lo reactive.
+ * La baja canceló los recordatorios de sus llamadas: los de las que siguen en pie se vuelven a programar
+ * (sin repetir la confirmación; los que ya se enviaron no se repiten porque se comprueban antes de enviar).
+ */
 export async function markOptedIn(businessId: string, leadId: string, actor: Actor) {
-  await getDb()
+  const db = getDb();
+  await db
     .update(leads)
     .set({ optedOut: false, updatedAt: new Date() })
     .where(and(eq(leads.businessId, businessId), eq(leads.id, leadId)));
   await recordLeadEvent(businessId, leadId, 'opted_in', actor);
+  const upcoming = await db
+    .select({ id: appointments.id, startsAt: appointments.startsAt, endsAt: appointments.endsAt, leadId: appointments.leadId })
+    .from(appointments)
+    .where(and(eq(appointments.businessId, businessId), eq(appointments.leadId, leadId), eq(appointments.status, 'scheduled'), gte(appointments.startsAt, new Date())));
+  if (upcoming.length === 0) return;
+  for (const appt of upcoming) await scheduleAppointmentJobs(businessId, appt, { sendConfirmation: false, postCall: false });
+}
+
+/** Última vez que se registró la baja del lead (o que el equipo revisó lo que escribió después de pedirla). */
+export async function lastOptedOutAt(businessId: string, leadId: string): Promise<Date | null> {
+  const [row] = await getDb()
+    .select({ at: leadEvents.createdAt })
+    .from(leadEvents)
+    .where(and(eq(leadEvents.businessId, businessId), eq(leadEvents.leadId, leadId), eq(leadEvents.type, 'opted_out')))
+    .orderBy(desc(leadEvents.createdAt))
+    .limit(1);
+  return row?.at ?? null;
+}
+
+/**
+ * Un lead dado de baja escribió después de pedirla y el entrenador ya lo ha visto («Marcar como atendido» o descartar
+ * el aviso «Un lead dado de baja te ha vuelto a escribir»): sigue de baja, deja de salir en «Pendientes» y se cierra
+ * el aviso. Queda en la ficha como una baja confirmada por el equipo. Devuelve false si no había nada que atender.
+ */
+export async function acknowledgeOptedOutLeadMessages(businessId: string, leadId: string, actor: Actor): Promise<boolean> {
+  const lead = await getLead(businessId, leadId);
+  if (!lead.optedOut || !lead.lastInboundAt) return false;
+  const since = await lastOptedOutAt(businessId, leadId);
+  if (!since || lead.lastInboundAt <= since) return false;
+  await recordLeadEvent(businessId, leadId, 'opted_out', actor, { manual: true, acknowledged: true, reason: 'Mensajes revisados: sigue de baja' });
+  await resolveAlertsFor(businessId, { leadId, type: 'client_message' });
+  return true;
 }
 
 /** Cancela seguimientos y trabajos pendientes de un lead (cuando responde, se cierra o se borra). */

@@ -16,8 +16,8 @@ import { logError } from '../audit/audit.service.js';
 import { connectionCredentials, findConnectionByExternalId, getActiveConnection, touchConnection, type ChannelConnection } from '../integrations/connections.service.js';
 import { friendlyMetaCode, friendlyMetaError, graphRequest } from '../integrations/meta/graph.js';
 import { insertMessage, markHandoffAttended } from '../crm/conversations.service.js';
-import { createAlert } from '../crm/alerts.service.js';
-import { findExistingLead } from '../crm/leads.service.js';
+import { createAlert, resolveAlertsFor } from '../crm/alerts.service.js';
+import { cancelPendingAutomationsForLead, findExistingLead } from '../crm/leads.service.js';
 import { toWhatsAppId } from '../integrations/channels/phone.js';
 import { ingestExternalLead, receiveInboundMessage } from './inbound.service.js';
 
@@ -31,6 +31,8 @@ interface WaMessage {
   text?: { body: string };
   button?: { text: string };
   interactive?: { button_reply?: { title: string }; list_reply?: { title: string } };
+  /** Reacción a un mensaje (emoji vacío = la ha quitado). */
+  reaction?: { message_id: string; emoji?: string };
 }
 interface WaStatus {
   id: string;
@@ -93,6 +95,20 @@ function waText(m: WaMessage): { text: string; contentType: 'text' | 'media' | '
   return { text: `[${labels[m.type] ?? 'Mensaje no soportado'}]`, contentType: labels[m.type] ? 'media' : 'unsupported' };
 }
 
+/** Tipos de WhatsApp sin contenido del lead: avisos del sistema y apertura del chat sin mensaje. */
+const IGNORED_WA_TYPES = new Set(['system', 'request_welcome']);
+
+async function saveWhatsAppReaction(businessId: string, m: WaMessage) {
+  const target = m.reaction?.message_id;
+  if (!target) return;
+  const emoji = m.reaction?.emoji ?? '';
+  const reaction = emoji ? sql`jsonb_build_object('reaction', jsonb_build_object('emoji', ${emoji}::text, 'at', ${new Date(Number(m.timestamp) * 1000 || Date.now()).toISOString()}::text))` : null;
+  await getDb()
+    .update(messages)
+    .set({ metadata: reaction ? sql`${messages.metadata} || ${reaction}` : sql`${messages.metadata} - 'reaction'` })
+    .where(and(eq(messages.businessId, businessId), eq(messages.externalId, target)));
+}
+
 async function handleWhatsApp(value: WaValue): Promise<number> {
   const phoneNumberId = value.metadata?.phone_number_id;
   if (!phoneNumberId) return 0;
@@ -101,6 +117,13 @@ async function handleWhatsApp(value: WaValue): Promise<number> {
   await touchConnection(connection.id);
   let n = 0;
   for (const m of value.messages ?? []) {
+    // Reacciones (👍 a un mensaje de KAI…) y avisos del sistema (cambio de número…) no son mensajes del lead:
+    // no se contestan ni cuentan como respuesta. La reacción se guarda en el mensaje al que reacciona.
+    if (m.type === 'reaction') {
+      await saveWhatsAppReaction(connection.businessId, m);
+      continue;
+    }
+    if (IGNORED_WA_TYPES.has(m.type)) continue;
     const contact = value.contacts?.find((c) => c.wa_id === m.from);
     const { text, contentType } = waText(m);
     await receiveInboundMessage({
@@ -235,6 +258,13 @@ async function handleInstagramEcho(connection: ChannelConnection, ev: IgMessagin
     .where(and(eq(conversations.id, conv.id), stillHuman));
   // Si KAI había escalado la conversación, la respuesta del entrenador la deja atendida.
   await markHandoffAttended(connection.businessId, conv.id, { type: 'integration' }, stillHuman);
+  // Igual que al contestar desde KAI: se cierran los avisos «Tu cliente te ha escrito» / «contacto manual» y se
+  // cancelan los seguimientos por falta de respuesta. (Si al final era un envío de KAI, recordSentMessage reabre los avisos.)
+  const [row] = await db.select({ senderType: messages.senderType }).from(messages).where(eq(messages.id, echo.id)).limit(1);
+  if (row?.senderType !== 'human') return;
+  await cancelPendingAutomationsForLead(connection.businessId, lead.id, ['no_reply']);
+  await resolveAlertsFor(connection.businessId, { leadId: lead.id, type: 'client_message' });
+  await resolveAlertsFor(connection.businessId, { leadId: lead.id, type: 'new_lead_manual' });
 }
 
 // ───────────── Lead Ads ─────────────

@@ -128,6 +128,26 @@ export async function loadLeadContext(businessId: string, leadId: string): Promi
   return { lead, memories: memories.map((m) => ({ kind: m.kind, content: m.content })), upcomingAppointment: upcoming ?? null };
 }
 
+/**
+ * Mensajes del lead que llegaron mientras KAI enviaba su última respuesta y que, por su hora, quedan ANTES de ella
+ * (el canal los fecha antes, o entraron mientras se enviaba): esa respuesta no los tuvo en cuenta (no están entre los
+ * que contestaba, `metadata.repliesTo`). Se colocan justo después de la respuesta para que sigan pendientes y KAI
+ * los conteste en el turno siguiente, en vez de darlos por respondidos.
+ */
+export function withLateInboundLast(history: MessageRow[]): MessageRow[] {
+  let o = history.length - 1;
+  while (o >= 0 && history[o].direction === 'inbound') o--;
+  if (o < 0) return history;
+  const replied = history[o].metadata?.repliesTo;
+  if (!Array.isArray(replied) || replied.length === 0) return history;
+  const ids = new Set(replied.filter((x): x is string => typeof x === 'string'));
+  const first = history.findIndex((m) => ids.has(m.id));
+  if (first < 0 || first >= o) return history;
+  const late = history.slice(first + 1, o).filter((m) => m.direction === 'inbound' && !ids.has(m.id));
+  if (late.length === 0) return history;
+  return [...history.slice(0, o + 1).filter((m) => !late.includes(m)), ...late, ...history.slice(o + 1)];
+}
+
 export async function loadConversationContext(businessId: string, conversationId: string, historyLimit = 40): Promise<ConversationContext> {
   const db = getDb();
   const [conversation] = await db
@@ -142,7 +162,7 @@ export async function loadConversationContext(businessId: string, conversationId
     .where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)))
     .orderBy(desc(messages.createdAt))
     .limit(historyLimit);
-  const history = rows.reverse().filter((m) => m.status !== 'failed' && m.status !== 'skipped');
+  const history = withLateInboundLast(rows.reverse().filter((m) => m.status !== 'failed' && m.status !== 'skipped'));
   const pendingInbound: MessageRow[] = [];
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].direction === 'inbound') pendingInbound.unshift(history[i]);

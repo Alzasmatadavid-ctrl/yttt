@@ -16,8 +16,8 @@ export async function getAutomation(businessId: string, type: AutomationType): P
 
 /**
  * ¿Se envía este mensaje de la llamada? La automatización tiene que estar activada y su opción concreta
- * (confirmación, recordatorio de 24 h o de 1 h) sin desmarcar. Se usa al programar Y al enviar: si el
- * entrenador lo desactiva después de reservar, los trabajos ya programados tampoco se envían.
+ * (confirmación, recordatorio de 24 h o de 1 h) sin desmarcar. Se comprueba al enviar: si el entrenador lo
+ * desactiva después de reservar, los trabajos ya programados no se envían (y si lo reactiva, vuelven a enviarse).
  */
 export function appointmentMessageEnabled(
   automation: { enabled: boolean; config: AutomationConfig } | null,
@@ -28,6 +28,9 @@ export function appointmentMessageEnabled(
 
 /**
  * Programa confirmación, recordatorios (24 h y 1 h antes) y el aviso post-llamada de una cita.
+ * Los recordatorios y el aviso post-llamada se programan SIEMPRE, aunque ahora estén desactivados: al ejecutarse
+ * se comprueba si siguen activos. Así, si el entrenador los activa (o reactiva) después de reservar, las llamadas
+ * que ya estaban agendadas también los reciben. La confirmación es inmediata: solo se programa si está activa.
  */
 export async function scheduleAppointmentJobs(
   businessId: string,
@@ -42,29 +45,23 @@ export async function scheduleAppointmentJobs(
   const post = await getAutomation(businessId, 'post_call');
   const base = { businessId, payload: { appointmentId: appointment.id, leadId: appointment.leadId } };
 
-  if (reminders?.enabled) {
-    const cfg = reminders.config;
-    if (opts.sendConfirmation && appointmentMessageEnabled(reminders, 'confirmation')) {
-      await scheduleJob({ ...base, type: 'appointment_confirmation', runAt: addMinutes(now, 1), dedupeKey: `appt:${appointment.id}:confirm` });
-    }
-    if (appointmentMessageEnabled(reminders, 'reminder24h')) {
-      let at = addHours(appointment.startsAt, -24);
-      if (isWithinQuietHours(at, tz, cfg.quietHours)) {
-        const shifted = shiftOutOfQuietHours(at, tz, cfg.quietHours);
-        if (appointment.startsAt.getTime() - shifted.getTime() >= 3 * 3600_000) at = shifted;
-      }
-      if (at.getTime() > now.getTime() + 60 * 60_000) {
-        await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at, payload: { ...base.payload, kind: '24h' }, dedupeKey: `appt:${appointment.id}:r24` });
-      }
-    }
-    if (appointmentMessageEnabled(reminders, 'reminder1h')) {
-      const at = addHours(appointment.startsAt, -1);
-      if (at.getTime() > now.getTime() + 5 * 60_000) {
-        await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at, payload: { ...base.payload, kind: '1h' }, dedupeKey: `appt:${appointment.id}:r1` });
-      }
-    }
+  if (opts.sendConfirmation && appointmentMessageEnabled(reminders, 'confirmation')) {
+    await scheduleJob({ ...base, type: 'appointment_confirmation', runAt: addMinutes(now, 1), dedupeKey: `appt:${appointment.id}:confirm` });
   }
-  if (post?.enabled !== false && opts.postCall !== false) {
+  const quietHours = reminders?.config.quietHours;
+  let at24 = addHours(appointment.startsAt, -24);
+  if (isWithinQuietHours(at24, tz, quietHours)) {
+    const shifted = shiftOutOfQuietHours(at24, tz, quietHours);
+    if (appointment.startsAt.getTime() - shifted.getTime() >= 3 * 3600_000) at24 = shifted;
+  }
+  if (at24.getTime() > now.getTime() + 60 * 60_000) {
+    await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at24, payload: { ...base.payload, kind: '24h' }, dedupeKey: `appt:${appointment.id}:r24` });
+  }
+  const at1 = addHours(appointment.startsAt, -1);
+  if (at1.getTime() > now.getTime() + 5 * 60_000) {
+    await scheduleJob({ ...base, type: 'appointment_reminder', runAt: at1, payload: { ...base.payload, kind: '1h' }, dedupeKey: `appt:${appointment.id}:r1` });
+  }
+  if (opts.postCall !== false) {
     await scheduleJob({
       ...base,
       type: 'post_call',

@@ -7,7 +7,7 @@
 import { DateTime } from 'luxon';
 import { BILLING_PERIOD_LABELS, CHANNEL_LABELS, formatMoney, leadStatusLabel, type ChannelKey, type ConversationState } from '../../lib/domain.js';
 import { firstName } from '../../lib/text.js';
-import { humanSlotLabel } from '../../lib/time.js';
+import { humanSlotLabel, leadZone, leadZoneNote, zonePlace } from '../../lib/time.js';
 import type { BusinessContext, LeadContext } from '../context/context.js';
 import type { Directive, SetterState } from '../setter/strategy.js';
 import { describeTone } from './tone.js';
@@ -114,18 +114,25 @@ export function buildSetterTurnContext(input: {
     })
     .join('\n');
   const memories = leadCtx.memories.map((m) => `- ${m.content}`).join('\n');
+  // Lead de otro país (por el prefijo de su WhatsApp): las horas llevan la zona del entrenador y, si se sabe, la suya.
+  const leadPhone = lead.whatsappId ?? lead.phone;
+  const foreign = leadZone(leadPhone, tz, now);
   // Etiquetas recalculadas para ESTE momento (“mañana” de una oferta de ayer es “hoy”).
-  const offered = (state.offeredSlots ?? []).map((s) => `- ${humanSlotLabel(s.start, tz, now)} (slot_id ${s.id})`).join('\n');
+  const offered = (state.offeredSlots ?? []).map((s) => `- ${humanSlotLabel(s.start, tz, now, { leadPhone })} (slot_id ${s.id})`).join('\n');
   const st = state as SetterState;
-  const appt = leadCtx.upcomingAppointment
-    ? `Tiene una ${biz.settings.callLabel} agendada: ${DateTime.fromJSDate(leadCtx.upcomingAppointment.startsAt).setZone(tz).setLocale('es').toFormat("cccc d 'de' LLLL 'a las' HH:mm")}${leadCtx.upcomingAppointment.meetingUrl ? ` (enlace: ${leadCtx.upcomingAppointment.meetingUrl})` : ''}.`
+  const upcoming = leadCtx.upcomingAppointment;
+  const appt = upcoming
+    ? `Tiene una ${biz.settings.callLabel} agendada: ${DateTime.fromJSDate(upcoming.startsAt).setZone(tz).setLocale('es').toFormat("cccc d 'de' LLLL 'a las' HH:mm")}${leadZoneNote(upcoming.startsAt, tz, leadPhone, now)}${upcoming.meetingUrl ? ` (enlace: ${upcoming.meetingUrl})` : ''}.`
     : 'No tiene ninguna llamada agendada.';
+  const zoneNote = foreign
+    ? `\n- Zona horaria: el lead escribe desde un número ${foreign.country ? `de ${foreign.country}` : 'de otro país'} y allí es otra hora. Al dar o confirmar un horario, di siempre que es hora de ${zonePlace(tz)}${foreign.country && foreign.timezone ? ` y, si quieres, su hora en ${foreign.country} tal como aparece arriba (“en ${foreign.country}, a las …”)` : ''}. No conviertas tú las horas.`
+    : '';
 
   return `# Contexto de este momento
 - Fecha y hora: ${local.toFormat("cccc d 'de' LLLL yyyy, HH:mm")} (${tz})
 - Canal: ${CHANNEL_LABELS[channel]}
 - Lead: ${lead.name ? `${lead.name} (llámale ${firstName(lead.name)})` : 'nombre desconocido'} · origen ${lead.source}${lead.sourceDetail ? ` (${lead.sourceDetail})` : ''} · etapa ${leadStatusLabel(lead.status)}
-- ${appt}
+- ${appt}${zoneNote}
 
 # Lo que sabemos del lead
 ${known}

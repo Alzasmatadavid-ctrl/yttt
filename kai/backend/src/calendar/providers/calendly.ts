@@ -113,6 +113,15 @@ export async function calendlyDeleteWebhook(token: string, uri: string) {
   await calendly(token, uri, { method: 'DELETE' });
 }
 
+/**
+ * Cancela una reserva: POST {scheduled_event}/cancellation. Calendly avisa al invitado por email y libera el hueco.
+ * Solo con URIs de la API de Calendly (el token del entrenador no se envía a ningún otro sitio).
+ */
+export async function calendlyCancelEvent(token: string, eventUri: string) {
+  if (!eventUri.startsWith(`${BASE}/scheduled_events/`)) throw new Error(`Evento de Calendly no válido: ${eventUri}`);
+  await calendly(token, `${eventUri}/cancellation`, { method: 'POST', body: {} });
+}
+
 /** Verifica la cabecera `Calendly-Webhook-Signature: t=…,v1=…` (HMAC-SHA256 de `t.cuerpo`). */
 export function verifyCalendlySignature(rawBody: string | undefined, header: string | undefined, signingKey: string, toleranceSec = 300): boolean {
   if (!rawBody || !header) return false;

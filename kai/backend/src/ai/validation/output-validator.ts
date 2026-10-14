@@ -3,11 +3,14 @@
  *
  * Capa 1 (determinista, siempre): reglas verificables con datos reales
  *   - una sola pregunta, longitud, formato de chat, emojis, palabras prohibidas
- *   - horarios: solo los ofrecidos por la agenda real
- *   - precios: solo los configurados
+ *   - horarios: solo los ofrecidos por la agenda real (en la zona del negocio, o en la del país que se nombre)
+ *   - precios: solo los configurados (en cifras o en letras)
  *   - enlaces: solo los permitidos
- *   - promesas de resultados, consejos médicos, presión, frases robóticas, seguimiento genérico
- *   - cifras de autoridad/testimonios que no estén en el perfil del entrenador
+ *   - promesas de resultados, consejos médicos (fármacos, dosis, diagnósticos), presión, frases robóticas,
+ *     seguimiento genérico
+ *   - cifras de autoridad (años, clientes, kilos que perdió alguien, % de éxito) y testimonios que no estén en el
+ *     perfil del entrenador ni los haya dicho el lead
+ * Son patrones: cubren las formas habituales, no todas. Lo demás lo revisa la capa 2.
  * Capa 2 (opcional, IA rápida): ¿responde a lo último que dijo? ¿suena humano? ¿inventa algo?
  *
  * Si falla, el motor regenera la respuesta con estos motivos como feedback.
@@ -16,7 +19,7 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { questionCount, type AiTone } from '../../lib/domain.js';
 import { countEmojis, fold, normalize } from '../../lib/text.js';
-import { humanSlotLabel } from '../../lib/time.js';
+import { humanSlotLabel, placeZones, zonePlace } from '../../lib/time.js';
 import { maxCharsFor, maxEmojisFor } from '../prompts/tone.js';
 import type { LLMProvider } from '../providers/types.js';
 
@@ -31,6 +34,11 @@ export interface ValidationContext {
   allowedUrls: string[];
   /** Texto con los datos de autoridad reales (para permitir cifras que sí existen). */
   factsText: string;
+  /**
+   * Lo que ha contado el lead (sus mensajes, su cualificación, su memoria). KAI puede repetir sus cifras sin que
+   * cuenten como inventadas: “esos 10 kilos”, “tu amigo que perdió 15 kilos”.
+   */
+  leadText?: string;
   isFollowUp?: boolean;
   /** Nombre del asistente (para no confundir su presentación con frases robóticas). */
   assistantName?: string;
@@ -50,23 +58,186 @@ export interface ValidationResult {
 const RX_MARKDOWN = /\*\*|__|^#{1,6}\s|^\s*[-*•]\s+\S|^\s*\d+[.)]\s+\S/m;
 const RX_ROBOTIC =
   /como (un )?(modelo de lenguaje|asistente virtual de ia)|no tengo (sentimientos|cuerpo)|estoy aqui para ayudarte|no dudes en (contactar|preguntar|escribir)|en que (mas )?puedo ayudarte hoy|espero que este mensaje te encuentre bien|como inteligencia artificial,? no puedo|¡?saludos cordiales/;
-const RX_PROMISE =
-  /garantiz|te aseguro que (vas a|vas|lo vas)|100\s?%\s?(seguro|garantizado)|resultados? (asegurados?|garantizados?)|(perderas|bajaras|vas a perder|vas a bajar|conseguiras perder)\s+(\d+|unos|varios)\s*(kg|kilos)|seguro que (lo )?(consigues|vas a conseguir)|en \d+ (dias|semanas) (veras|tendras|perderas)/;
-const RX_MEDICAL =
-  /(deja|dejar|suspende|suspender|ajusta|ajustar|reduce|reducir|aumenta|aumentar|cambia|cambiar) (la |tu |de )?(medicacion|insulina|pastillas|dosis|tratamiento)|te diagnostic|(tienes|sufres|padeces) (diabetes|hipotiroidismo|una hernia|una lesion|resistencia a la insulina|sop)|eso es (una|un) (tendinitis|hernia|lesion|sindrome)/;
-const RX_PRESSURE =
-  /ultima oportunidad|solo (por )?hoy|quedan (pocas|solo \d+) plazas|plazas limitadas|si no (te )?decides (ahora|hoy)|no lo pienses mas|oferta (exclusiva|limitada|solo para ti)|ahora o nunca|se acaba (hoy|manana)|precio sube (manana|pronto)/;
+/** Verbos de resultado físico (para promesas: “vas a perder la barriga seguro”). */
+const RESULT_VERBS = 'perder|bajar|adelgazar|quitarte|eliminar|conseguir|lograr|notar|ver resultados|reducir|transformar';
+const RX_PROMISE = new RegExp(
+  [
+    String.raw`garantiz|te aseguro que (vas a|vas|lo vas)|100\s?%\s?(seguro|garantizado)|resultados? (asegurados?|garantizados?)`,
+    String.raw`(perderas|bajaras|vas a perder|vas a bajar|conseguiras perder)\s+(\d+|unos|varios)\s*(kg|kilos)|seguro que (lo )?(consigues|vas a conseguir)|en \d+ (dias|semanas) (veras|tendras|perderas)`,
+    String.raw`\b(?:te|le|os) (?:lo )?prometo\b`,
+    // “vas a perder la barriga seguro”, “bajarás de talla sí o sí”, “sin duda vas a conseguirlo”.
+    String.raw`\b(?:vas|va|van) a (?:${RESULT_VERBS})\b[^.!?\n]{0,50}\b(?:seguro|sin duda|si o si|sin falta)\b`,
+    String.raw`\b(?:perderas|bajaras|adelgazaras|conseguiras|lograras|notaras|eliminaras|reduciras|te quitaras)\b[^.!?\n]{0,50}\b(?:seguro|sin duda|si o si)\b`,
+    String.raw`\b(?:seguro que|sin duda|si o si)[, ]+(?:lo )?(?:vas|va) a (?:${RESULT_VERBS})\b`,
+  ].join('|'),
+);
+/** Fármacos y suplementos que KAI nunca debe recomendar (ni decir que se dejen). */
+const DRUGS =
+  'ibuprofeno|paracetamol|naproxeno|aspirina|dexketoprofeno|diclofenaco|enantyum|nolotil|metamizol|voltaren|antiinflamatorios?|analgesicos?|relajantes? musculares?|corticoides?|metformina|ozempic|semaglutida|wegovy|mounjaro|tirzepatida|saxenda|liraglutida|orlistat|levotiroxina|eutirox|omeprazol|antidepresivos?|ansioliticos?|diazepam|lorazepam|melatonina|insulina|estatinas?|diureticos?|laxantes?|quemagrasas|termogenicos?|testosterona|esteroides?|anabolizantes?|clembuterol';
+/** Problemas de salud que KAI no puede diagnosticar (“suena a resistencia a la insulina”). */
+const CONDITIONS =
+  'resistencia a la insulina|prediabetes|diabetes|hipotiroidismo|hipertiroidismo|problemas? de tiroides|tendinitis|tendinopatia|hernia(?: discal)?|ciatica|lumbalgia|fascitis|bursitis|condromalacia|artrosis|artritis|fibromialgia|esguince|rotura|sindrome|sop|ovario poliquistico|hipertension|apnea|celiaquia|intolerancia|anemia|higado graso|colon irritable|reflujo|gastritis|depresion|ansiedad|trastorno|lesion|contractura|sobrecarga';
+const RX_MEDICAL = new RegExp(
+  [
+    String.raw`(deja|dejar|suspende|suspender|ajusta|ajustar|reduce|reducir|aumenta|aumentar|cambia|cambiar) (la |tu |de )?(medicacion|insulina|pastillas|dosis|tratamiento)|te diagnostic`,
+    String.raw`(tienes|sufres|padeces) (diabetes|hipotiroidismo|una hernia|una lesion|resistencia a la insulina|sop)|eso es (una|un) (tendinitis|hernia|lesion|sindrome)`,
+    // Recomendar (o retirar) un fármaco: “que tomes ibuprofeno”, “prueba con melatonina”. “Si toma…” describe, no recomienda.
+    String.raw`(?<!\b(?:si|ya|como|cuando|mientras|porque|aunque) )\b(?:toma|tomes|tome|tomar|tomate|tomese|tomarte|tomarse|prueba con|pruebe con|usa|uses|use|usar|ponte|pongase|recomiendo|aconsejo|recomendaria|aconsejaria|te iria bien|le iria bien)\b[^.!?\n]{0,30}\b(?:${DRUGS})\b`,
+    // Dosis.
+    String.raw`\b\d+(?:[.,]\d+)?\s?(?:mg|miligramos|mcg|microgramos)\b`,
+    // Diagnóstico a ojo: “suena a resistencia a la insulina”, “parece una tendinitis”, “eso es ansiedad”.
+    String.raw`\b(?:me suena a|suena a|parece(?: ser)?|puede ser|podria ser|seguramente (?:es|sea|tengas)|probablemente (?:es|sea|tengas)|tiene pinta de|apunta a|eso es)\s+(?:una |un |la |el )?(?:${CONDITIONS})\b`,
+  ].join('|'),
+);
+const RX_PRESSURE = new RegExp(
+  [
+    String.raw`ultima oportunidad|ultimas plazas|solo (por )?hoy|plazas (limitadas|contadas)|si no (te )?decides (ahora|hoy)|no lo pienses mas|oferta (exclusiva|limitada|solo para ti)|ahora o nunca|se acaba (hoy|manana)`,
+    // Escasez: “solo me quedan dos plazas”, “queda una plaza”.
+    String.raw`\bquedan? (?:solo |solamente |apenas |muy |ya )?(?:pocas|\d+|una|dos|tres|cuatro|cinco|un par de) plazas?\b`,
+    // Caducidad y subidas de precio: “esta oferta caduca esta noche”, “el precio sube mañana”.
+    String.raw`\b(?:oferta|precio|descuento|promocion|plaza) (?:caduca|expira|vence|se acaba)\b|\b(?:caduca|expira|vence) (?:hoy|esta noche|manana|en \d+ horas)\b|\bprecio (?:sube|subira|va a subir) (?:manana|pronto|la semana que viene)\b`,
+    // Prisa y miedo: “decide hoy”, “lo vas a lamentar”, “antes de que sea tarde”.
+    String.raw`\bdecide(?:te|lo)? (?:hoy|ya|ahora)\b|\btienes que decidir(?:te|lo)? (?:hoy|ya|ahora)\b|\blo vas a lamentar|\blo lamentaras|(?<!no )\bte vas a arrepentir|(?<!no )\bte arrepentiras|\bantes de que sea (?:demasiado )?tarde|\bno dejes pasar (?:esta|la) oportunidad`,
+  ].join('|'),
+);
 const RX_GENERIC_FOLLOWUP = /solo (hago|te hago|queria hacer|para hacer) (un )?seguimiento|solo queria saber si (has visto|viste|leiste)|te escribo para hacer seguimiento|hago seguimiento/;
 const RX_URL = /https?:\/\/[^\s)]+/gi;
-const RX_CLAIMED_NUMBERS = /(\+?\d[\d.]*)\s*(clientes|alumnos|personas|transformaciones|anos de experiencia|kilos perdidos|kg perdidos)/g;
 
 type Span = { index: number; end: number };
 const overlapsSpan = (m: Span, spans: Span[]) => spans.some((s) => m.index < s.end && s.index < m.end);
 
-/** Números citados en los datos reales (“1.000” → 1000, “+500” → 500). */
-function numbersIn(text: string): Set<number> {
-  return new Set([...text.matchAll(/\d{1,3}(?:\.\d{3})+(?!\d)|\d+/g)].map((m) => Number(m[0].replace(/\./g, ''))));
+// ───────────── Cifras (en dígitos o en letras) ─────────────
+
+const NUMBER_WORDS: Record<string, number> = {
+  un: 1,
+  uno: 1,
+  una: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+  trece: 13,
+  catorce: 14,
+  quince: 15,
+  dieciseis: 16,
+  diecisiete: 17,
+  dieciocho: 18,
+  diecinueve: 19,
+  veinte: 20,
+  veintiun: 21,
+  veintiuno: 21,
+  veintiuna: 21,
+  veintidos: 22,
+  veintitres: 23,
+  veinticuatro: 24,
+  veinticinco: 25,
+  veintiseis: 26,
+  veintisiete: 27,
+  veintiocho: 28,
+  veintinueve: 29,
+  treinta: 30,
+  cuarenta: 40,
+  cincuenta: 50,
+  sesenta: 60,
+  setenta: 70,
+  ochenta: 80,
+  noventa: 90,
+  cien: 100,
+  ciento: 100,
+  doscientos: 200,
+  doscientas: 200,
+  trescientos: 300,
+  trescientas: 300,
+  cuatrocientos: 400,
+  cuatrocientas: 400,
+  quinientos: 500,
+  quinientas: 500,
+  seiscientos: 600,
+  seiscientas: 600,
+  setecientos: 700,
+  setecientas: 700,
+  ochocientos: 800,
+  ochocientas: 800,
+  novecientos: 900,
+  novecientas: 900,
+  mil: 1000,
+};
+const NUMBER_WORD = String.raw`(?:${Object.keys(NUMBER_WORDS)
+  .sort((a, b) => b.length - a.length)
+  .join('|')})\b`;
+/** Cifra en letras: “quince”, “doscientos”, “ciento cincuenta y siete”, “dos mil” (texto en minúsculas y sin tildes). */
+const NUM_WORDS = String.raw`\b${NUMBER_WORD}(?:\s+(?:y\s+)?${NUMBER_WORD})*`;
+/** Cifra en dígitos (“1.000”, “+500”, “2 mil”) o en letras. */
+const NUM = String.raw`(?:(?<![\d.,])\+?\s?(?:\d{1,3}(?:\.\d{3})+(?!\d)|\d+)(?:\s+mil\b)?|${NUM_WORDS})`;
+
+function wordsToNumber(phrase: string): number {
+  let total = 0;
+  let current = 0;
+  for (const w of phrase.trim().split(/\s+/)) {
+    if (w === 'y') continue;
+    if (w === 'mil') {
+      total += (current || 1) * 1000;
+      current = 0;
+    } else current += NUMBER_WORDS[w] ?? 0;
+  }
+  return total + current;
 }
+
+/** Valor de una cifra en dígitos o en letras (“+1.000” → 1000, “2 mil” → 2000, “quince” → 15). */
+function numberValue(raw: string): number {
+  const s = raw.replace(/^\+\s?/, '').trim();
+  if (!/\d/.test(s)) return wordsToNumber(s);
+  const [digits, mil] = s.split(/\s+/);
+  return Number(digits.replace(/\./g, '')) * (mil === 'mil' ? 1000 : 1);
+}
+
+/** Números citados en un texto, en dígitos o en letras (“1.000” → 1000, “+500” → 500, “quinientos” → 500). */
+function numbersIn(text: string): Set<number> {
+  const out = new Set<number>();
+  for (const m of text.matchAll(/\d{1,3}(?:\.\d{3})+(?!\d)|\d+/g)) out.add(Number(m[0].replace(/\./g, '')));
+  for (const m of text.matchAll(new RegExp(NUM, 'g'))) out.add(numberValue(m[0]));
+  return out;
+}
+
+/** Aproximación delante de la cifra: “más de 500”, “casi quince”. */
+const ABOUT = String.raw`(?:mas de\s+|casi\s+|unos\s+|unas\s+|hasta\s+|cerca de\s+|nada menos que\s+)?`;
+/**
+ * Cifras de autoridad o resultados de terceros. Solo valen si están en los datos del negocio o las ha dicho el lead.
+ * No cuentan las del propio lead (“esos 10 kilos”, “quieres bajar 3 tallas”, “a tus 40 años”).
+ */
+const RX_CLAIMS: RegExp[] = [
+  // Clientes o casos: “300 personas”, “más de doscientos clientes”.
+  new RegExp(String.raw`(?<num>${NUM})\s+(?:clientes|clientas|alumnos|alumnas|personas|transformaciones|casos de exito|historias de exito|atletas|deportistas)\b`, 'g'),
+  // Experiencia: “10 años de experiencia”, “quince años entrenando”, “desde hace 8 años ayudo…”.
+  new RegExp(
+    String.raw`(?<num>${NUM})\s+anos?\s+(?:que\s+)?(?:de (?:experiencia|trayectoria|carrera|profesion)|en (?:el sector|esto|este mundo|el mundo del fitness)|entrenando|ayudando|trabajando|dedicad[oa]s?|dedicandome|dedicandose|me dedico|nos dedicamos|se dedica|entreno|entrena|entrenamos|ayudo|ayuda|ayudamos|trabajo|trabaja|trabajamos|como (?:entrenador|entrenadora|coach|nutricionista|preparador|preparadora|profesional))\b`,
+    'g',
+  ),
+  // “Llevo 10 años…” (lo dice el entrenador o su equipo, no el lead).
+  new RegExp(String.raw`\b(?:llevo|llevamos)\s+(?:ya\s+)?${ABOUT}(?<num>${NUM})\s+anos?\b`, 'g'),
+  // Resultados de otros (testimonios): “perdió 12 kilos”, “han bajado 3 tallas”, “500 kilos perdidos”.
+  new RegExp(
+    String.raw`\b(?:perdio|perdieron|perdi|perdimos|ha perdido|han perdido|he perdido|bajo|bajaron|ha bajado|han bajado|he bajado|se quito|se quitaron|me quite|se ha quitado|se han quitado|elimino|eliminaron|ha eliminado|han eliminado|redujo|redujeron|ha reducido|han reducido|(?:consiguio|consiguieron|logro|lograron) (?:perder|bajar|quitarse))\s+${ABOUT}(?<num>${NUM})\s*(?:kilos?|kg|kgs|centimetros|cm|tallas?|%|por ciento|puntos)`,
+    'g',
+  ),
+  new RegExp(String.raw`(?<num>${NUM})\s*(?:kilos|kg) perdidos`, 'g'),
+  // Estadísticas de éxito: “el 95% de mis clientes”, “una tasa de éxito del 90%”.
+  new RegExp(String.raw`(?<num>${NUM})\s*(?:%|por ciento)\s+(?:de (?:exito|efectividad|eficacia|satisfaccion|acierto)|de (?:mis|nuestros|nuestras|sus|los|las) (?:clientes|clientas|alumnos|alumnas|personas|casos)|de la gente)`, 'g'),
+  new RegExp(String.raw`\b(?:exito|efectividad|eficacia|satisfaccion|acierto)\s+(?:es\s+)?(?:del?|de un)\s+(?<num>${NUM})\s*(?:%|por ciento)`, 'g'),
+];
+
+/** Anécdota de un cliente concreto con su resultado: “una clienta mía perdió…”, “uno de mis alumnos consiguió…”. */
+const RX_TESTIMONIAL =
+  /\b(?:(?:un|una|otro|otra) (?:cliente|clienta|alumno|alumna) (?:mio|mia|nuestro|nuestra|que (?:tengo|tenemos|tuve|tuvimos)|con (?:el|la) que (?:trabajo|trabajamos|trabaje))|(?:uno|una|otro|otra) de (?:mis|nuestros|nuestras|sus) (?:clientes|clientas|alumnos|alumnas))\b[^.!?\n]{0,80}\b(?:perdio|bajo|consiguio|logro|se quito|paso de|redujo|elimino|cambio|transformo|dejo de|recupero|ha perdido|ha bajado|ha conseguido|ha logrado|ha pasado de)\b/;
+/** Los datos del negocio incluyen casos reales (“Juan perdió 15 kg”): entonces KAI puede contarlos. */
+const RX_REAL_CASES = /\b(?:perdio|perdieron|bajo|bajaron|consiguio|consiguieron|logro|lograron|se quito|paso de|redujo|elimino|transformo|ha perdido|han perdido|ha bajado|han bajado|testimonio|caso de exito|casos de exito)\b/;
 
 /** ¿Es el mismo enlace? Admite que la IA omita los parámetros (?utm_…) o la barra final, pero no otra ruta. */
 function sameUrl(candidate: string, allowed: string): boolean {
@@ -94,6 +265,9 @@ const RX_PRICE_VERB = new RegExp(
   String.raw`\b(?:cuesta|cuestan|vale|valen|precio(?: es| de| es de)?|tarifa(?: es| de)?|cuota(?: es| de)?|inversion(?: es| de)?|pagas|pagarias)\s+(?:de\s+|unos\s+|solo\s+|solamente\s+)?(?<a3>${AMOUNT})(?![\d.,]*\s?(?:${CURRENCY}))(?!\s*(?:%|kilos?|kg|semanas?|mes(?:es)?\b|dias?|minutos?|horas?|sesiones?|clases?|personas?|anos?|veces))`,
   'g',
 );
+
+/** Importe en letras con la moneda: “ciento cincuenta euros”, “dos mil pesos” (en plural: “un peso saludable” no es un importe). */
+const RX_PRICE_WORDS = new RegExp(String.raw`(?<w>${NUM_WORDS})\s+(?<c>euros?|dolares|pesos|soles|francos)\b`, 'g');
 
 const DOLLAR_LIKE = ['USD', 'MXN', 'ARS', 'COP', 'CLP', 'CAD', 'AUD', 'UYU', 'DOP', 'NZD'];
 
@@ -154,6 +328,12 @@ function findPrices(f: string, original: string): PriceMention[] {
       cents: parsePriceToCents(g.a1 ?? g.a2 ?? ''),
       currencies: currenciesFor(g.c1 ?? g.c2 ?? ''),
     });
+  }
+  for (const m of f.matchAll(RX_PRICE_WORDS)) {
+    const index = m.index!;
+    const end = index + m[0].length;
+    if (out.some((p) => index < p.end && p.index < end)) continue;
+    out.push({ index, end, text: original.slice(index, end), cents: wordsToNumber(m.groups!.w) * 100, currencies: currenciesFor(m.groups!.c) });
   }
   for (const m of f.matchAll(RX_PRICE_VERB)) {
     const amount = m.groups!.a3;
@@ -305,6 +485,17 @@ function findDayRefs(f: string): DayRef[] {
   return refs;
 }
 
+/**
+ * Zona a la que se atribuye una hora de forma explícita: “a las 18:00 (hora de España)”, “en México, a las 10:00”,
+ * “las 10:00 en México”. Así KAI puede dar la hora de un lead de otro país (y se comprueba en su zona). null si no se dice.
+ */
+function zoneFor(time: TimeMention, f: string, places: Map<string, string>, placeRx: string): string | null {
+  const after = new RegExp(String.raw`^[\s,]*\(?\s*(?:(?:hora|horario) (?:de|del|en) |en |de )(?:la |el )?(${placeRx})\b`).exec(f.slice(time.end));
+  if (after) return places.get(after[1]) ?? null;
+  const before = new RegExp(String.raw`\ben (${placeRx})\b[^.!?¿\n;()]{0,30}$`).exec(f.slice(Math.max(0, time.index - 60), time.index));
+  return before ? (places.get(before[1]) ?? null) : null;
+}
+
 /** Día que acompaña a una hora: el que va justo después (“a las 18:00 del jueves”) o el más cercano antes, en la misma frase. */
 function dayFor(time: TimeMention, refs: DayRef[], f: string): DayRef | null {
   const after = refs.find((r) => r.index >= time.end && /^\s*,?\s*(?:del?|el|este|esta|para el|para)?\s*$/.test(f.slice(time.end, r.index)));
@@ -364,20 +555,28 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   const prices = findPrices(f, trimmed).filter((p) => !overlapsSpan(p, urlSpans));
 
   // Horarios: solo los que salen de la agenda real, y el día también debe coincidir (“el sábado a las 18:00”).
-  const allowed = ctx.allowedTimes.map((d) => DateTime.fromJSDate(d).setZone(ctx.timezone));
-  const today = ctx.now ? DateTime.fromJSDate(ctx.now).setZone(ctx.timezone).startOf('day') : null;
+  // Se leen en la zona del negocio, salvo que el mensaje diga de qué país es la hora (lead de otro país).
+  const places = placeZones([ctx.timezone]);
+  const placeRx = [...places.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
   const dayRefs = findDayRefs(f);
   for (const t of findTimes(f, trimmed)) {
     if (overlapsSpan(t, prices) || overlapsSpan(t, urlSpans)) continue;
+    const zone = zoneFor(t, f, places, placeRx) ?? ctx.timezone;
+    const inZone = zone === ctx.timezone ? '' : ` (hora de ${zonePlace(zone)})`;
+    const allowed = ctx.allowedTimes.map((d) => DateTime.fromJSDate(d).setZone(zone));
+    const today = ctx.now ? DateTime.fromJSDate(ctx.now).setZone(zone).startOf('day') : null;
     let sameTime = allowed.filter((a) => a.minute === t.minute && (t.exact ? a.hour === t.hour : a.hour === t.hour || a.hour % 12 === t.hour % 12));
     // Un horario que ya ha pasado no se puede ofrecer (aunque se ofreciera ayer).
     if (ctx.now && sameTime.length && sameTime.every((a) => a.toMillis() <= ctx.now!.getTime())) {
-      issues.push(`Menciona el horario “${t.text}”, que ya ha pasado. Consulta get_available_slots y ofrece horarios futuros.`);
+      issues.push(`Menciona el horario “${t.text}”${inZone}, que ya ha pasado. Consulta get_available_slots y ofrece horarios futuros.`);
       break;
     }
     if (ctx.now) sameTime = sameTime.filter((a) => a.toMillis() > ctx.now!.getTime());
     if (sameTime.length === 0) {
-      issues.push(`Menciona el horario “${t.text}”, que no ha salido de la agenda real. Usa get_available_slots y sus etiquetas exactas.`);
+      issues.push(`Menciona el horario “${t.text}”${inZone}, que no ha salido de la agenda real. Usa get_available_slots y sus etiquetas exactas.`);
       break;
     }
     const day = dayFor(t, dayRefs, f);
@@ -411,15 +610,13 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
     }
   }
 
-  // Cifras de autoridad / testimonios que no estén en los datos reales del entrenador.
-  const facts = numbersIn(normalize(ctx.factsText));
-  for (const m of n.matchAll(RX_CLAIMED_NUMBERS)) {
-    const num = Number(m[1].replace(/[+.]/g, ''));
-    if (!facts.has(num)) {
-      issues.push(`Afirma “${m[0]}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
-      break;
-    }
-  }
+  // Cifras de autoridad / testimonios que no estén en los datos reales del entrenador ni los haya dicho el lead.
+  const factsText = normalize(ctx.factsText);
+  const known = numbersIn(`${factsText}\n${normalize(ctx.leadText ?? '')}`);
+  const claim = RX_CLAIMS.flatMap((rx) => [...n.matchAll(rx)]).find((m) => !known.has(numberValue(m.groups!.num)));
+  if (claim) issues.push(`Afirma “${claim[0].trim()}”, un dato que no aparece en el perfil del entrenador. No inventes cifras ni testimonios.`);
+  else if (RX_TESTIMONIAL.test(n) && !RX_REAL_CASES.test(factsText))
+    issues.push('Cuenta el caso de un cliente que no aparece en el perfil del entrenador. No inventes testimonios ni resultados de clientes.');
 
   return { ok: issues.length === 0, issues };
 }

@@ -23,6 +23,24 @@ export interface ToolRunRecord {
 
 const HANDOFF_KEYS = Object.keys(HANDOFF_REASONS) as HandoffReason[];
 
+/** Herramientas que dependen del calendario conectado (Google, Calendly). */
+const CALENDAR_TOOLS = ['get_available_slots', 'book_call', 'reschedule_call'];
+
+/**
+ * Lo que el objetivo del turno permite hacer con la agenda. Lo decide la estrategia, no la IA: así la IA no reserva
+ * un horario que el lead aún no ha visto ni cancela una llamada que el lead no ha pedido cancelar.
+ */
+export interface ToolboxPolicy {
+  directive: { kind: string; slotId?: string };
+  /** El lead ha pedido cancelar su llamada de forma explícita (permite cancel_call al moverla). */
+  leadAskedToCancel?: boolean;
+}
+
+/** ¿Es un intento que la caja de herramientas no permitió en este turno? (no llegó a ejecutarse). */
+export function isDeniedRecord(r: ToolRunRecord): boolean {
+  return Boolean(r.result && typeof r.result === 'object' && (r.result as { denied?: unknown }).denied);
+}
+
 export const SETTER_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_available_slots',
@@ -95,13 +113,18 @@ export class SetterToolbox {
   private linkLabel: string | null = null;
   handoff: { reason: HandoffReason; detail: string } | null = null;
   private offeredAll: OfferedSlot[];
+  /** Horarios ofrecidos en mensajes anteriores (el lead ya los ha visto y puede haber elegido uno). */
+  private readonly offeredBefore: Set<string>;
 
   constructor(
     private readonly biz: BusinessContext,
     private readonly leadCtx: LeadContext,
     private readonly conversation: ConversationRow,
+    /** Sin política (pruebas, herramientas internas), se permite todo. */
+    private readonly policy?: ToolboxPolicy,
   ) {
     this.offeredAll = [...(conversation.state.offeredSlots ?? [])];
+    this.offeredBefore = new Set(this.offeredAll.map((s) => s.id));
   }
 
   definitions(): ToolDefinition[] {
@@ -126,15 +149,56 @@ export class SetterToolbox {
   }
 
   async run(name: string, input: Record<string, unknown>): Promise<{ content: string; isError: boolean }> {
+    const denied = this.deniedReason(name, input);
+    if (denied) {
+      this.records.push({ name, input, ok: false, result: { error: denied, denied: true } });
+      return { content: JSON.stringify({ error: denied }), isError: true };
+    }
     try {
       const result = await this.dispatch(name, input);
       this.records.push({ name, input, ok: true, result });
       return { content: JSON.stringify(result), isError: false };
     } catch (err) {
       const message = err instanceof AppError ? err.message : errorMessage(err);
-      this.records.push({ name, input, ok: false, result: { error: message } });
-      return { content: JSON.stringify({ error: message }), isError: true };
+      // El calendario conectado no responde (token caducado o revocado, servicio caído): KAI no puede ofrecer ni
+      // reservar horarios. La conversación pasa al entrenador para que alguien le escriba con opciones de verdad
+      // (sale en «Pendientes» y no se programa el seguimiento automático).
+      const calendarDown = err instanceof AppError && err.code === 'unavailable' && CALENDAR_TOOLS.includes(name);
+      if (calendarDown) {
+        this.handoff ??= {
+          reason: 'technical_issue',
+          detail: `${message} KAI no ha podido ${name === 'get_available_slots' ? 'ofrecerle horarios' : 'reservarle la llamada'}: revisa la conexión del calendario en Integraciones y escríbele con opciones.`.slice(0, 300),
+        };
+      }
+      const result = calendarDown
+        ? { error: message, note: 'No se puede consultar la agenda ahora mismo. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios ni digas que el hueco está ocupado.' }
+        : { error: message };
+      this.records.push({ name, input, ok: false, result });
+      return { content: JSON.stringify(result), isError: true };
     }
+  }
+
+  /** Motivo por el que esta acción no se permite en este turno (o null si se puede hacer). */
+  private deniedReason(name: string, input: Record<string, unknown>): string | null {
+    if (!this.policy) return null;
+    const { kind, slotId } = this.policy.directive;
+    if (name === 'cancel_call') {
+      if (kind === 'cancel_booking' || (kind === 'reschedule' && this.policy.leadAskedToCancel)) return null;
+      return 'No canceles la llamada: el lead no ha pedido cancelarla. Si duda, pregúntale si prefiere cancelarla o moverla a otro día.';
+    }
+    if (name !== 'book_call' && name !== 'reschedule_call') return null;
+    const slot = this.findOffered(String(input.slot_id ?? ''));
+    // Un slot_id que no se ha ofrecido lo rechaza la propia herramienta (con su explicación).
+    if (!slot) return null;
+    if (kind === 'book_slot') {
+      const chosen = slotId ? this.findOffered(slotId) : null;
+      return chosen && chosen.id === slot.id ? null : 'Ese no es el horario que ha elegido el lead: reserva solo el que ha elegido.';
+    }
+    if (kind === 'offer_slots' || kind === 'reschedule') {
+      // Solo si ya lo vio en un mensaje anterior: uno ofrecido en este mismo turno todavía no lo ha podido elegir.
+      return this.offeredBefore.has(slot.id) ? null : 'No reserves todavía: el lead aún no ha visto este horario. Ofréceselo y espera a que te diga cuál prefiere.';
+    }
+    return 'No reserves ni muevas la llamada en este mensaje: el lead no ha elegido ningún horario.';
   }
 
   private async dispatch(name: string, input: Record<string, unknown>): Promise<unknown> {

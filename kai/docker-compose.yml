@@ -1,7 +1,8 @@
 # KAI + PostgreSQL en tu propio servidor (opcional).
 #   1. Copia .env.example a .env y rellena al menos ENCRYPTION_KEY, APP_URL y POSTGRES_PASSWORD.
 #   2. docker compose up -d --build
-#   3. Abre APP_URL en el navegador.
+#   3. Pon delante un proxy con HTTPS en la misma máquina (Caddy, ver docs/DESPLIEGUE.md).
+#   4. Abre APP_URL en el navegador.
 services:
   db:
     image: postgres:16-alpine
@@ -27,10 +28,14 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://kai:${POSTGRES_PASSWORD}@db:5432/kai
+      # La contraseña va aparte (PGPASSWORD) y no dentro de la dirección: así funciona aunque lleve # / : ? % @.
+      DATABASE_URL: postgres://kai@db:5432/kai
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       SERVE_FRONTEND: 'true'
     ports:
-      - '3000:3000'
+      # Solo accesible desde el propio servidor: pon delante un proxy con HTTPS (Caddy) en la misma máquina.
+      # Con «3000:3000» quedaría abierto a internet sin HTTPS aunque el cortafuegos (UFW) lo bloquee.
+      - '127.0.0.1:3000:3000'
 
 volumes:
   kai-db:

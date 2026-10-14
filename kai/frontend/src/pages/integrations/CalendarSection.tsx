@@ -137,8 +137,8 @@ function GoogleCard({ data, google, calendly, canManage }: { data: IntegrationsR
           </div>
           {available && (
             <p className="xs subtle">
-              Te llevaremos a Google para que elijas tu cuenta y aceptes los permisos. Después volverás aquí automáticamente. Si Google te dice que la app no
-              está verificada o que no tienes acceso, pide a quien administra KAI que añada tu email como usuario de prueba.
+              Te llevaremos a Google para que elijas tu cuenta y aceptes los permisos. Después volverás aquí automáticamente. Si Google te dice que no
+              tienes acceso o que la aplicación no está verificada, avisa a quien administra KAI: tiene que publicarla y verificarla en Google.
             </p>
           )}
         </div>

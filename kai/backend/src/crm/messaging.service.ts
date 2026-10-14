@@ -1,4 +1,4 @@
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { alerts, conversations, leads, messages } from '../database/schema.js';
 import type { TemplateRef } from '../lib/domain.js';
@@ -11,8 +11,8 @@ import { connectionCredentials, getActiveConnection, markConnectionError } from 
 import { friendlyMetaError, GraphApiError } from '../integrations/meta/graph.js';
 import { incrementUsage } from '../plans/plans.service.js';
 import { createAlert, resolveAlertsFor } from './alerts.service.js';
-import { getConversation, insertMessage, type Message } from './conversations.service.js';
-import { applyPipelineEvent, cancelPendingAutomationsForLead, recordLeadEvent } from './leads.service.js';
+import { applyMessageCounters, getConversation, insertMessage, type Message } from './conversations.service.js';
+import { applyPipelineEvent, cancelPendingAutomationsForLead, isUniqueViolation, recordLeadEvent } from './leads.service.js';
 
 export type MessagePurpose = 'reply' | 'manual' | 'first_contact' | 'follow_up' | 'confirmation' | 'reminder' | 'no_show' | 'handoff';
 
@@ -22,7 +22,7 @@ export interface SendMessageInput {
   text: string;
   sender: { type: 'kai' | 'human' | 'system'; userId?: string | null };
   purpose: MessagePurpose;
-  /** Parámetros extra para plantillas de WhatsApp ({{2}}, {{3}}…). {{1}} es siempre el nombre del lead. */
+  /** Parámetros extra para plantillas de WhatsApp ({{2}}, {{3}}…). {{1}} es siempre el nombre del lead (o 👋 si no se sabe). */
   templateExtraParams?: string[];
   metadata?: Record<string, unknown>;
 }
@@ -40,6 +40,9 @@ const TEMPLATE_FOR_PURPOSE: Partial<Record<MessagePurpose, 'firstContact' | 'fol
   reminder: 'reminder',
   no_show: 'noShow',
 };
+
+/** Lo que recibe {{1}} en las plantillas de WhatsApp cuando no se sabe el nombre del lead. */
+export const TEMPLATE_NAME_FALLBACK = '👋';
 
 /**
  * Envía un mensaje al lead por el canal de la conversación, respetando las reglas de cada plataforma
@@ -119,13 +122,18 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     }
   }
 
+  // Se guarda ANTES de llamar al canal («en cola», con la hora en que se decide enviarlo): un mensaje del lead que
+  // llegue mientras se envía queda detrás de esta respuesta (sin contestar), no delante como si ya se hubiera respondido.
+  const metadata: Record<string, unknown> = { ...input.metadata, purpose: input.purpose };
+  const queued = await insertMessage({ ...base, content: text, status: 'queued', metadata });
   try {
     let externalId: string | null;
     let content = text;
     let contentType: 'text' | 'template' = 'text';
-    const metadata: Record<string, unknown> = { ...input.metadata, purpose: input.purpose };
     if (template && adapter.sendTemplate) {
-      const params = [firstName(lead.name) || 'hola', ...(input.templateExtraParams ?? [])];
+      // {{1}} = nombre. Sin nombre (formularios que no lo piden, leads de WhatsApp sin perfil) va un saludo con la
+      // mano: las plantillas empiezan por «Hola {{1}}, …» y con «hola» el lead leería «Hola hola, …».
+      const params = [firstName(lead.name) || TEMPLATE_NAME_FALLBACK, ...(input.templateExtraParams ?? [])];
       ({ externalId } = await adapter.sendTemplate(ctx, template, params));
       content = `[Plantilla «${template.name}»] ${params.join(' · ')}`;
       contentType = 'template';
@@ -134,7 +142,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     } else {
       ({ externalId } = await adapter.sendText(ctx, text, { humanAgent: humanAgentTag }));
     }
-    const message = await recordSentMessage({ ...base, content, contentType, externalId, status: 'sent', metadata });
+    const message = await recordSentMessage(queued, { content, contentType, externalId, metadata });
     // Los leads del simulador no consumen el cupo mensual de mensajes de KAI.
     if (input.sender.type === 'kai' && !lead.isTest) await incrementUsage(input.businessId, 'ai_messages');
     if (input.sender.type === 'human') {
@@ -149,7 +157,17 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   } catch (err) {
     // Al entrenador se le muestra un motivo comprensible en español; el error técnico de Meta queda en error_logs.
     const reason = friendlyMetaError(err, adapter.label);
-    const message = await insertMessage({ ...base, content: text, status: 'failed', error: reason.slice(0, 500), metadata: { ...input.metadata, purpose: input.purpose } });
+    const [message] = await db
+      .update(messages)
+      .set({ status: 'failed', error: reason.slice(0, 500) })
+      .where(and(eq(messages.id, queued.id), eq(messages.status, 'queued')))
+      .returning();
+    if (!message) {
+      // El mensaje ya había salido: el fallo es de lo que se anota después. No se da por no enviado (ni se reintenta).
+      await logError('channel.after_send', err, { channel: conv.channel, conversationId: conv.id }, input.businessId);
+      const [sent] = await db.select().from(messages).where(eq(messages.id, queued.id)).limit(1);
+      return { message: sent ?? queued, delivered: true };
+    }
     await logError('channel.send', err, { channel: conv.channel, conversationId: conv.id }, input.businessId);
     if (err instanceof GraphApiError && err.isAuthError && connectionId) {
       await markConnectionError(connectionId, reason);
@@ -168,53 +186,65 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
 }
 
 /**
- * Guarda un mensaje ya enviado. Si el eco de Instagram llegó antes y lo registró como escrito por el
- * entrenador desde la app (mismo id de Meta), se corrige esa fila en vez de dar el envío por fallido,
- * y la conversación vuelve a quedar como estaba antes del eco: ni se queda KAI en pausa por su propio
- * mensaje, ni se reactiva en una conversación que llevaba el entrenador, ni se da por atendido un escalado.
+ * Da por enviado el mensaje que se guardó en cola antes de llamar al canal. Si el eco de Instagram llegó antes y se
+ * registró como escrito por el entrenador desde la app (mismo id de Meta), ese eco sobra: se borra, y la conversación
+ * vuelve a quedar como estaba antes del eco: ni se queda KAI en pausa por su propio mensaje, ni se reactiva en una
+ * conversación que llevaba el entrenador, ni se da por atendido un escalado o un aviso.
  */
-async function recordSentMessage(input: Parameters<typeof insertMessage>[0]): Promise<Message> {
+async function recordSentMessage(
+  queued: Message,
+  patch: { content: string; contentType: 'text' | 'template'; externalId: string | null; metadata: Record<string, unknown> },
+): Promise<Message> {
+  const db = getDb();
+  const markSent = () => db.update(messages).set({ status: 'sent', ...patch }).where(eq(messages.id, queued.id)).returning();
+  let rows: Message[];
   try {
-    return await insertMessage(input);
+    rows = await markSent();
   } catch (err) {
-    if (!input.externalId) throw err;
-    const db = getDb();
+    if (!patch.externalId || !isUniqueViolation(err)) throw err;
     const [echo] = await db
       .select()
       .from(messages)
-      .where(and(eq(messages.businessId, input.businessId), eq(messages.externalId, input.externalId)))
+      .where(and(eq(messages.businessId, queued.businessId), eq(messages.externalId, patch.externalId)))
       .limit(1);
-    if (!echo) throw err;
-    const [fixed] = await db
-      .update(messages)
-      .set({ senderType: input.senderType, senderUserId: input.senderUserId ?? null, content: input.content, contentType: input.contentType ?? 'text', metadata: input.metadata ?? {} })
-      .where(eq(messages.id, echo.id))
-      .returning();
-    const before = echo.metadata.before as { aiEnabled: boolean; handoffActive: boolean; handoffReason: string | null } | undefined;
-    const wasEcho = echo.senderType === 'human' && echo.metadata.via === 'instagram_app';
-    if (wasEcho && before) {
-      await db
-        .update(conversations)
-        .set({ aiEnabled: before.aiEnabled, handoffActive: before.handoffActive, handoffReason: before.handoffReason, updatedAt: new Date() })
-        .where(eq(conversations.id, input.conversationId));
-      // El eco cerró el aviso del escalado al darlo por atendido: se vuelve a abrir.
-      if (before.handoffActive)
-        await db
-          .update(alerts)
-          .set({ status: 'open', resolvedAt: null })
-          .where(
-            and(
-              eq(alerts.businessId, input.businessId),
-              eq(alerts.leadId, input.leadId),
-              eq(alerts.type, 'handoff'),
-              eq(alerts.status, 'resolved'),
-              gte(alerts.resolvedAt, echo.createdAt),
-            ),
-          );
-    } else if (wasEcho && input.senderType === 'kai') {
-      // Eco guardado sin el estado previo (versión anterior): se deshace al menos la pausa que puso.
-      await db.update(conversations).set({ aiEnabled: true, updatedAt: new Date() }).where(eq(conversations.id, input.conversationId));
-    }
-    return fixed;
+    if (!echo || echo.id === queued.id) throw err;
+    await db.delete(messages).where(eq(messages.id, echo.id));
+    rows = await markSent();
+    await undoEchoEffects(queued, echo);
   }
+  const [sent] = rows;
+  await applyMessageCounters(sent);
+  return sent;
+}
+
+/** Deshace lo que hizo el eco de Instagram al tomarse por una respuesta del entrenador (ver handleInstagramEcho). */
+async function undoEchoEffects(queued: Message, echo: Message) {
+  const db = getDb();
+  const before = echo.metadata.before as { aiEnabled: boolean; handoffActive: boolean; handoffReason: string | null } | undefined;
+  const wasEcho = echo.senderType === 'human' && echo.metadata.via === 'instagram_app';
+  if (!wasEcho) return;
+  if (before) {
+    await db
+      .update(conversations)
+      .set({ aiEnabled: before.aiEnabled, handoffActive: before.handoffActive, handoffReason: before.handoffReason, updatedAt: new Date() })
+      .where(eq(conversations.id, queued.conversationId));
+  } else if (queued.senderType === 'kai') {
+    // Eco guardado sin el estado previo (versión anterior): se deshace al menos la pausa que puso.
+    await db.update(conversations).set({ aiEnabled: true, updatedAt: new Date() }).where(eq(conversations.id, queued.conversationId));
+  }
+  // El eco cerró avisos al darlos por atendidos (el escalado, «te ha escrito», «contacto manual»): se vuelven a abrir.
+  const reopen: (typeof alerts.$inferSelect)['type'][] = ['client_message', 'new_lead_manual'];
+  if (before?.handoffActive) reopen.push('handoff');
+  await db
+    .update(alerts)
+    .set({ status: 'open', resolvedAt: null })
+    .where(
+      and(
+        eq(alerts.businessId, queued.businessId),
+        eq(alerts.leadId, queued.leadId),
+        inArray(alerts.type, reopen),
+        eq(alerts.status, 'resolved'),
+        gte(alerts.resolvedAt, echo.createdAt),
+      ),
+    );
 }

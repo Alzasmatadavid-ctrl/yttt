@@ -1,8 +1,9 @@
 import { and, eq, ne } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { calendarConnections } from '../database/schema.js';
+import { alerts, calendarConnections } from '../database/schema.js';
 import { decryptJson, encryptJson } from '../lib/crypto.js';
 import { audit, logError } from '../audit/audit.service.js';
+import { createAlert } from '../crm/alerts.service.js';
 import { refreshGoogleToken, type GoogleTokens } from './providers/google.js';
 import { calendlyDeleteWebhook } from './providers/calendly.js';
 
@@ -108,6 +109,8 @@ export async function saveCalendarConnection(
     .values(values)
     .onConflictDoUpdate({ target: [calendarConnections.businessId, calendarConnections.provider], set: values })
     .returning();
+  // Recién conectado (o reconectado): el aviso «Tu calendario no responde» ya está atendido.
+  await resolveCalendarDownAlert(businessId);
   await audit({ businessId, actorType: 'user', actorUserId: userId, action: 'calendar.connected', entityType: 'calendar_connection', entityId: row.id, metadata: { provider: input.provider } });
   return row;
 }
@@ -121,4 +124,45 @@ export async function updateCalendarConnection(id: string, patch: Partial<typeof
 
 export async function markCalendarError(id: string, error: string) {
   await updateCalendarConnection(id, { status: 'error', lastError: error.slice(0, 500) });
+}
+
+/** Título del aviso de calendario caído (se busca por él para cerrarlo cuando vuelve a funcionar). */
+export const CALENDAR_DOWN_ALERT_TITLE = 'Tu calendario no responde: KAI no puede ofrecer horarios';
+
+const CALENDAR_LABEL: Record<CalendarConnection['provider'], string> = { google: 'Google Calendar', calendly: 'Calendly' };
+
+/**
+ * El calendario conectado ha fallado (token caducado o revocado, permisos retirados, servicio caído…).
+ * Además de marcar la conexión con el error (que solo se ve en Integraciones), avisa al entrenador: mientras
+ * no lo arregle, KAI no puede ofrecer horarios ni reservar llamadas a sus leads. Un solo aviso abierto a la vez.
+ */
+export async function reportCalendarFailure(conn: CalendarConnection, error: string) {
+  await markCalendarError(conn.id, error);
+  const label = CALENDAR_LABEL[conn.provider];
+  await createAlert({
+    businessId: conn.businessId,
+    type: 'integration_error',
+    severity: 'critical',
+    title: CALENDAR_DOWN_ALERT_TITLE,
+    body:
+      conn.provider === 'calendly' && !conn.calendarId
+        ? 'Falta elegir qué tipo de evento de Calendly usa KAI para tus llamadas. Entra en Integraciones y selecciónalo: hasta entonces KAI no puede ofrecer horarios a tus leads.'
+        : `KAI no ha podido consultar tu ${label}, así que ahora mismo no puede ofrecer horarios ni reservar llamadas a tus leads. ` +
+          `Entra en Integraciones y vuelve a conectar ${label}. Mientras tanto, escribe tú a los leads que te pidan una llamada.`,
+    dedupeByTitle: true,
+  });
+}
+
+/** El calendario vuelve a responder: la conexión deja de estar en error y se cierra el aviso «no responde». */
+export async function markCalendarHealthy(conn: CalendarConnection) {
+  if (conn.status !== 'error') return;
+  await updateCalendarConnection(conn.id, { status: 'connected', lastError: null });
+  await resolveCalendarDownAlert(conn.businessId);
+}
+
+async function resolveCalendarDownAlert(businessId: string) {
+  await getDb()
+    .update(alerts)
+    .set({ status: 'resolved', resolvedAt: new Date() })
+    .where(and(eq(alerts.businessId, businessId), eq(alerts.type, 'integration_error'), eq(alerts.title, CALENDAR_DOWN_ALERT_TITLE), eq(alerts.status, 'open')));
 }

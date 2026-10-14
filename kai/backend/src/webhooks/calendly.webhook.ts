@@ -4,9 +4,9 @@
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
-import { appointments, conversations, leads } from '../database/schema.js';
+import { appointments, calendarConnections, conversations, leads } from '../database/schema.js';
 import { decryptJson } from '../lib/crypto.js';
-import { getCalendarConnection, type CalendlyCredentials } from '../calendar/connections.js';
+import { getCalendarConnection, type CalendarConnection, type CalendlyCredentials } from '../calendar/connections.js';
 import { verifyCalendlySignature } from '../calendar/providers/calendly.js';
 import { afterBooked } from '../calendar/calendar.service.js';
 import { applyPipelineEvent, createLead, recordLeadEvent } from '../crm/leads.service.js';
@@ -22,7 +22,8 @@ interface CalendlyPayload {
     name?: string;
     rescheduled?: boolean;
     tracking?: { utm_content?: string | null; utm_source?: string | null };
-    scheduled_event?: { uri: string; start_time: string; end_time: string; location?: { join_url?: string | null } };
+    /** `event_type`: URI del tipo de evento reservado (el webhook avisa de TODOS los tipos de evento del entrenador). */
+    scheduled_event?: { uri: string; name?: string; event_type?: string; start_time: string; end_time: string; location?: { join_url?: string | null } };
   };
 }
 
@@ -57,6 +58,12 @@ export async function handleCalendlyEvent(businessId: string, connectionId: stri
   }
 
   if (body.event !== 'invitee.created') return { ignored: true };
+  // El webhook es de toda la cuenta: también llegan las sesiones, consultas o clases que el entrenador tenga en
+  // Calendly. Solo se registra la llamada (el tipo de evento elegido en Integraciones) o lo reservado desde un
+  // enlace de KAI (p. ej. si el entrenador cambió después el tipo de evento). Lo demás no es asunto de KAI: ni
+  // crea leads, ni mueve el pipeline, ni manda confirmaciones ni recordatorios.
+  const [connection] = await db.select().from(calendarConnections).where(and(eq(calendarConnections.businessId, businessId), eq(calendarConnections.id, connectionId))).limit(1);
+  if (!isKaiCallBooking(connection, ev.event_type, body.payload.tracking?.utm_source)) return { ignored: true, reason: 'other_event_type' };
   const [exists] = await db
     .select({ id: appointments.id })
     .from(appointments)
@@ -101,4 +108,11 @@ export async function handleCalendlyEvent(businessId: string, connectionId: stri
   if (conv) await updateConversationState(businessId, conv.id, { offeredSlots: [], callAccepted: true });
   await afterBooked(businessId, appt, { type: 'integration' }, Boolean(conv));
   return { booked: true, appointmentId: appt.id };
+}
+
+/** ¿Es una reserva de la llamada de KAI? Sin tipo de evento elegido (o sin dato en el aviso) no se puede distinguir: se acepta. */
+function isKaiCallBooking(connection: CalendarConnection | undefined, eventType: string | undefined, utmSource: string | null | undefined): boolean {
+  if (utmSource === 'kai') return true;
+  if (!connection?.calendarId || !eventType) return true;
+  return eventType === connection.calendarId;
 }

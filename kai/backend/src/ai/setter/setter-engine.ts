@@ -9,6 +9,7 @@
  *  6. Envía por el canal, actualiza CRM/estado y programa el seguimiento.
  */
 import { and, eq } from 'drizzle-orm';
+import type { z } from 'zod';
 import { getDb } from '../../database/client.js';
 import { messages, leads } from '../../database/schema.js';
 import { env } from '../../config/env.js';
@@ -19,9 +20,11 @@ import { analyzeLeadMessages, type LeadAnalysis } from '../analysis/analyzer.js'
 import { loadBusinessContext, loadConversationContext, loadLeadContext, type BusinessContext, type ConversationContext, type LeadContext } from '../context/context.js';
 import { saveLeadMemories } from '../memory/lead-memory.js';
 import { getLLMProvider } from '../providers/index.js';
-import { SetterToolbox } from '../tools/setter-tools.js';
-import { judgeReply, validateReply, type ValidationContext } from '../validation/output-validator.js';
+import type { LLMProvider, StructuredRequest } from '../providers/types.js';
+import { isDeniedRecord, SetterToolbox } from '../tools/setter-tools.js';
+import { judgeReply, validateReply, type ValidationContext, type ValidationResult } from '../validation/output-validator.js';
 import { createSetterAgent, disclosureIntro, firstMessageGreeting, RuleBasedSetterAgent, type AgentMode, type SetterAgent } from './agents.js';
+import { describeServices } from '../prompts/setter.prompt.js';
 import { decideDirective, oneQuestion, type Directive, type SetterState } from './strategy.js';
 import { humanSlotLabel } from '../../lib/time.js';
 import { applyPipelineEvent, markOptedOut, mergeQualification } from '../../crm/leads.service.js';
@@ -31,6 +34,7 @@ import { sendMessage, type MessagePurpose } from '../../crm/messaging.service.js
 import { createAlert } from '../../crm/alerts.service.js';
 import { checkUsageLimit } from '../../plans/plans.service.js';
 import { scheduleNoReplyFollowUp } from '../../automation/followups.js';
+import { scheduleJob } from '../../automation/jobs.js';
 import { firstName, truncate } from '../../lib/text.js';
 
 export interface SetterRunResult {
@@ -45,20 +49,46 @@ export interface SetterRunResult {
 
 const MAX_ATTEMPTS = 3;
 
+/** El entrenador ha elegido tratar a los leads «de usted» (Ajustes de KAI → Tono). */
+const isUsted = (biz: BusinessContext) => biz.settings.tone?.addressing === 'usted';
+
+/** Elige la forma de tú o de usted de un texto fijo según el trato configurado. */
+const tuUsted = (biz: BusinessContext, tu: string, usted: string) => (isUsted(biz) ? usted : tu);
+
 export const MEDICAL_MESSAGE =
   'Eso sí que sería mejor revisarlo con un profesional sanitario. En cuanto al entrenamiento, podemos ayudarte a valorar tus objetivos dentro de lo que sea adecuado para ti.';
 
-function defaultHandoffMessage(reason: HandoffReason, trainer: string): string | null {
+const MEDICAL_MESSAGE_USTED =
+  'Eso sí que sería mejor revisarlo con un profesional sanitario. En cuanto al entrenamiento, podemos ayudarle a valorar sus objetivos dentro de lo que sea adecuado para usted.';
+
+/** Aviso sanitario fijo con el trato configurado (tú o usted). */
+export function medicalMessage(biz: BusinessContext): string {
+  return tuUsted(biz, MEDICAL_MESSAGE, MEDICAL_MESSAGE_USTED);
+}
+
+function defaultHandoffMessage(reason: HandoffReason, trainer: string, biz: BusinessContext): string | null {
   switch (reason) {
     case 'human_request':
-      return `¡Claro! Le paso tu mensaje a ${trainer} y te escribe directamente en cuanto pueda.`;
+      return tuUsted(
+        biz,
+        `¡Claro! Le paso tu mensaje a ${trainer} y te escribe directamente en cuanto pueda.`,
+        `¡Claro! Le paso su mensaje a ${trainer} y le escribe directamente en cuanto pueda.`,
+      );
     case 'complex_negotiation':
-      return `Eso prefiero que lo veas directamente con ${trainer}. Le paso tu mensaje y te responde en cuanto pueda.`;
+      return tuUsted(
+        biz,
+        `Eso prefiero que lo veas directamente con ${trainer}. Le paso tu mensaje y te responde en cuanto pueda.`,
+        `Eso prefiero que lo vea directamente con ${trainer}. Le paso su mensaje y le responde en cuanto pueda.`,
+      );
     case 'out_of_scope':
     case 'exceptional_request':
-      return `Le paso tu mensaje a ${trainer} para que te responda directamente.`;
+      return tuUsted(biz, `Le paso tu mensaje a ${trainer} para que te responda directamente.`, `Le paso su mensaje a ${trainer} para que le responda directamente.`);
     case 'technical_issue':
-      return 'Vaya, lo siento. Le paso el aviso al equipo para revisarlo y te escribimos enseguida.';
+      return tuUsted(
+        biz,
+        'Vaya, lo siento. Le paso el aviso al equipo para revisarlo y te escribimos enseguida.',
+        'Vaya, lo siento. Le paso el aviso al equipo para revisarlo y le escribimos enseguida.',
+      );
     default:
       return null; // enfado, médico (mensaje propio), calidad: sin mensaje automático
   }
@@ -74,27 +104,83 @@ export function buildValidationContext(biz: BusinessContext, toolbox: SetterTool
     allowedPricesCents: biz.services.filter((s) => s.priceCents > 0).map((s) => s.priceCents),
     currencies: [...new Set([biz.business.currency, ...biz.services.map((s) => s.currency)].filter(Boolean))],
     allowedUrls: toolbox?.allowedUrls() ?? [],
-    factsText: [t.credentials, t.methodDescription, t.transformation, t.idealClient, ...biz.services.map((s) => `${s.description} ${s.includes.join(' ')}`)].join('\n'),
+    // Los mismos datos del negocio que recibe la IA en su prompt (una cifra que esté aquí no es inventada).
+    factsText: [
+      t.credentials,
+      t.specialty,
+      t.methodName,
+      t.methodDescription,
+      t.transformation,
+      t.idealClient,
+      ...biz.services.map((s) => `${s.name} ${s.description} ${s.includes.join(' ')}${s.durationWeeks ? ` ${s.durationWeeks} semanas` : ''}`),
+      `${biz.settings.callLabel} de ${biz.settings.callDurationMinutes} minutos ${biz.settings.callDescription}`,
+    ].join('\n'),
     isFollowUp: opts.isFollowUp,
     assistantName: biz.settings.assistantName,
     now: new Date(),
   };
 }
 
-function factsSummary(biz: BusinessContext, leadCtx: LeadContext, toolbox: SetterToolbox | null): string {
-  const services = biz.services.map((s) => `${s.name}: ${(s.priceCents / 100).toFixed(2)} ${s.currency} (${s.billingPeriod}). ${s.description}`).join('\n');
+/**
+ * «Datos disponibles» para el juez con IA: los mismos que la IA recibe en su prompt (servicios con lo que incluyen y su
+ * duración, modalidad, la llamada…). Si faltara alguno, una respuesta correcta se rechazaría por «inventada».
+ */
+export function factsSummary(biz: BusinessContext, leadCtx: LeadContext, toolbox: SetterToolbox | null): string {
+  const t = biz.trainer;
+  const s = biz.settings;
+  const trainer = t.displayName || 'el entrenador';
   const tz = biz.business.timezone;
   const now = new Date();
   const times = toolbox?.allowedTimes().map((d) => humanSlotLabel(d, tz, now)).join(', ') || '(ninguno)';
   return [
-    `Entrenador: ${biz.trainer.displayName}. Especialidad: ${biz.trainer.specialty}. Método: ${biz.trainer.methodName} ${biz.trainer.methodDescription}`,
-    `Credenciales reales: ${biz.trainer.credentials || '(ninguna)'}`,
-    `Servicios: ${services || '(sin precio configurado)'}`,
+    `Entrenador: ${trainer}. Especialidad: ${t.specialty || '(no especificada)'}. Método: ${t.methodName || '(sin nombre)'}${t.methodDescription ? ` — ${t.methodDescription}` : ''}`,
+    `Asistente: ${s.assistantName || 'KAI'}, el asistente virtual ${s.persona === 'trainer' ? `que escribe en nombre de ${trainer}` : `del equipo de ${trainer}`}`,
+    `Cliente ideal: ${t.idealClient || '(no especificado)'}`,
+    `Transformación que consigue con sus clientes: ${t.transformation || '(no especificada)'}`,
+    `Modalidad: ${t.modality}`,
+    `Credenciales reales: ${t.credentials || '(ninguna)'}`,
+    `Servicios y precios reales:\n${describeServices(biz)}`,
+    `La llamada: ${s.callLabel} de ${s.callDurationMinutes} minutos${s.callDescription ? `. ${s.callDescription}` : ''}`,
     `Ahora: ${humanSlotLabel(now, tz, now)} (zona horaria ${tz})`,
     `Horarios reales ofrecidos/reservados (hora local, ${tz}): ${times}`,
     `Memoria del lead: ${leadCtx.memories.map((m) => m.content).join(' | ') || '(nada)'}`,
     `Cualificación conocida: ${Object.entries(leadCtx.lead.qualification).map(([k, v]) => `${k}=${v.value}`).join(' | ') || '(nada)'}`,
   ].join('\n');
+}
+
+const JUDGE_UNAVAILABLE = 'El control de calidad con IA no respondió.';
+
+/**
+ * Pasa el borrador por el juez con IA. judgeReply da por bueno el borrador si la llamada falla, así que aquí se vigila
+ * la llamada: si no responde (error de la API o respuesta que no cumple el formato), se reintenta una vez y, si sigue
+ * fallando, devuelve null (el borrador NO queda aprobado).
+ */
+async function judgeWithRetry(provider: LLMProvider, businessId: string, input: Parameters<typeof judgeReply>[1]): Promise<ValidationResult | null> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let failed = false;
+    const watched: LLMProvider = {
+      id: provider.id,
+      describe: () => provider.describe(),
+      chat: (req) => provider.chat(req),
+      structured: async <T extends z.ZodType>(req: StructuredRequest<T>): Promise<z.infer<T>> => {
+        try {
+          const out = await provider.structured(req);
+          const parsed = req.schema.safeParse(out);
+          if (!parsed.success) throw new Error(`Respuesta del juez con formato no válido: ${parsed.error.message}`);
+          return parsed.data as z.infer<T>;
+        } catch (err) {
+          failed = true;
+          lastError = err;
+          throw err;
+        }
+      },
+    };
+    const result = await judgeReply(watched, input);
+    if (!failed) return result;
+  }
+  await logError('ai.setter.judge', lastError ?? new Error(JUDGE_UNAVAILABLE), {}, businessId, 'warn');
+  return null;
 }
 
 /**
@@ -154,12 +240,16 @@ export async function generateValidatedMessage(input: {
       .map((m) => m.content);
     let result = validateReply(text, vctx);
     if (result.ok && input.useJudge && provider && env.AI_JUDGE_ENABLED) {
-      result = await judgeReply(provider, {
+      const judged = await judgeWithRetry(provider, input.biz.business.id, {
         reply: text,
         lastLeadMessages: input.convCtx.pendingInbound.map((m) => m.content).join('\n'),
         facts: factsSummary(input.biz, input.leadCtx, input.toolbox),
         objective: input.directive.instruction,
       });
+      // Sin el juez no se aprueba en silencio: el turno pasa al motor de reglas (determinista y validado) o se escala.
+      // Volver a redactar con la IA no serviría de nada mientras el juez no responda.
+      if (!judged) return { text: null, attempts: attempt, issues: [JUDGE_UNAVAILABLE], meta };
+      result = judged;
     }
     if (result.ok) return { text, attempts: attempt, issues: [], meta };
     feedback = result.issues;
@@ -202,7 +292,7 @@ async function proactiveBlock(biz: BusinessContext, lead: LeadContext['lead']): 
 export function qualityIssueSummary(issues: string[]): string {
   const reasons = new Set<string>();
   for (const i of issues) {
-    if (/^Error al generar/.test(i)) reasons.add('la IA no respondió por un problema técnico temporal');
+    if (/^Error al generar|^El control de calidad con IA no respondió/.test(i)) reasons.add('la IA no respondió por un problema técnico temporal');
     else if (/horario|ese día no hay/.test(i)) reasons.add('la respuesta mencionaba un horario que no está en tu agenda');
     else if (/importe|moneda/.test(i)) reasons.add('la respuesta mencionaba un precio que no coincide con tus servicios');
     else if (/enlace/.test(i)) reasons.add('la respuesta incluía un enlace que no has configurado');
@@ -226,8 +316,9 @@ export function qualityIssueSummary(issues: string[]): string {
  * turno, se ejecuta ahora. Devuelve true si ha tenido que hacerlo (hay que redactar de nuevo con el resultado).
  */
 export async function ensureDirectiveAction(directive: Directive, toolbox: SetterToolbox, leadCtx: LeadContext): Promise<boolean> {
-  // Si la IA lo intentó y falló (p. ej. el hueco se ocupó), ya lo habrá explicado: no se repite.
-  const attempted = (names: string[]) => toolbox.records.some((r) => names.includes(r.name));
+  // Si la IA lo intentó y falló (p. ej. el hueco se ocupó), ya lo habrá explicado: no se repite. Un intento que la
+  // caja de herramientas no permitió (otro horario, por ejemplo) no cuenta: la acción del objetivo sigue pendiente.
+  const attempted = (names: string[]) => toolbox.records.some((r) => names.includes(r.name) && !isDeniedRecord(r));
   if (directive.kind === 'book_slot' && directive.slotId && !attempted(['book_call', 'reschedule_call']) && !toolbox.bookingUrl) {
     await toolbox.run(leadCtx.upcomingAppointment ? 'reschedule_call' : 'book_call', { slot_id: directive.slotId });
     return true;
@@ -291,6 +382,7 @@ export async function runSetterReply(businessId: string, conversationId: string,
 
   const provider = getLLMProvider();
   const lastPending = convCtx.pendingInbound[convCtx.pendingInbound.length - 1];
+  const answeredIds = convCtx.pendingInbound.map((m) => m.id);
 
   // 2) Análisis.
   let analysis: LeadAnalysis | null = null;
@@ -330,7 +422,7 @@ export async function runSetterReply(businessId: string, conversationId: string,
   const lastText = convCtx.pendingInbound.map((m) => m.content).join(' ').slice(0, 200);
   const handoffDetail = lastText ? `Último mensaje: “${lastText}”` : '';
   if (analysis?.flags.optOut) {
-    const bye = withIntroIfFirst(biz, convCtx, lead.name, 'Entendido, no te escribiremos más. ¡Mucho ánimo!', { greet: false });
+    const bye = withIntroIfFirst(biz, convCtx, lead.name, tuUsted(biz, 'Entendido, no te escribiremos más. ¡Mucho ánimo!', 'Entendido, no le escribiremos más. ¡Mucho ánimo!'), { greet: false });
     const res = await sendKai(biz, conversationId, bye, 'reply', { kind: 'opt_out_ack' });
     await markOptedOut(businessId, lead.id);
     await audit({ businessId, actorType: 'kai', action: 'lead.opted_out', entityType: 'lead', entityId: lead.id });
@@ -344,16 +436,16 @@ export async function runSetterReply(businessId: string, conversationId: string,
     [Boolean(analysis?.flags.outOfScope && rules.outOfScope), 'out_of_scope'],
   ];
   if (analysis?.flags.medical && rules.medical) {
-    const text = withIntroIfFirst(biz, convCtx, lead.name, MEDICAL_MESSAGE);
+    const text = withIntroIfFirst(biz, convCtx, lead.name, medicalMessage(biz));
     const res = await sendKai(biz, conversationId, text, 'reply', { kind: 'medical_redirect' });
     await triggerHandoff(businessId, conversationId, 'medical', handoffDetail);
     return { status: 'handoff', reason: 'medical', messageId: res.message.id, text, analysis: analysisSummary };
   }
   for (const [hit, reason] of handoffChecks) {
     if (!hit) continue;
-    let msg = rules.handoffMessage?.trim() || defaultHandoffMessage(reason, trainer);
+    let msg = rules.handoffMessage?.trim() || defaultHandoffMessage(reason, trainer, biz);
     // Pregunta si es un bot: primero la verdad, sin el “¡Claro!” (sonaría a que confirma que es una persona).
-    if (msg && analysis?.flags.asksIfBot) msg = `Te soy sincero: soy ${biz.settings.assistantName || 'KAI'}, el asistente automatizado del equipo de ${trainer}. ${msg.replace(/^¡Claro!\s*/, '')}`;
+    if (msg && analysis?.flags.asksIfBot) msg = `${tuUsted(biz, 'Te', 'Le')} soy sincero: soy ${biz.settings.assistantName || 'KAI'}, el asistente automatizado del equipo de ${trainer}. ${msg.replace(/^¡Claro!\s*/, '')}`;
     else if (msg) msg = withIntroIfFirst(biz, convCtx, lead.name, msg);
     let messageId: string | undefined;
     if (msg && reason !== 'angry') messageId = (await sendKai(biz, conversationId, msg, 'handoff', { kind: 'handoff', reason })).message.id;
@@ -366,7 +458,7 @@ export async function runSetterReply(businessId: string, conversationId: string,
   const medicalNoticeSent = convCtx.history.some((m) => m.direction === 'outbound' && (m.metadata.kind === 'medical_notice' || m.metadata.kind === 'medical_redirect'));
   let medicalNoticeNow = false;
   if (analysis?.flags.medical && !rules.medical && !medicalNoticeSent) {
-    const notice = await sendKai(biz, conversationId, withIntroIfFirst(biz, convCtx, lead.name, MEDICAL_MESSAGE), 'reply', { kind: 'medical_notice' });
+    const notice = await sendKai(biz, conversationId, withIntroIfFirst(biz, convCtx, lead.name, medicalMessage(biz)), 'reply', { kind: 'medical_notice' });
     if (notice.delivered) {
       medicalNoticeNow = true;
       // La respuesta que sigue ya no es el primer mensaje de KAI (no debe volver a saludar ni presentarse).
@@ -381,11 +473,13 @@ export async function runSetterReply(businessId: string, conversationId: string,
   if (analysis?.flags.medical && !rules.medical) {
     notes.push(
       medicalNoticeNow
-        ? `Ha mencionado un tema de salud y acabas de enviarle este aviso en un mensaje aparte: “${MEDICAL_MESSAGE}”. No lo repitas: sigue la conversación sin dar consejos médicos.`
+        ? `Ha mencionado un tema de salud y acabas de enviarle este aviso en un mensaje aparte: “${medicalMessage(biz)}”. No lo repitas: sigue la conversación sin dar consejos médicos.`
         : 'Ha mencionado un tema de salud (ya le recomendaste revisarlo con un profesional sanitario): no des consejos médicos ni diagnósticos.',
     );
   }
-  const toolbox = new SetterToolbox(biz, leadCtx, conv);
+  // La caja de herramientas solo deja reservar o cancelar lo que pide el objetivo de este turno (lo decide la
+  // estrategia, no la IA): nada de cancelar mientras se pregunta si cancelar, ni reservar un horario que el lead no ha visto.
+  const toolbox = new SetterToolbox(biz, leadCtx, conv, { directive, leadAskedToCancel: Boolean(analysis?.flags.wantsCancel) });
   const agent = createSetterAgent(provider);
   let gen = await generateValidatedMessage({ agent, biz, leadCtx, convCtx, state: conv.state, directive, toolbox, mode: 'reply', extraNote: notes.join('\n'), useJudge: true });
   // La reserva o la cancelación no se dan por hechas porque el texto lo diga: si la IA no ejecutó la herramienta,
@@ -405,9 +499,13 @@ export async function runSetterReply(businessId: string, conversationId: string,
   }
 
   // 5) ¿Ha cambiado algo mientras generábamos? (nuevo mensaje del lead o el entrenador tomó el control)
+  // Si en este turno ya se hizo algo con efectos (reservar, cancelar o pasar la conversación al entrenador), la
+  // respuesta se envía igualmente: descartarla dejaría la acción sin confirmar al lead. El mensaje nuevo sigue pendiente
+  // (no está entre los que contesta esta respuesta) y se responde en el turno siguiente.
   convCtx = await loadConversationContext(businessId, conversationId);
   const newest = convCtx.history[convCtx.history.length - 1];
-  if (newest && lastPending && newest.direction === 'inbound' && newest.id !== lastPending.id && !toolbox.booked) {
+  const actedThisTurn = Boolean(toolbox.booked || toolbox.cancelled || toolbox.handoff);
+  if (newest && lastPending && newest.direction === 'inbound' && newest.id !== lastPending.id && !actedThisTurn) {
     return { status: 'skipped', reason: 'superseded', analysis: analysisSummary };
   }
   if (!convCtx.conversation.aiEnabled || convCtx.conversation.handoffActive) return { status: 'skipped', reason: 'taken_over', analysis: analysisSummary };
@@ -418,6 +516,9 @@ export async function runSetterReply(businessId: string, conversationId: string,
     attempts: gen.attempts,
     analysisEngine: analysis?.engine,
     toolCalls: toolbox.records,
+    // Mensajes del lead que contesta esta respuesta: uno que llegue mientras se envía y quede fechado antes que ella
+    // sigue pendiente (ver loadConversationContext).
+    repliesTo: answeredIds,
     ...gen.meta,
   });
   const statePatch: Partial<SetterState> = {};
@@ -426,7 +527,9 @@ export async function runSetterReply(businessId: string, conversationId: string,
     const counts = (conv.state as SetterState).askCounts ?? {};
     statePatch.askCounts = { ...counts, [directive.questionKey]: (counts[directive.questionKey] ?? 0) + 1 };
   }
-  else if (!gen.text.includes('?')) statePatch.lastAskedKey = undefined;
+  // Sin pregunta, o con otra pregunta (proponer la llamada, ofrecer horarios…): la respuesta siguiente del lead ya no
+  // contesta a la última variable de cualificación que se le preguntó.
+  else statePatch.lastAskedKey = undefined;
   if (directive.kind === 'reassure_call') statePatch.callReassuredAt = new Date().toISOString();
   // Canceló la llamada: no se le vuelve a proponer otra salvo que la pida.
   if (toolbox.cancelled) statePatch.callDeclinedAt = new Date().toISOString();
@@ -450,8 +553,17 @@ export async function runSetterReply(businessId: string, conversationId: string,
   }
   if (toolbox.handoff) {
     await triggerHandoff(businessId, conversationId, toolbox.handoff.reason, toolbox.handoff.detail);
-  } else if (sent.delivered && !toolbox.booked && !leadCtx.upcomingAppointment && directive.kind !== 'disqualify_kindly') {
+  } else if (sent.delivered && !toolbox.booked && !leadCtx.upcomingAppointment && directive.kind !== 'disqualify_kindly' && leadCtx.lead.signals.fit !== 'no') {
+    // Al lead que no encaja (p. ej. un menor) no se le persigue con seguimientos aunque se le haya dado el precio.
     await scheduleNoReplyFollowUp(businessId, lead.id, conversationId);
+  }
+  // ¿Ha escrito el lead mientras se enviaba esta respuesta? Ese mensaje no lo contesta: se asegura otro turno de KAI
+  // (si ya hay uno programado, se respeta su hora).
+  if (sent.delivered && !toolbox.handoff) {
+    const after = await loadConversationContext(businessId, conversationId);
+    if (after.pendingInbound.some((m) => !answeredIds.includes(m.id)) && after.conversation.aiEnabled && !after.conversation.handoffActive) {
+      await scheduleJob({ businessId, type: 'kai_reply', runAt: new Date(), payload: { conversationId, leadId: lead.id }, dedupeKey: `reply:${conversationId}`, maxAttempts: 2 });
+    }
   }
   await audit({ businessId, actorType: 'kai', action: 'kai.reply_sent', entityType: 'conversation', entityId: conversationId, metadata: { directive: directive.kind, attempts: gen.attempts, delivered: sent.delivered } });
   return {
@@ -508,7 +620,8 @@ export async function runFirstContact(businessId: string, conversationId: string
 
   let text: string | null;
   if (convCtx.conversation.channel === 'web') {
-    const gen = await generateValidatedMessage({ agent: createSetterAgent(provider), biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, toolbox: null, mode: 'first_contact', useJudge: false });
+    // También el primer mensaje pasa por el juez con IA (¿inventa?, ¿presiona?); si no lo supera, el del motor de reglas.
+    const gen = await generateValidatedMessage({ agent: createSetterAgent(provider), biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, toolbox: null, mode: 'first_contact', useJudge: true });
     text = gen.text ?? (await new RuleBasedSetterAgent().respond({ biz, leadCtx, convCtx, state: convCtx.conversation.state, directive, now: new Date(), feedback: [], toolbox: null, mode: 'first_contact' })).text;
   } else {
     // Texto de referencia; en WhatsApp lo que se envía es la plantilla aprobada.

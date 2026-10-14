@@ -3,7 +3,7 @@
  * Todos los webhooks (WhatsApp, Instagram, Meta Lead Ads, formularios, Calendly…) normalizan
  * sus datos y llaman aquí. Añadir un canal nuevo = un normalizador nuevo, sin tocar el CRM.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { aiSettings, businesses, messages } from '../database/schema.js';
 import { OVER_LIMIT_TAG, type ChannelKey, type LeadSource } from '../lib/domain.js';
@@ -13,13 +13,14 @@ import {
   applyPipelineEvent,
   cancelPendingAutomationsForLead,
   isUniqueViolation,
+  lastOptedOutAt,
   markOptedOut,
   recordLeadEvent,
   type Lead,
 } from '../crm/leads.service.js';
 import { getOrCreateConversation, insertMessage, type Conversation, type Message } from '../crm/conversations.service.js';
 import { createAlert } from '../crm/alerts.service.js';
-import { isOptOutRequest } from '../crm/opt-out.js';
+import { isCourtesyOnly, isOptOutRequest } from '../crm/opt-out.js';
 import { checkUsageLimit } from '../plans/plans.service.js';
 import { scheduleJob, scheduleOrReschedule } from '../automation/jobs.js';
 import { audit } from '../audit/audit.service.js';
@@ -92,6 +93,8 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     { type: 'lead' },
   );
   const conversation = await getOrCreateConversation(input.businessId, lead.id, input.channel, input.channelConnectionId);
+  const createdAt = await inboundTimestamp(conversation.id, input.sentAt);
+  const sentAtValid = input.sentAt && !Number.isNaN(input.sentAt.getTime());
   let message: Message;
   try {
     message = await insertMessage({
@@ -103,7 +106,9 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
       content: input.text || '(mensaje sin texto)',
       contentType: input.contentType ?? 'text',
       externalId: input.externalMessageId ?? null,
-      createdAt: input.sentAt,
+      // Si se ha movido, la hora que dio el canal queda guardada.
+      metadata: sentAtValid && input.sentAt!.getTime() !== createdAt.getTime() ? { sentAt: input.sentAt!.toISOString() } : undefined,
+      createdAt,
     });
   } catch (err) {
     // Meta entregó el mismo mensaje dos veces a la vez: el otro aviso ya lo ha guardado.
@@ -124,8 +129,12 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
   }
   // Ya estaba dado de baja y vuelve a escribir: KAI no le contesta, pero el entrenador tiene que enterarse
   // (sale en «Pendientes» y con un aviso). Si solo repite que no le escriban, se renueva la baja y nada más.
+  // Lo mismo si solo es cortesía («Gracias», «👍»… a la despedida de KAI): no hay nada que contestar. Salvo que
+  // tenga sin atender algo que escribió antes tras la baja: entonces sigue pendiente (con su aviso).
   if (lead.optedOut && !input.isTest) {
     if (isOptOutRequest(input.text)) await markOptedOut(input.businessId, lead.id, { type: 'lead' }, { messageId: message.id, detectedBy: 'inbound', repeated: true });
+    else if (isCourtesyOnly(input.text) && !(await optedOutLeadHasUnattended(input.businessId, lead)))
+      await markOptedOut(input.businessId, lead.id, { type: 'lead' }, { messageId: message.id, detectedBy: 'inbound', repeated: true, courtesy: true });
     else await alertOptedOutLeadWrote(input.businessId, lead, conversation, message);
   }
 
@@ -141,6 +150,24 @@ export async function receiveInboundMessage(input: InboundMessageInput) {
     });
   }
   return { duplicate: false as const, lead, leadCreated: created, conversation, message };
+}
+
+/**
+ * Hora con la que se guarda un mensaje entrante: la que da el canal (nunca en el futuro), pero siempre DESPUÉS de
+ * cualquier mensaje enviado que ya estuviera guardado al recibirlo. Ese envío no pudo tener en cuenta este mensaje:
+ * si quedara antes (WhatsApp da la hora en segundos, o el lead escribió mientras KAI enviaba su respuesta), se daría
+ * por contestado sin que nadie lo haya leído (ni KAI le respondería ni saldría en «Pendientes»).
+ */
+async function inboundTimestamp(conversationId: string, sentAt?: Date): Promise<Date> {
+  const now = new Date();
+  const at = sentAt && sentAt.getTime() < now.getTime() ? sentAt : now;
+  const [lastOut] = await getDb()
+    .select({ at: messages.createdAt })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'outbound')))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  return lastOut && lastOut.at.getTime() >= at.getTime() ? new Date(lastOut.at.getTime() + 1) : at;
 }
 
 /** ¿Va a responder KAI a este mensaje? (mismas condiciones que comprueba antes de analizarlo). */
@@ -171,12 +198,21 @@ async function registerOptOutFromInbound(businessId: string, lead: Lead, convers
   });
 }
 
+/** ¿Escribió el lead (dado de baja) algo después de la baja que el entrenador aún no ha visto? (antes de este mensaje) */
+async function optedOutLeadHasUnattended(businessId: string, lead: Lead): Promise<boolean> {
+  if (!lead.lastInboundAt) return false;
+  const since = await lastOptedOutAt(businessId, lead.id);
+  return since !== null && lead.lastInboundAt > since;
+}
+
 async function alertOptedOutLeadWrote(businessId: string, lead: Lead, conversation: Conversation, message: Message) {
   await createAlert({
     businessId,
     type: 'client_message',
     title: 'Un lead dado de baja te ha vuelto a escribir',
-    body: `${lead.name || 'Un lead'} pidió no recibir más mensajes y ahora ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». KAI no le contesta. Si quiere volver a hablar contigo, pulsa «Volver a permitir mensajes» en su ficha y respóndele.`,
+    body:
+      `${lead.name || 'Un lead'} pidió no recibir más mensajes y ahora ha escrito «${truncate(message.content.replace(/\s+/g, ' '), 120)}». KAI no le contesta y sigue dado de baja. ` +
+      'Si te pide volver a hablar, pulsa «Volver a permitir mensajes» en su ficha y respóndele. Si no hace falta hacer nada, descarta este aviso y la conversación dejará de salir en «Pendientes».',
     leadId: lead.id,
     conversationId: conversation.id,
   });

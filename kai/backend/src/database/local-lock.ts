@@ -13,11 +13,29 @@ export function localDbLockPath(): string | null {
   return env.DATABASE_URL ? null : `${path.resolve(process.cwd(), env.PGLITE_DIR)}.lock`;
 }
 
-/** El servidor deja su número de proceso en el candado antes de abrir la base de datos. */
+/** Otro KAI arrancado ya tiene el candado: este no debe abrir la base de datos local. */
+export class LocalDbInUseError extends Error {
+  constructor(readonly lock: string) {
+    super(localDbServerRunningMessage(lock));
+    this.name = 'LocalDbInUseError';
+  }
+}
+
+/**
+ * El servidor deja su número de proceso en el candado antes de abrir la base de datos. Si otro KAI arrancado ya lo
+ * tiene, lanza LocalDbInUseError sin tocarlo (un segundo arranque que luego falla, p. ej. con el puerto ocupado, no
+ * debe dejar su número en el candado ni abrir la base que está usando el primero). Un candado de un proceso que ya no
+ * existe se sustituye.
+ */
 export function writeLocalDbLock(): string | null {
   const lock = localDbLockPath();
-  if (lock) {
-    mkdirSync(path.dirname(lock), { recursive: true });
+  if (!lock) return null;
+  mkdirSync(path.dirname(lock), { recursive: true });
+  try {
+    writeFileSync(lock, String(process.pid), { flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    if (localDbInUseBy()) throw new LocalDbInUseError(lock);
     writeFileSync(lock, String(process.pid));
   }
   return lock;
@@ -59,4 +77,9 @@ export function localDbInUseBy(): string | null {
 /** Mensaje para el entrenador cuando un comando no puede usar la base de datos porque KAI está arrancado. */
 export function localDbInUseMessage(lock: string): string {
   return `✖ KAI está arrancado y está usando la base de datos de tu ordenador. Páralo con Ctrl + C, vuelve a ejecutar este comando y después arráncalo otra vez con «npm run dev».\n  (Si KAI no está abierto en ninguna terminal, borra el archivo ${lock} y vuelve a intentarlo.)`;
+}
+
+/** Mensaje cuando se intenta arrancar KAI y ya hay otro KAI arrancado con la base de datos de tu ordenador. */
+export function localDbServerRunningMessage(lock: string): string {
+  return `✖ KAI ya está arrancado en otra terminal y está usando la base de datos de tu ordenador. Usa ese (en el navegador, http://localhost:5173) o páralo con Ctrl + C en su terminal antes de arrancarlo otra vez.\n  (Si KAI no está abierto en ninguna terminal, borra el archivo ${lock} y vuelve a intentarlo.)`;
 }

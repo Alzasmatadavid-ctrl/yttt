@@ -74,7 +74,8 @@ async function gcal<T>(token: string, path: string, init: { method?: string; bod
   });
   if (res.status === 204) return {} as T;
   const json = (await res.json()) as T & { error?: { message?: string } };
-  if (!res.ok) throw new Error(`Google Calendar ${res.status}: ${json.error?.message ?? 'error'}`);
+  // `status` permite distinguir un evento que ya no existe (404/410) de un fallo de conexión.
+  if (!res.ok) throw Object.assign(new Error(`Google Calendar ${res.status}: ${json.error?.message ?? 'error'}`), { status: res.status });
   return json;
 }
 
@@ -112,6 +113,28 @@ export async function googleCreateEvent(
   );
   const video = json.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ?? json.hangoutLink ?? null;
   return { id: json.id, meetUrl: video, htmlLink: json.htmlLink ?? null };
+}
+
+/**
+ * Lee un evento para saber si el entrenador lo ha movido o borrado en su Google Calendar.
+ * Devuelve null si ya no existe. `start`/`end` son null en eventos de día completo (sin hora).
+ */
+export async function googleGetEvent(token: string, calendarId: string, eventId: string): Promise<{ status: string; start: Date | null; end: Date | null } | null> {
+  try {
+    const json = await gcal<{ status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>(
+      token,
+      `calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    );
+    return {
+      status: json.status ?? 'confirmed',
+      start: json.start?.dateTime ? new Date(json.start.dateTime) : null,
+      end: json.end?.dateTime ? new Date(json.end.dateTime) : null,
+    };
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    if (status === 404 || status === 410) return null;
+    throw err;
+  }
 }
 
 export async function googleDeleteEvent(token: string, calendarId: string, eventId: string) {

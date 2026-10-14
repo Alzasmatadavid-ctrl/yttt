@@ -135,7 +135,9 @@ KAI consulta los huecos ocupados del calendario y crea el evento (con enlace de 
 
 1. Entra en <https://console.cloud.google.com> y crea un proyecto (por ejemplo “KAI”).
 2. **APIs y servicios → Biblioteca** → busca **Google Calendar API** → **Habilitar**.
-3. **APIs y servicios → Pantalla de consentimiento de OAuth**: tipo **Externo**, nombre de la app “KAI”, tu email. En *Permisos* añade `.../auth/calendar.events` y `.../auth/calendar.readonly` (o `.../auth/calendar`). Mientras esté en modo prueba, añade como usuarios de prueba los emails de los entrenadores.
+3. **APIs y servicios → Pantalla de consentimiento de OAuth**: tipo **Externo**, nombre de la app “KAI”, tu email. En *Permisos* añade `.../auth/calendar.events` y `.../auth/calendar.readonly` (o `.../auth/calendar`).
+   - **Modo prueba** (*Testing*): solo sirve para probar KAI tú mismo. Añade tu email como usuario de prueba. En este modo Google **corta la conexión a los 7 días** (con permisos de calendario) y hay que volver a conectar el calendario cada semana, así que no lo uses con entrenadores reales.
+   - **Con entrenadores reales**: pulsa **Publicar app** (*En producción*). Como los permisos de calendario son *sensibles*, Google pide **verificar la app** (dominio propio, política de privacidad y una explicación de para qué se usan); mientras no esté verificada, los entrenadores verán el aviso «Google no ha verificado esta aplicación» y podrán continuar desde **Configuración avanzada** (Google limita a 100 usuarios las apps sin verificar).
 4. **Credenciales → Crear credenciales → ID de cliente de OAuth** → tipo **Aplicación web**.
    - **URI de redireccionamiento autorizado**: `https://tu-dominio/api/integrations/google/callback`
    - En local: `http://localhost:5173/api/integrations/google/callback`

@@ -11,6 +11,7 @@ import {
   listLeads,
   markOptedIn,
   markOptedOut,
+  acknowledgeOptedOutLeadMessages,
   setLeadStatus,
   updateLead,
   recomputeLeadScore,
@@ -275,9 +276,11 @@ export async function crmRoutes(app: FastifyInstance) {
   app.post('/conversations/:id/handoff-attended', async (request) => {
     const ctx = await requireTenant(request, 'conversations:reply');
     const { id } = parse(uuidParam, request.params);
-    await getConversation(ctx.businessId, id);
+    const conv = await getConversation(ctx.businessId, id);
     const changed = await markHandoffAttended(ctx.businessId, id, { type: 'user', userId: ctx.userId });
-    return { ok: true, changed };
+    // Lead dado de baja que ha vuelto a escribir: no se le puede contestar, así que «atendido» = visto (sigue de baja).
+    const acknowledged = await acknowledgeOptedOutLeadMessages(ctx.businessId, conv.leadId, { type: 'user', userId: ctx.userId });
+    return { ok: true, changed: changed || acknowledged };
   });
 
   app.post('/conversations/:id/release', async (request) => {
@@ -302,7 +305,11 @@ export async function crmRoutes(app: FastifyInstance) {
     const ctx = await requireTenant(request, 'leads:write');
     const { id } = parse(uuidParam, request.params);
     const body = parse(z.object({ status: z.enum(['resolved', 'dismissed']).default('resolved') }), request.body ?? {});
-    return { alert: await resolveAlert(ctx.businessId, id, body.status) };
+    const alert = await resolveAlert(ctx.businessId, id, body.status);
+    // «Un lead dado de baja te ha vuelto a escribir» ya visto: sigue de baja y deja de salir en «Pendientes».
+    if (alert.type === 'client_message' && alert.leadId)
+      await acknowledgeOptedOutLeadMessages(ctx.businessId, alert.leadId, { type: 'user', userId: ctx.userId });
+    return { alert };
   });
 
   app.get('/follow-ups', async (request) => {

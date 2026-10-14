@@ -293,9 +293,10 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
       // Leads a los que KAI o el equipo ya han escrito (no solo los que siguen en la etapa “Contactado”).
       contacted: sql<number>`count(*) filter (where ${leads.lastOutboundAt} is not null)::int`,
       active: sql<number>`count(*) filter (where ${leads.lastInteractionAt} >= now() - interval '7 days' and ${leads.status} not in ('client','lost'))::int`,
-      hot: sql<number>`count(*) filter (where ${leads.temperature} in ('caliente','muy_cualificado') and ${leads.status} not in ('client','lost'))::int`,
+      // Los que pidieron la baja no cuentan como calientes ni como «sin respuesta»: no se les puede escribir.
+      hot: sql<number>`count(*) filter (where ${leads.temperature} in ('caliente','muy_cualificado') and ${leads.status} not in ('client','lost') and ${leads.optedOut} = false)::int`,
       qualified: sql<number>`count(*) filter (where ${leads.status} in ('qualified','call_proposed'))::int`,
-      noReply: sql<number>`count(*) filter (where ${leads.lastOutboundAt} is not null and (${leads.lastInboundAt} is null or ${leads.lastInboundAt} < ${leads.lastOutboundAt}) and ${leads.lastOutboundAt} < now() - interval '24 hours' and ${leads.status} not in ('client','lost'))::int`,
+      noReply: sql<number>`count(*) filter (where ${leads.lastOutboundAt} is not null and (${leads.lastInboundAt} is null or ${leads.lastInboundAt} < ${leads.lastOutboundAt}) and ${leads.lastOutboundAt} < now() - interval '24 hours' and ${leads.status} not in ('client','lost') and ${leads.optedOut} = false)::int`,
     })
     .from(leads)
     .where(notTest);
@@ -359,6 +360,7 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
   // Leads a punto de perderse: interesados o más (según las bandas de puntuación del negocio),
   // sin contestar hace 48 h y sin llamada. Los que ya esperan respuesta de una persona (escalado o mensaje sin
   // contestar) no se repiten aquí: salen en «Esperan tu respuesta» o como aviso, y es la misma tarea.
+  // Tampoco los que pidieron la baja: no se les puede escribir (si vuelven a escribir, salen en «Esperan tu respuesta»).
   const [settings] = await db.select({ scoreBands: aiSettings.scoreBands }).from(aiSettings).where(eq(aiSettings.businessId, businessId)).limit(1);
   const interestedMin = bandMin(settings?.scoreBands ?? DEFAULT_SCORE_BANDS, 'interesado', 51);
   const autopilotOn = await autopilotEnabled(businessId);
@@ -368,6 +370,7 @@ export async function getDashboard(businessId: string, opts: { advanced: boolean
     .where(
       and(
         notTest,
+        eq(leads.optedOut, false),
         gte(leads.score, interestedMin),
         inArray(leads.status, ['conversing', 'interested', 'qualified', 'call_proposed', 'follow_up', 'no_show']),
         sql`coalesce(${leads.lastInboundAt}, ${leads.createdAt}) < now() - interval '48 hours'`,

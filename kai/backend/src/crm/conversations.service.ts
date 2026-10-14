@@ -108,29 +108,39 @@ export async function insertMessage(input: {
     })
     .returning();
 
-  const delivered = input.direction === 'inbound' || !['failed', 'skipped'].includes(msg.status);
-  if (delivered) {
-    const convPatch: Partial<typeof conversations.$inferInsert> = {
-      lastMessageAt: at,
-      lastMessagePreview: truncate(input.content.replace(/\s+/g, ' '), 140),
-      updatedAt: new Date(),
-    };
-    if (input.direction === 'inbound') {
-      convPatch.lastInboundAt = at;
-      convPatch.unreadCount = sql`${conversations.unreadCount} + 1` as unknown as number;
-      convPatch.status = 'open';
-    }
-    await db.update(conversations).set(convPatch).where(eq(conversations.id, input.conversationId));
-
-    const leadPatch: Partial<typeof leads.$inferInsert> = { lastInteractionAt: at, updatedAt: new Date() };
-    if (input.direction === 'inbound') leadPatch.lastInboundAt = at;
-    else {
-      leadPatch.lastOutboundAt = at;
-      leadPatch.firstResponseSeconds = sql`coalesce(${leads.firstResponseSeconds}, greatest(0, extract(epoch from (${at.toISOString()}::timestamptz - ${leads.createdAt}))::int))` as unknown as number;
-    }
-    await db.update(leads).set(leadPatch).where(and(eq(leads.businessId, input.businessId), eq(leads.id, input.leadId)));
-  }
+  // Los no entregados no cuentan como actividad; los que están «en cola» (enviándose) cuentan cuando salen.
+  const delivered = input.direction === 'inbound' || !['failed', 'skipped', 'queued'].includes(msg.status);
+  if (delivered) await applyMessageCounters(msg);
   return msg;
+}
+
+/** Actualiza la última actividad de la conversación y del lead con un mensaje recibido o enviado. */
+export async function applyMessageCounters(msg: Pick<Message, 'businessId' | 'conversationId' | 'leadId' | 'direction' | 'content' | 'createdAt'>) {
+  const db = getDb();
+  const at = msg.createdAt;
+  const atSql = sql`${at.toISOString()}::timestamptz`;
+  // Un mensaje fechado antes que el último de la conversación (una respuesta que empezó a enviarse antes de que
+  // llegara otro mensaje del lead) no lo sustituye como último mensaje ni en la vista previa.
+  const isLatest = sql`(${conversations.lastMessageAt} is null or ${conversations.lastMessageAt} <= ${atSql})`;
+  const convPatch: Partial<typeof conversations.$inferInsert> = {
+    lastMessageAt: sql`greatest(${conversations.lastMessageAt}, ${atSql})` as unknown as Date,
+    lastMessagePreview: sql`case when ${isLatest} then ${truncate(msg.content.replace(/\s+/g, ' '), 140)} else ${conversations.lastMessagePreview} end` as unknown as string,
+    updatedAt: new Date(),
+  };
+  if (msg.direction === 'inbound') {
+    convPatch.lastInboundAt = at;
+    convPatch.unreadCount = sql`${conversations.unreadCount} + 1` as unknown as number;
+    convPatch.status = 'open';
+  }
+  await db.update(conversations).set(convPatch).where(eq(conversations.id, msg.conversationId));
+
+  const leadPatch: Partial<typeof leads.$inferInsert> = { lastInteractionAt: at, updatedAt: new Date() };
+  if (msg.direction === 'inbound') leadPatch.lastInboundAt = at;
+  else {
+    leadPatch.lastOutboundAt = at;
+    leadPatch.firstResponseSeconds = sql`coalesce(${leads.firstResponseSeconds}, greatest(0, extract(epoch from (${atSql} - ${leads.createdAt}))::int))` as unknown as number;
+  }
+  await db.update(leads).set(leadPatch).where(and(eq(leads.businessId, msg.businessId), eq(leads.id, msg.leadId)));
 }
 
 export async function listMessages(businessId: string, conversationId: string, limit = 200) {
@@ -217,7 +227,8 @@ function kaiReplyInFlight(): SQL {
  *  - el lead ya es cliente y ha escrito después de cerrarse la venta (KAI no habla con clientes), o
  *  - KAI no tiene ninguna respuesta en marcha (p. ej. el mensaje llegó con KAI en pausa y luego se reactivó).
  * Los leads que pidieron la baja no cuentan (no se les puede escribir), salvo que hayan vuelto a escribir
- * después de pedirla: entonces el entrenador tiene que verlo (puede volver a permitir mensajes desde su ficha).
+ * después de pedirla: entonces el entrenador tiene que verlo (puede volver a permitir mensajes desde su ficha, o darlo
+ * por visto con «Marcar como atendido» o descartando el aviso, que registra otra vez la baja: ver acknowledgeOptedOutLeadMessages).
  * Requiere el join con `leads` (ver `conversationLeadJoin`).
  */
 export function needsHumanReplyCondition(opts: { autopilotOn: boolean }): SQL {

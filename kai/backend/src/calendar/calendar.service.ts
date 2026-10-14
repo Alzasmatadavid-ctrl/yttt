@@ -5,16 +5,16 @@ import { aiSettings, appointments, availabilitySettings, businesses, conversatio
 import type { AppointmentOutcome, OfferedSlot } from '../lib/domain.js';
 import { DEFAULT_AVAILABILITY } from '../config/defaults.js';
 import { badRequest, conflict, errorMessage, notFound, unavailable } from '../lib/errors.js';
-import { humanSlotLabel, shiftOutOfQuietHours } from '../lib/time.js';
+import { formatInZone, humanSlotLabel, shiftOutOfQuietHours } from '../lib/time.js';
 import { audit, logError } from '../audit/audit.service.js';
 import { applyPipelineEvent, recordLeadEvent, setLeadStatus, type Actor } from '../crm/leads.service.js';
 import { createAlert, resolveAlertsFor } from '../crm/alerts.service.js';
 import { cancelAppointmentJobs, getAutomation, scheduleAppointmentJobs } from '../automation/reminders.js';
 import { scheduleJob } from '../automation/jobs.js';
 import { clampSlotRange, computeFreeSlots, pickOfferSlots, slotId, type AvailabilityConfig, type Interval, type PartOfDay, type Slot } from './availability.js';
-import { getCalendarConnection, googleAccessToken, markCalendarError, type CalendlyCredentials } from './connections.js';
-import { googleCreateEvent, googleDeleteEvent, googleFreeBusy } from './providers/google.js';
-import { calendlyAvailableTimes, calendlyPrefilledUrl } from './providers/calendly.js';
+import { getCalendarConnection, googleAccessToken, markCalendarHealthy, reportCalendarFailure, type CalendlyCredentials } from './connections.js';
+import { googleCreateEvent, googleDeleteEvent, googleFreeBusy, googleGetEvent } from './providers/google.js';
+import { calendlyAvailableTimes, calendlyCancelEvent, calendlyPrefilledUrl } from './providers/calendly.js';
 import { decryptJson } from '../lib/crypto.js';
 
 export type Appointment = typeof appointments.$inferSelect;
@@ -95,9 +95,11 @@ export async function getFreeSlots(
       const times = await calendlyAvailableTimes(creds.token, connection.calendarId, { from, to }, config.callDurationMinutes);
       const minStart = Date.now() + config.minNoticeMinutes * 60_000;
       const slots = times.filter((t) => t.start.getTime() >= minStart).map((t) => ({ id: slotId(t.start), start: t.start, end: t.end, url: t.url }));
+      await markCalendarHealthy(connection);
       return { slots, config, provider: 'calendly' };
     } catch (err) {
-      await markCalendarError(connection.id, errorMessage(err));
+      // Además de marcar la conexión, se avisa al entrenador: sin calendario, KAI no puede ofrecer horarios.
+      await reportCalendarFailure(connection, errorMessage(err));
       await logError('calendar.calendly.availability', err, {}, businessId);
       throw unavailable('No se pudo consultar la disponibilidad en Calendly.');
     }
@@ -115,10 +117,11 @@ export async function getFreeSlots(
       const token = await googleAccessToken(connection);
       busy.push(...(await googleFreeBusy(token, connection.calendarId ?? 'primary', busyRange, config.timezone)));
     } catch (err) {
-      await markCalendarError(connection.id, errorMessage(err));
+      await reportCalendarFailure(connection, errorMessage(err));
       await logError('calendar.google.freebusy', err, {}, businessId);
       throw unavailable('No se pudo consultar Google Calendar.');
     }
+    await markCalendarHealthy(connection);
   }
   const slots = computeFreeSlots(config, busy, { from, to }, config.callDurationMinutes);
   return { slots, config, provider: connection?.provider ?? 'internal' };
@@ -294,6 +297,7 @@ async function createAppointment(input: BookInput & { excludeAppointmentId?: str
       .set({ externalEventId: ev.id, meetingUrl: ev.meetUrl, updatedAt: new Date() })
       .where(eq(appointments.id, appointment.id))
       .returning();
+    await markCalendarHealthy(google);
     return { appointment: updated ?? appointment, sendConfirmation: !input.confirmationAlreadySent };
   } catch (err) {
     // Sin evento en Google la cita no vale: se deshace (también el evento, si llegó a crearse) para no dejar nada a medias.
@@ -303,7 +307,7 @@ async function createAppointment(input: BookInput & { excludeAppointmentId?: str
       );
     }
     await db.delete(appointments).where(eq(appointments.id, appointment.id));
-    await markCalendarError(google.id, errorMessage(err));
+    await reportCalendarFailure(google, errorMessage(err));
     await logError('calendar.google.create_event', err, { leadId: lead.id }, input.businessId);
     throw unavailable('No se pudo crear el evento en Google Calendar.');
   }
@@ -348,27 +352,56 @@ export async function listAppointments(businessId: string, range: { from: Date; 
     .orderBy(asc(appointments.startsAt));
 }
 
-/** Borra el evento de Google Calendar de una cita (si lo tiene). Un fallo se registra pero no bloquea. */
+/**
+ * Retira la cita del calendario externo (si lo tiene): borra el evento de Google Calendar o cancela la reserva
+ * en Calendly (Calendly avisa al lead por email y libera el hueco). Un fallo se registra pero no bloquea; si una
+ * reserva de Calendly no se ha podido cancelar, se avisa al entrenador para que la cancele él desde Calendly.
+ */
 async function deleteExternalEvent(businessId: string, appt: Appointment) {
-  if (appt.calendarProvider !== 'google' || !appt.externalEventId) return;
-  const conn = await getCalendarConnection(businessId, 'google');
-  if (!conn) return;
+  if (!appt.externalEventId) return;
+  if (appt.calendarProvider === 'google') {
+    const conn = await getCalendarConnection(businessId, 'google');
+    if (!conn) return;
+    try {
+      await googleDeleteEvent(await googleAccessToken(conn), conn.calendarId ?? 'primary', appt.externalEventId);
+    } catch (err) {
+      await logError('calendar.google.delete_event', err, { appointmentId: appt.id }, businessId, 'warn');
+    }
+    return;
+  }
+  if (appt.calendarProvider !== 'calendly') return;
   try {
-    await googleDeleteEvent(await googleAccessToken(conn), conn.calendarId ?? 'primary', appt.externalEventId);
+    const conn = await getCalendarConnection(businessId, 'calendly');
+    if (!conn) throw new Error('Calendly no está conectado.');
+    await calendlyCancelEvent(decryptJson<CalendlyCredentials>(conn.credentialsEnc).token, appt.externalEventId);
   } catch (err) {
-    await logError('calendar.google.delete_event', err, { appointmentId: appt.id }, businessId, 'warn');
+    await logError('calendar.calendly.cancel_event', err, { appointmentId: appt.id }, businessId, 'warn');
+    const { timezone } = await getAvailabilityConfig(businessId);
+    // Sin lead: el aviso tiene que sobrevivir también al borrado del lead (sus avisos se borran con él).
+    await createAlert({
+      businessId,
+      type: 'integration_error',
+      severity: 'warning',
+      title: 'Cancela también la llamada en Calendly',
+      body:
+        `KAI no ha podido cancelar en tu Calendly la llamada «${appt.title}» del ${formatInZone(appt.startsAt, timezone)}. ` +
+        'Cancélala tú desde Calendly para que el lead no siga contando con ella y el hueco quede libre.',
+      appointmentId: appt.id,
+    });
   }
 }
 
-export async function cancelAppointment(businessId: string, id: string, actor: Actor, reason = '') {
+/** `keepExternal`: no tocar el calendario externo (la cita ya se borró allí). */
+export async function cancelAppointment(businessId: string, id: string, actor: Actor, reason = '', opts: { keepExternal?: boolean } = {}) {
   const appt = await getAppointment(businessId, id);
   if (appt.status !== 'scheduled') throw badRequest('Solo se pueden cancelar citas programadas.');
-  await deleteExternalEvent(businessId, appt);
   const [row] = await getDb()
     .update(appointments)
     .set({ status: 'cancelled', outcomeNotes: reason || appt.outcomeNotes, updatedAt: new Date() })
     .where(eq(appointments.id, id))
     .returning();
+  // Después de marcarla: el aviso de cancelación que manda Calendly al cancelarla allí ya la encuentra cancelada.
+  if (!opts.keepExternal) await deleteExternalEvent(businessId, appt);
   await cancelAppointmentJobs(id);
   await applyPipelineEvent(businessId, appt.leadId, 'appointment_cancelled', actor);
   await recordLeadEvent(businessId, appt.leadId, 'call_cancelled', actor, { appointmentId: id, reason });
@@ -487,6 +520,73 @@ export async function setAppointmentOutcome(
   await resolveAlertsFor(businessId, { appointmentId: id, type: 'call_outcome' });
   await audit({ businessId, actorType: 'user', actorUserId: actor.userId, action: 'appointment.outcome', entityType: 'appointment', entityId: id, metadata: input });
   return getAppointment(businessId, id);
+}
+
+/**
+ * KAI no recibe los cambios que el entrenador hace en su Google Calendar. Antes de escribir al lead por una
+ * llamada (confirmación, recordatorios) o de pedir su resultado, se comprueba que sigue como está en KAI:
+ * - Borrada allí → se cancela también en KAI (sin recordatorios) y se avisa al entrenador.
+ * - Movida allí → se actualiza la hora, se reprograman los recordatorios con la nueva y se avisa al entrenador.
+ * Devuelve 'unchanged' si sigue igual o no se puede comprobar (con Google caído se usa lo que hay en KAI).
+ * Con 'cancelled' o 'moved', el mensaje que se iba a enviar ya no vale: no se envía.
+ */
+export async function syncAppointmentWithCalendar(businessId: string, appt: Appointment): Promise<'unchanged' | 'cancelled' | 'moved'> {
+  if (appt.calendarProvider !== 'google' || !appt.externalEventId || appt.status !== 'scheduled') return 'unchanged';
+  const conn = await getCalendarConnection(businessId, 'google');
+  if (!conn) return 'unchanged';
+  let ev: Awaited<ReturnType<typeof googleGetEvent>>;
+  try {
+    ev = await googleGetEvent(await googleAccessToken(conn), conn.calendarId ?? 'primary', appt.externalEventId);
+  } catch (err) {
+    await logError('calendar.google.get_event', err, { appointmentId: appt.id }, businessId, 'warn');
+    return 'unchanged';
+  }
+  const { timezone } = await getAvailabilityConfig(businessId);
+  const when = formatInZone(appt.startsAt, timezone);
+  if (!ev || ev.status === 'cancelled') {
+    await cancelAppointment(businessId, appt.id, { type: 'integration' }, 'Borrada en Google Calendar', { keepExternal: true });
+    await createAlert({
+      businessId,
+      type: 'integration_error',
+      severity: 'warning',
+      title: 'Llamada borrada en tu Google Calendar',
+      body: `La llamada «${appt.title}» del ${when} ya no está en tu Google Calendar. KAI la ha cancelado también y no enviará recordatorios al lead. Si no se lo has dicho, escríbele.`,
+      leadId: appt.leadId,
+      appointmentId: appt.id,
+      dedupeByTitle: true,
+    });
+    return 'cancelled';
+  }
+  // Evento de día completo (sin hora) o misma hora: se deja como está.
+  if (!ev.start || !ev.end || Math.abs(ev.start.getTime() - appt.startsAt.getTime()) < 60_000) return 'unchanged';
+  const [moved] = await getDb()
+    .update(appointments)
+    // Los recordatorios ya enviados eran de la hora antigua: los de la nueva se envían de nuevo.
+    .set({ startsAt: ev.start, endsAt: ev.end, reminder24hSentAt: null, reminder1hSentAt: null, updatedAt: new Date() })
+    .where(and(eq(appointments.id, appt.id), eq(appointments.status, 'scheduled')))
+    .returning();
+  if (!moved) return 'cancelled'; // cancelada o movida en KAI mientras tanto
+  await cancelAppointmentJobs(appt.id);
+  await scheduleAppointmentJobs(businessId, moved, { sendConfirmation: !moved.confirmationSentAt });
+  await audit({
+    businessId,
+    actorType: 'integration',
+    action: 'appointment.rescheduled',
+    entityType: 'appointment',
+    entityId: appt.id,
+    metadata: { from: appt.startsAt.toISOString(), to: moved.startsAt.toISOString(), source: 'google_calendar' },
+  });
+  await createAlert({
+    businessId,
+    type: 'integration_error',
+    severity: 'warning',
+    title: 'Llamada movida en tu Google Calendar',
+    body: `La llamada «${appt.title}» del ${when} se ha movido en tu Google Calendar al ${formatInZone(moved.startsAt, timezone)}. KAI ha actualizado la hora y los recordatorios al lead saldrán con la nueva. Si no se lo has dicho, escríbele.`,
+    leadId: appt.leadId,
+    appointmentId: appt.id,
+    dedupeByTitle: true,
+  });
+  return 'moved';
 }
 
 export async function requestOutcomeAlert(businessId: string, appointment: Appointment, leadName: string) {
