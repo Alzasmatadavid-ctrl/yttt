@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.data/
+coverage/
+*.log
+.DS_Store
+
+# Archivos de trabajo temporales
+.scratch/
+
+# Pruebas temporales de las revisiones (los revisores las borran al terminar)
+backend/test/tmp-*.test.ts
