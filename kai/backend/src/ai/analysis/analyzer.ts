@@ -296,7 +296,7 @@ const RX_REMINDER_OK =
 const DAY_WORD = String.raw`(?:(?:el|este|para el|para)\s+)?(?<!\b(?:por la|de la|esta)\s)\b(?:pasado manana|manana|hoy|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b(?:\s+(?:por|de) la (?:manana|tarde|noche))?`;
 /** Dice que ese día no puede (“el lunes no puedo”, “mañana no me va”, “el martes tampoco”, “no puedo el lunes”). */
 const RX_DAY_REJECTED = new RegExp(
-  `${DAY_WORD}[\\s,]*(?:no (?:puedo|podre|podria|voy a poder|llego|me (?:va|viene|encaja|cuadra|pilla|sirve|vendria|iria)(?: bien)?)\\b|no(?=\\s*(?:[,.;!?…]|$|pero\\b|mejor\\b))|imposible\\b|tampoco\\b|me (?:va|viene|pilla) (?:fatal|mal)\\b|(?:lo )?tengo (?:complicado|imposible|fatal|lleno|ocupado)\\b|estoy (?:ocupad[oa]|liad[oa]|fuera)\\b)|\\bno (?:puedo|podre|podria|voy a poder|me (?:va|viene|encaja|cuadra|pilla|sirve)(?: bien)?)\\s+(?:ni\\s+)?${DAY_WORD}`,
+  `${DAY_WORD}(?:\\s*,?\\s*(?:ni|y|o)\\s+${DAY_WORD})*[\\s,]*(?:no (?:puedo|podre|podria|voy a poder|llego|me (?:va|viene|encaja|cuadra|pilla|sirve|vendria|iria)(?: bien)?)\\b|no(?=\\s*(?:[,.;!?…]|$|pero\\b|mejor\\b))|imposible\\b|tampoco\\b|me (?:va|viene|pilla) (?:fatal|mal)\\b|(?:lo )?tengo (?:complicado|imposible|fatal|lleno|ocupado)\\b|estoy (?:ocupad[oa]|liad[oa]|fuera)\\b)|\\bno (?:puedo|podre|podria|voy a poder|me (?:va|viene|encaja|cuadra|pilla|sirve)(?: bien)?)\\s+(?:ni\\s+)?${DAY_WORD}(?:\\s*,?\\s*(?:ni|y|o)\\s+${DAY_WORD})*`,
   'g',
 );
 /** Rechaza la oferta sin decir un día (“ninguna me va bien”, “¿no tienes otro día?”, “mejor otro día”). */
@@ -495,7 +495,9 @@ export function matchOfferedSlot(
     const sameDay = offered.filter((s) => DateTime.fromISO(s.start).setZone(tz).toISODate() === date);
     if (sameDay.length === 1 && (RX.affirm.test(n) || /\b(me viene|me va|me encaja|me cuadra|prefiero|mejor|esa|ese)\b/.test(n))) return sameDay[0].id;
   }
-  if (offered.length === 1 && RX.affirm.test(n)) return offered[0].id;
+  // Un “vale” elige el único horario solo si responde a la oferta: tras “mejor la dejamos como estaba” y la respuesta
+  // de KAI, un “vale, gracias” no mueve la llamada.
+  if (offered.length === 1 && RX.affirm.test(n) && opts.offerIsLastMessage !== false) return offered[0].id;
   return null;
 }
 
@@ -527,12 +529,20 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   const onlyQuestion = sentences.length > 0 && sentences.every((t) => t.endsWith('?'));
   // El objetivo es lo que más pesa (resúmenes, mensajes, puntuación): solo se toma como objetivo lo que lo parece.
   const aboutOtherKey = Object.entries(QUAL_PATTERNS).some(([k, rx]) => k !== 'goal' && enabledKeys.has(k) && rx.test(n));
-  const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || !aboutOtherKey;
+  // Muletillas, risas o “no sé, la verdad” no son un objetivo (la ficha lo mostraría como objetivo y como «Encaje: sí»).
+  const answersLastAsked = lastAsked !== 'goal' || QUAL_PATTERNS.goal.test(n) || (!aboutOtherKey && !isGoalNonAnswer(n));
+  // Ya es cliente (escribe desde otro número o canal): su mensaje es para el entrenador y no se cualifica.
+  const existingClient = RX_EXISTING_CLIENT.test(n);
   // Tampoco responde a la pregunta quien pide hablar con una persona («prefiero hablar con David directamente»),
   // pregunta si es un bot o habla de la llamada («no quiero hacer la llamada»): la ficha mostraría eso como su
   // objetivo (y, con él, «Encaje: sí»).
   const aboutTheConversation =
-    RX.humanRequest.test(n) || asksForTrainer(n, input.biz.trainer.displayName) || RX.asksIfBot.test(n) || RX.callRequest.test(n) || RX.declineCall.test(n);
+    RX.humanRequest.test(n) ||
+    asksForTrainer(n, input.biz.trainer.displayName) ||
+    RX.asksIfBot.test(n) ||
+    RX.callRequest.test(n) ||
+    RX.declineCall.test(n) ||
+    existingClient;
   if (
     lastAsked &&
     enabledKeys.has(lastAsked) &&
@@ -548,7 +558,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   }
   // 2) Información que el lead da por iniciativa propia.
   for (const [key, rx] of Object.entries(QUAL_PATTERNS)) {
-    if (!enabledKeys.has(key) || qualification[key]) continue;
+    if (!enabledKeys.has(key) || qualification[key] || existingClient) continue;
     if (key === 'goal') {
       // Objetivo: la frase concreta (“perder 10 kilos”), no el mensaje entero.
       const nfc = raw.normalize('NFC');
@@ -579,8 +589,11 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     if (!lvl || !enabledKeys.has(key)) continue;
     if (key === 'fit' && fitFromGoal) {
       // Encaje deducido del objetivo, no de este mensaje: la prueba es el objetivo. Si no, la ficha mostraría como
-      // «Encaje» cualquier frase posterior (“¿qué incluye el programa?”), y se reescribiría en cada mensaje.
-      if (input.lead.qualification.fit?.level === lvl) continue;
+      // «Encaje» cualquier frase posterior (“¿qué incluye el programa?”), y se reescribiría en cada mensaje. Si el
+      // objetivo cambia en este mensaje (lo corrige o lo concreta), el encaje se actualiza con él.
+      const newGoal = qualification.goal?.value.slice(0, 200);
+      const prevFit = input.lead.qualification.fit;
+      if (prevFit?.level === lvl && (!newGoal || prevFit.value === newGoal)) continue;
       const goal = qualification.goal?.value ?? input.lead.qualification.goal?.value ?? raw.trim();
       if (!qualification.fit) qualification.fit = { value: goal.slice(0, 200), confidence: 0.6, updatedAt: nowIso, level: lvl };
       continue;
@@ -619,30 +632,53 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
         return lastOutbound.content.includes(local.toFormat('HH:mm')) || lastOutbound.content.includes(local.toFormat('H:mm'));
       }),
   );
-  // “No” a secas como respuesta al recordatorio o a la confirmación de la llamada: no puede ir.
+  // “No” como respuesta al recordatorio o a la confirmación de la llamada: no puede ir. Las confirmaciones que empiezan
+  // por “no” (“No se me olvida 😉”, “No faltaré, gracias”, “No te preocupes, allí estaré”) no cuentan.
   const lastKind = typeof lastOutbound?.metadata?.kind === 'string' ? lastOutbound.metadata.kind : '';
   const noToReminder =
-    ['reminder_24h', 'reminder_1h', 'confirmation'].includes(lastKind) &&
-    /^\s*no\b/.test(n) &&
-    wordCount <= 8 &&
-    !/\bno (hay problema|pasa nada|te preocupes|problem)|todo (bien|perfecto|ok)|perfecto|genial|alli estare|ahi estare|cuenta conmigo|nos vemos/.test(n);
-  const preferredDate = resolvePreferredDate(n, input.now, tz);
-  const preferredPartOfDay = resolvePartOfDay(n);
+    ['reminder_24h', 'reminder_1h', 'confirmation'].includes(lastKind) && wordCount <= 8 && RX_NO_TO_REMINDER.test(n) && !RX_REMINDER_OK.test(n);
+  // Un día que dice que no puede (“el lunes no puedo”) nunca es su preferencia: se guarda aparte.
+  const rejectedDays = (n.match(RX_DAY_REJECTED) ?? []).join(' ');
+  const nPreference = rejectedDays ? n.replace(RX_DAY_REJECTED, ' ') : n;
+  const excludedDate = rejectedDays ? resolvePreferredDate(rejectedDays, input.now, tz) : null;
+  const preferredDate = resolvePreferredDate(nPreference, input.now, tz);
+  const preferredPartOfDay = resolvePartOfDay(nPreference);
+  const preferredTime = resolvePreferredTime(nPreference);
   // Con la llamada agendada, pedir otro día u hora con naturalidad (“mejor el miércoles”, “el jueves a las 18:00 me
-  // iría mejor”, o solo “el viernes”) es moverla. Solo cuenta en ese contexto (la estrategia lo usa si hay cita).
+  // iría mejor”, “¿me podéis llamar a las 9?”, o solo “el viernes”) es moverla. Solo cuenta en ese contexto (la
+  // estrategia lo usa si hay cita y comprueba que no sea el mismo día y hora que ya tiene: “Vale, el lunes”).
   const asksOtherTime =
-    Boolean(preferredDate || preferredPartOfDay || RX_EXPLICIT_TIME.test(n)) && (RX_SCHEDULE_PREFERENCE.test(n) || RX_ONLY_DAY.test(n)) && !RX_NOT_ABOUT_CALL.test(n);
-  const wantsReschedule = RX.reschedule.test(n) || noToReminder || asksOtherTime;
+    Boolean(preferredDate || preferredPartOfDay || RX_EXPLICIT_TIME.test(nPreference)) &&
+    (RX_SCHEDULE_PREFERENCE.test(nPreference) || RX_ONLY_DAY.test(nPreference)) &&
+    !RX_NOT_ABOUT_CALL.test(n);
+  // Desiste de moverla (“mejor la dejamos como estaba”): no es pedir otro horario.
+  const keepsAppointment = RX_KEEP_BOOKED.test(n);
+  const explicitReschedule = RX.reschedule.test(n) || noToReminder;
+  const wantsReschedule = !keepsAppointment && (explicitReschedule || asksOtherTime);
   // Respuesta a «¿quieres que cancele la llamada o prefieres que la movamos?»: un “sí” o volver a decir que no la
   // quiere es cancelarla (pedir moverla ya lo detecta wantsReschedule).
   const askedCancelOrMove = lastOutbound?.metadata?.directive === 'confirm_cancel';
   const confirmsCancel = askedCancelOrMove && !wantsReschedule && (RX_YES_ONLY.test(n) || RX.declineCall.test(n));
   const wantsCancel = RX.cancel.test(n) || confirmsCancel;
+  // ¿El último mensaje de KAI trataba de la llamada (la propuesta, sus dudas, los horarios)? Solo entonces un “sí” o
+  // un “vale” la aceptan: un “vale” a otra pregunta (compromiso, una objeción, “seguimos en contacto”) no es aceptarla.
+  // Si el mensaje no lleva directiva (lo escribió el entrenador, un seguimiento…), basta con que se propusiera.
+  const lastDirective = typeof lastOutbound?.metadata?.directive === 'string' ? lastOutbound.metadata.directive : '';
+  const lastText = normalize(lastOutbound?.content ?? '');
+  const callLabel = normalize(input.biz.settings.callLabel ?? '');
+  const lastMentionsCall = /llamada/.test(lastText) || Boolean(callLabel && lastText.includes(callLabel));
+  const lastAboutCall = lastDirective
+    ? CALL_DIRECTIVES.has(lastDirective) || (lastDirective !== 'continue_without_call' && lastMentionsCall)
+    : Boolean(input.state.callProposedAt) || lastMentionsCall;
+  // Un “no” corto a «¿te encaja la llamada?» es rechazarla (“No”, “No, gracias”, “Que no”, “Paso”).
+  const askedAboutCall =
+    ['propose_call', 'reassure_call'].includes(lastDirective) || (!lastDirective && lastMentionsCall && lastText.includes('?') && !offerIsLastMessage);
+  const declinesAfterProposal = askedAboutCall && RX_SHORT_NO.test(n);
   // Pedir cancelar la llamada (“ya no quiero la cita”) también es no querer la llamada, nunca pedirla.
-  const declinesCall = RX.declineCall.test(n) || wantsCancel;
+  const declinesCall = RX.declineCall.test(n) || wantsCancel || declinesAfterProposal;
   // Si el lead ya rechazó la llamada, un “vale” o un “me interesa” no la reabren: solo una petición explícita.
   const callDeclined = Boolean((input.state as SetterState).callDeclinedAt);
-  const callWasProposed = !callDeclined && (Boolean(input.state.callProposedAt) || /llamada/.test(normalize(lastOutbound?.content ?? '')));
+  const callWasProposed = !callDeclined && lastAboutCall;
   const positive = RX.affirm.test(n) || /quiero empezar|cuanto antes|adelante|vamos alla|me interesa|claro que si|me apunto|hagamosla|cuando quieras|me parece genial|me parece perfecto/.test(n);
   // Mencionar la llamada cuenta como un sí, salvo que vaya negada (“no tengo tiempo para una llamada”).
   const mentionsCall = RX.callYes.test(n) && !RX_CALL_NEGATED.test(n.replace(RX_NOT_A_NEGATION, ' '));
@@ -668,6 +704,34 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // para no capturar palabras comunes (“soy nueva”).
   const nameMatch = /(?<!\p{L})(?:[Mm]e llamo|[Mm]i nombre es|[Ss]oy)\s+(\p{Lu}\p{Ll}+)/u.exec(raw.normalize('NFC'));
 
+  // Horarios ofrecidos: ¿elige uno, los rechaza (“el lunes no puedo”, “ninguna me va bien”, “¿no tienes otro día?”) o
+  // habla de otra cosa (“gracias”, otro tema)? Repetir los mismos horarios a quien no puede o ya no los quiere es un bucle.
+  const selectedSlotId = matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage });
+  const latestOffer = lastOfferIds.map((id) => offered.find((o) => o.id === id)).filter((s): s is OfferedSlot => Boolean(s));
+  const offeredDays = new Set(latestOffer.map((s) => DateTime.fromISO(s.start).setZone(tz).toISODate()));
+  const rejectsOffer =
+    latestOffer.length > 0 &&
+    !selectedSlotId &&
+    !keepsAppointment &&
+    (Boolean(excludedDate && offeredDays.has(excludedDate)) || RX_OFFER_REJECTED.test(n) || (offerIsLastMessage && RX_PLAIN_SLOT_NO.test(nPreference)));
+  const aboutSchedule =
+    !keepsAppointment &&
+    Boolean(
+      selectedSlotId ||
+        rejectsOffer ||
+        ordinalChoice(n) !== null ||
+        preferredDate ||
+        excludedDate ||
+        preferredPartOfDay ||
+        RX_EXPLICIT_TIME.test(n) ||
+        RX_SCHEDULE_PREFERENCE.test(n) ||
+        RX.reschedule.test(n) ||
+        RX_SLOT_REJECTION.test(n) ||
+        RX_SLOT_HESITATION.test(n) ||
+        RX_ABOUT_SLOTS.test(n) ||
+        (offerIsLastMessage && RX_BARE_ACK.test(n)),
+    );
+
   return {
     qualification,
     signals,
@@ -683,7 +747,8 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
       wantsCall,
       declinesCall,
       complexNegotiation: RX.negotiation.test(n),
-      outOfScope: RX.outOfScope.test(n),
+      // Un cliente que escribe desde otro número o canal: se le pasa al entrenador (fuera del alcance de KAI).
+      outOfScope: RX.outOfScope.test(n) || existingClient,
       technicalIssue: RX.technical.test(n),
       wantsReschedule,
       wantsCancel,
@@ -694,9 +759,15 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     goalSummary: qualification.goal?.value?.slice(0, 160) ?? null,
     preferredDate,
     preferredPartOfDay,
-    selectedSlotId: matchOfferedSlot(n, offered, tz, input.now, lastOfferIds, { offerIsLastMessage }),
+    selectedSlotId,
     summary: 'Análisis heurístico (modo simulación).',
     engine: 'heuristic',
+    preferredTime,
+    rescheduleImplicit: wantsReschedule && !explicitReschedule,
+    excludedDate,
+    rejectsOffer,
+    keepsAppointment,
+    aboutSchedule,
   };
 }
 
