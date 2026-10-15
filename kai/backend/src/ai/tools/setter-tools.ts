@@ -32,7 +32,7 @@ const CALENDAR_TOOLS = ['get_available_slots', 'book_call', 'reschedule_call'];
  */
 export interface ToolboxPolicy {
   /** `slotQuery.excludeDates`: días que el lead ha descartado (“el lunes no puedo”): get_available_slots no los ofrece. */
-  directive: { kind: string; slotId?: string; slotQuery?: { excludeDates?: string[]; time?: string } };
+  directive: { kind: string; slotId?: string; slotQuery?: { excludeDates?: string[]; excludeTimes?: string[]; time?: string } };
   /** El lead ha pedido cancelar su llamada de forma explícita (permite cancel_call al moverla). */
   leadAskedToCancel?: boolean;
 }
@@ -222,13 +222,17 @@ export class SetterToolbox {
         const excludeDates = [...(this.policy?.directive.slotQuery?.excludeDates ?? []), ...(Array.isArray(input.exclude_dates) ? input.exclude_dates : [])].filter(
           (d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d),
         );
+        // Horas que el lead ha dicho que no puede (“a las 10 no puedo”): tampoco se le ofrecen.
+        const excludeTimes = [...(this.policy?.directive.slotQuery?.excludeTimes ?? []), ...(Array.isArray(input.exclude_times) ? input.exclude_times : [])].filter(
+          (t): t is string => typeof t === 'string' && /^(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}$/.test(t),
+        );
         // Hora concreta que pide el lead (“a las 10”): primero los huecos más cercanos a ella.
         const nearRaw = typeof input.near_time === 'string' ? input.near_time : this.policy?.directive.slotQuery?.time;
         const nearTime = nearRaw && /^\d{1,2}:\d{2}$/.test(nearRaw) ? nearRaw : undefined;
-        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2, ...shift, excludeDates, nearTime });
+        let { offered } = await getOfferableSlots(business.id, lead, { date, partOfDay, count: 2, ...shift, excludeDates, excludeTimes, nearTime });
         let note: string | undefined;
         if (offered.length === 0 && date) {
-          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2, ...shift, excludeDates, nearTime }));
+          ({ offered } = await getOfferableSlots(business.id, lead, { partOfDay, count: 2, ...shift, excludeDates, excludeTimes, nearTime }));
           note = 'No hay huecos ese día; estas son las alternativas más cercanas.';
         }
         if (offered.length === 0) return { slots: [], note: 'No hay huecos libres en los próximos días. Dile que lo revisas con el entrenador y que le escribís con opciones; no inventes horarios.' };

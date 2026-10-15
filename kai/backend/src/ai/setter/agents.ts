@@ -429,7 +429,16 @@ export class RuleBasedSetterAgent implements SetterAgent {
      */
     const answerTo = (q: string): string | null => {
       if (smallTalk(q)) return null;
+      // Pide que le aclare o repita lo que le acaba de preguntar («¿a qué te refieres?», «¿me repites la pregunta?»): el
+      // texto principal se lo vuelve a plantear; «eso te lo concreta el entrenador» no tendría sentido.
+      if (/\b(refieres|referis|repet\w*|repit\w*|no (?:te |lo )?entiendo|no (?:lo )?pillo|que quieres decir|como dices|por que me (?:lo )?preguntas|para que me (?:lo )?preguntas|perdona que)\b/.test(q)) return null;
+      // «¿Con quién hablo?», «¿quién eres?»: se presenta (si este mensaje ya lleva la presentación, no hace falta).
+      if (/\b(?:con quien (?:hablo|estoy hablando|tengo el gusto)|quien (?:eres|sois|me escribe|me habla|es)|de parte de quien)\b/.test(q)) {
+        return presentsNow || !intro ? null : `${cap(intro.replace(/[.!]*$/, '.'))}`;
+      }
       if (/\b(bot|robot|ia|inteligencia artificial|persona real|una persona|humano|maquina|automatic\w*|automatizad\w*|asistente|chatgpt)\b/.test(q)) return null;
+      // Cuándo sería la llamada (día, hora, horarios): lo responde el texto principal (horarios o la cita que ya tiene).
+      if (/\b(llamada|videollamada|llam\w*)\b/.test(q) && /\b(cuando|que dias?|que horarios?|a que hora|que hora|huecos?|disponibilidad|que fechas?|que dia)\b/.test(q)) return null;
       if (/\b(llamada|videollamada|llamais|llamas|llamara|llamaras|llamarme|zoom|meet|telefono)\b/.test(q)) {
         if (/\b(cuesta|precio|coste|costo|pagar|paga|gratis|gratuit[ao]|cobr\w*)\b/.test(q)) return null;
         const asksDuration = /\bcuanto (?:dura|tiempo|rato)\b|\bduracion\b|\bcuantos minutos\b/.test(q);

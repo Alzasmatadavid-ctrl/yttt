@@ -123,13 +123,21 @@ export function partOfDay(d: Date, tz: string): Exclude<PartOfDay, 'any'> {
 export function pickOfferSlots(
   slots: Slot[],
   tz: string,
-  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date; excludeDates?: string[]; nearTime?: string } = {},
+  opts: { date?: string; partOfDay?: PartOfDay; count?: number; after?: Date; before?: Date; excludeDates?: string[]; excludeTimes?: string[]; nearTime?: string } = {},
 ): Slot[] {
   const count = Math.min(Math.max(opts.count ?? 2, 1), 5);
   let pool = slots;
   if (opts.date) pool = pool.filter((s) => DateTime.fromJSDate(s.start).setZone(tz).toISODate() === opts.date);
   // Días que el lead ha dicho que no puede (“el lunes no puedo”) o cuyos horarios acaba de rechazar.
   if (opts.excludeDates?.length) pool = pool.filter((s) => !opts.excludeDates!.includes(DateTime.fromJSDate(s.start).setZone(tz).toISODate() ?? ''));
+  // Horas que ha dicho que no puede (“a las 10 no puedo”): “HH:mm” cualquier día o “YYYY-MM-DD HH:mm” solo ese día.
+  if (opts.excludeTimes?.length) {
+    pool = pool.filter((s) => {
+      const local = DateTime.fromJSDate(s.start).setZone(tz);
+      const time = local.toFormat('HH:mm');
+      return !opts.excludeTimes!.some((t) => t === time || t === `${local.toISODate()} ${time}`);
+    });
+  }
   // «Una hora más tarde» / «un poco antes» que la llamada que ya tiene: solo horarios posteriores (o anteriores).
   if (opts.after) pool = pool.filter((s) => s.start.getTime() > opts.after!.getTime());
   if (opts.before) pool = pool.filter((s) => s.start.getTime() < opts.before!.getTime());

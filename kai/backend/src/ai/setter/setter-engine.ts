@@ -569,6 +569,18 @@ export async function runSetterReply(businessId: string, conversationId: string,
   }
   if (directive.kind === 'share_price') statePatch.priceShared = true;
   if (directive.kind === 'handle_objection' && directive.objection) statePatch.objectionsHandled = [...(conv.state.objectionsHandled ?? []), directive.objection.key].slice(-10);
+  // Tercera vez la misma objeción: KAI le ha dicho que no va a insistir. No se le vuelve a vender la llamada (ni en
+  // el siguiente “vale” ni en los seguimientos) salvo que la pida él.
+  if (directive.closesObjection && !leadCtx.upcomingAppointment) statePatch.callDeclinedAt = new Date().toISOString();
+  // Días y horas que ha descartado mientras busca horario: se recuerdan para las ofertas siguientes (si vuelve a pedir
+  // uno de esos días, la estrategia ya lo ha quitado de la lista). Al reservar o cancelar, se olvidan.
+  if (toolbox.booked || toolbox.cancelled) {
+    statePatch.rejectedDates = undefined;
+    statePatch.rejectedTimes = undefined;
+  } else if (directive.slotQuery) {
+    statePatch.rejectedDates = directive.slotQuery.excludeDates?.length ? directive.slotQuery.excludeDates : undefined;
+    statePatch.rejectedTimes = directive.slotQuery.excludeTimes?.length ? directive.slotQuery.excludeTimes : undefined;
+  }
   await updateConversationState(businessId, conversationId, statePatch);
 
   if (toolbox.records.some((r) => r.name === 'get_available_slots' && r.ok && Array.isArray((r.result as { slots?: unknown[] }).slots) && (r.result as { slots: unknown[] }).slots.length === 0)) {
@@ -583,8 +595,16 @@ export async function runSetterReply(businessId: string, conversationId: string,
   }
   if (toolbox.handoff) {
     await triggerHandoff(businessId, conversationId, toolbox.handoff.reason, toolbox.handoff.detail);
-  } else if (sent.delivered && !toolbox.booked && !leadCtx.upcomingAppointment && directive.kind !== 'disqualify_kindly' && leadCtx.lead.signals.fit !== 'no') {
-    // Al lead que no encaja (p. ej. un menor) no se le persigue con seguimientos aunque se le haya dado el precio.
+  } else if (
+    sent.delivered &&
+    !toolbox.booked &&
+    !leadCtx.upcomingAppointment &&
+    directive.kind !== 'disqualify_kindly' &&
+    !directive.closesObjection &&
+    leadCtx.lead.signals.fit !== 'no'
+  ) {
+    // Al lead que no encaja (p. ej. un menor) no se le persigue con seguimientos aunque se le haya dado el precio. Tras
+    // decirle «no quiero insistir, si quieres retomarlo aquí me tienes», tampoco: escribirle después sería insistir.
     await scheduleNoReplyFollowUp(businessId, lead.id, conversationId);
   }
   // ¿Ha escrito el lead mientras se enviaba esta respuesta? Ese mensaje no lo contesta: se asegura otro turno de KAI
