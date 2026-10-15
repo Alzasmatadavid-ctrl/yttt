@@ -169,7 +169,9 @@ describe('worker', () => {
       .insert(followUps)
       .values({ businessId: T.businessId, leadId: l.leadId, conversationId: l.conversationId, reason: 'no_reply', step: 1, scheduledFor: new Date() })
       .returning();
-    const job = await scheduleJob({ businessId: T.businessId, type: 'followup', runAt: new Date(), payload: { followUpId: fu.id, leadId: l.leadId } });
+    // forceNow: sin él, entre las 21:30 y las 09:00 (descanso por defecto) el seguimiento se aplaza y el test
+    // dependería de la hora a la que se ejecuta; aquí se prueba el límite del plan, no el descanso.
+    const job = await scheduleJob({ businessId: T.businessId, type: 'followup', runAt: new Date(), payload: { followUpId: fu.id, leadId: l.leadId, forceNow: true } });
     await getDb().update(followUps).set({ jobId: job.id }).where(eq(followUps.id, fu.id));
     await incrementUsage(T.businessId, 'ai_messages', 1_000_000);
 

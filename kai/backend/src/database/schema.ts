@@ -445,6 +445,8 @@ export const messages = pgTable(
     index('messages_conversation_idx').on(t.conversationId, t.createdAt),
     index('messages_business_created_idx').on(t.businessId, t.createdAt),
     uniqueIndex('messages_business_external_uq').on(t.businessId, t.externalId).where(sql`${t.externalId} is not null`),
+    // Envíos que se quedaron «en cola» (failInterruptedSends los busca cada minuto): solo unos pocos a la vez.
+    index('messages_queued_idx').on(t.createdAt).where(sql`${t.status} = 'queued'`),
   ],
 );
 

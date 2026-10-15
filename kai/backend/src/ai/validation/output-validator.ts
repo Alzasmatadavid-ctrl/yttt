@@ -68,13 +68,23 @@ const RX_PROMISE = new RegExp(
   [
     String.raw`garantiz|te aseguro que (vas a|vas|lo vas)|100\s?%\s?(seguro|garantizado)|resultados? (asegurados?|garantizados?)`,
     String.raw`(perderas|bajaras|vas a perder|vas a bajar|conseguiras perder)\s+(\d+|unos|varios)\s*(kg|kilos)|seguro que (lo )?(consigues|vas a conseguir)|en \d+ (dias|semanas) (veras|tendras|perderas)`,
-    String.raw`\b(?:te|le|os) (?:lo )?prometo\b`,
     // “vas a perder la barriga seguro”, “bajarás de talla sí o sí”, “sin duda vas a conseguirlo”.
     String.raw`\b(?:vas|va|van) a (?:${RESULT_VERBS})\b[^.!?\n]{0,50}\b(?:seguro|sin duda|si o si|sin falta)\b`,
     String.raw`\b(?:perderas|bajaras|adelgazaras|conseguiras|lograras|notaras|eliminaras|reduciras|te quitaras)\b[^.!?\n]{0,50}\b(?:seguro|sin duda|si o si)\b`,
     String.raw`\b(?:seguro que|sin duda|si o si)[, ]+(?:lo )?(?:vas|va) a (?:${RESULT_VERBS})\b`,
   ].join('|'),
 );
+/**
+ * “Te prometo que lo vas a conseguir”: prometer en una frase que habla de resultados. “No te prometo resultados
+ * mágicos” o “Te lo prometo: no te voy a llenar de mensajes” no prometen nada sobre el cuerpo del lead.
+ */
+const RX_PROMISE_WORD = /(?<!\bno )\b(?:te|le|os) (?:lo )?prometo\b/;
+const RX_PROMISE_TOPIC = new RegExp(
+  String.raw`\b(?:${RESULT_VERBS}|conseguir\w*|consigu\w*|lograr\w*|logr\w*|resultados?|kilos?|kg|tallas?|barriga|grasa|peso|cuerpo|en forma|cambios?|cambiar\w*|funciona\w*)\b`,
+);
+function promisesResults(n: string): boolean {
+  return n.split(/[.!?\n]+/).some((sentence) => RX_PROMISE_WORD.test(sentence) && RX_PROMISE_TOPIC.test(sentence));
+}
 /** Fármacos y suplementos que KAI nunca debe recomendar (ni decir que se dejen). */
 const DRUGS =
   'ibuprofeno|paracetamol|naproxeno|aspirina|dexketoprofeno|diclofenaco|enantyum|nolotil|metamizol|voltaren|antiinflamatorios?|analgesicos?|relajantes? musculares?|corticoides?|metformina|ozempic|semaglutida|wegovy|mounjaro|tirzepatida|saxenda|liraglutida|orlistat|levotiroxina|eutirox|omeprazol|antidepresivos?|ansioliticos?|diazepam|lorazepam|melatonina|insulina|estatinas?|diureticos?|laxantes?|quemagrasas|termogenicos?|testosterona|esteroides?|anabolizantes?|clembuterol';
@@ -275,6 +285,11 @@ const VAGUE_MIN: Record<string, number> = { decenas: 20, cientos: 200, centenare
  */
 const RX_LEAD_SIDE =
   /\b(?:llevas|lleves|llevabas|llevais|lleveis|sois|seais|tienes|tengas|teneis|tengais|perdiste|perdisteis|bajaste|bajasteis|si (?:ya )?(?:lleva|llevan|tiene|tienen)|usted(?:es)? (?:lleva|llevan|tiene|tienen)|(?:lleva|llevan|tiene|tienen) usted(?:es)?)\b|\btus? (?:amig|herman|prim|pareja|mujer|marido|novi|padre|madre|compan|vecin|cunad|soci|jefe|hij|famil|conocid)\w*/;
+/** Años que el lead cuenta de sí mismo y que KAI le puede repetir: “3 años entrenando”, “20 años trabajando” (no “de experiencia”). */
+const RX_YEARS_DOING = /\banos?\s+(?:que\s+)?(?<verb>entren|trabaj|dedic)\w*/;
+const RX_YEARS = new RegExp(String.raw`(?<num>${NUM})\s+anos?\b`, 'g');
+/** Quien lleva esos años es el entrenador o su equipo (“Álex lleva…”, “tengo…”, “mis…”), no el lead. */
+const RX_TRAINER_YEARS = /\b(?:lleva|llevo|llevamos|llevan|tengo|tiene|tenemos|tienen|cuento|cuenta|contamos|sumo|suma|sumamos|mi|mis|nuestr[oa]s?|su|sus)\b/;
 /** Hasta dónde se mira hacia atrás para saber si la cifra es del lead (“tienes delante a Álex, que lleva 15 años…” no lo es). */
 const LEAD_SIDE_REACH = 40;
 /** La cifra se atribuye a clientes del entrenador (“mis alumnos han perdido…”, “una clienta mía…”): solo valen sus datos. */
@@ -323,9 +338,9 @@ const RX_PRICE_VERB = new RegExp(
 
 /**
  * Importe en letras con la moneda: “ciento cincuenta euros”, “dos mil pesos”, “15 mil pesos” (en plural: “un peso
- * saludable” no es un importe).
+ * saludable” o “no te cuesta ni un euro” no son un importe).
  */
-const RX_PRICE_WORDS = new RegExp(String.raw`(?<w>(?<![\d.,])\d{1,3}\s+mil\b|${NUM_WORDS})\s+(?<c>euros?|dolares|pesos|soles|francos)\b`, 'g');
+const RX_PRICE_WORDS = new RegExp(String.raw`(?<w>(?<![\d.,])\d{1,3}\s+mil\b|${NUM_WORDS})\s+(?<c>euros|dolares|pesos|soles|francos)\b`, 'g');
 
 const DOLLAR_LIKE = ['USD', 'MXN', 'ARS', 'COP', 'CLP', 'CAD', 'AUD', 'UYU', 'DOP', 'NZD'];
 
@@ -600,7 +615,7 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
     if (nw && new RegExp(`(^|[^a-z0-9])${nw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`).test(n)) issues.push(`Usa la palabra prohibida “${w}”.`);
   }
 
-  if (RX_PROMISE.test(n)) issues.push('Promete o garantiza resultados. KAI no puede prometer resultados físicos.');
+  if (RX_PROMISE.test(n) || promisesResults(n)) issues.push('Promete o garantiza resultados. KAI no puede prometer resultados físicos.');
   if (RX_MEDICAL.test(n)) issues.push('Da un consejo o diagnóstico médico. Deriva a un profesional sanitario.');
   if (RX_PRESSURE.test(n)) issues.push('Presiona con urgencia o escasez. Elimina cualquier presión.');
   if (ctx.isFollowUp && RX_GENERIC_FOLLOWUP.test(n)) issues.push('Es un seguimiento genérico. Usa algo concreto de la conversación (su objetivo, lo que contó).');
@@ -671,7 +686,13 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
   // Cifras de autoridad / testimonios que no estén en los datos reales del entrenador ni los haya dicho el lead.
   const factsText = normalize(ctx.factsText);
   const facts = numbersIn(factsText);
-  const withLead = ctx.leadText === undefined ? facts : new Set([...facts, ...numbersIn(normalize(ctx.leadText))]);
+  const leadN = ctx.leadText === undefined ? '' : normalize(ctx.leadText);
+  const withLead = ctx.leadText === undefined ? facts : new Set([...facts, ...numbersIn(leadN)]);
+  // “Después de 3 años entrenando por tu cuenta…”: repite los años que contó el lead (mismo número y mismo verbo).
+  const repeatsLeadYears = (value: number, claimText: string) => {
+    const verb = RX_YEARS_DOING.exec(claimText)?.groups?.verb;
+    return Boolean(verb) && [...leadN.matchAll(RX_YEARS)].some((y) => numberValue(y.groups!.num) === value) && new RegExp(String.raw`\b${verb}`).test(leadN);
+  };
   const rules: { rx: RegExp; kind: ClaimKind; generic?: true }[] = ctx.leadText === undefined ? RX_CLAIMS : [...RX_CLAIMS, ...RX_CLAIMS_ANY];
   const claim = rules
     .flatMap(({ rx, kind, generic }) => [...n.matchAll(rx)].map((m) => ({ m, kind, generic })))
@@ -680,6 +701,7 @@ export function validateReply(text: string, ctx: ValidationContext): ValidationR
       const clause = clauseBefore(n, m.index!);
       if (RX_LEAD_SIDE.test(clause.slice(-LEAD_SIDE_REACH))) return false; // habla del lead o de alguien suyo
       if (generic && value === 100 && /%|por ciento/.test(m[0])) return false; // “100% online” (pero no “el 100% de mis clientes”)
+      if (repeatsLeadYears(value, m[0]) && !RX_TRAINER_YEARS.test(clause.slice(-LEAD_SIDE_REACH))) return false;
       const known = kind === 'authority' || RX_TRAINER_SIDE.test(clause) ? facts : withLead;
       return !known.has(value);
     });

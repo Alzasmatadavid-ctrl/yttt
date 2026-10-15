@@ -5,7 +5,7 @@
  */
 import { DateTime } from 'luxon';
 import type { ConversationState } from '../../lib/domain.js';
-import { humanSlotLabel, leadZone } from '../../lib/time.js';
+import { humanSlotLabel, leadZone, zonePlace } from '../../lib/time.js';
 import { partOfDay } from '../../calendar/availability.js';
 import { matchesRejectedTime, type LeadAnalysis } from '../analysis/analyzer.js';
 import type { BusinessContext, LeadContext, ObjectionRow, RuleRow } from '../context/context.js';
@@ -71,6 +71,11 @@ export interface Directive {
   };
   /** clarify_slot: lead de otro país; “a las 11” puede ser la hora del negocio o la suya. Se le pregunta cuál. */
   ambiguousTime?: string;
+  /**
+   * clarify_slot: esa hora (`ambiguousTime`) no se le ofreció: se le pregunta solo de qué país es, sin escribirla en
+   * cifras (no ha salido de la agenda), para buscar después huecos cerca de ella.
+   */
+  askZoneOnly?: boolean;
   /** handle_objection: la misma objeción por tercera vez. No se insiste: se respeta y no se vuelve a proponer la llamada. */
   closesObjection?: boolean;
   /** offer_slots/reschedule: acaba de rechazar los horarios ofrecidos (“el lunes no puedo”): nada de “Genial” ni “Perfecto”. */
@@ -184,16 +189,26 @@ function slotQueryFor(
   // (“a las 10 no puedo”), se descarta esa hora, no el día entero.
   if (analysis?.rejectsOffer && !analysis.excludedDate && !analysis.preferredDate && !analysis.rejectedTimes?.length) for (const s of offer) excluded.add(localDate(s.start, tz)!);
   if (analysis?.preferredDate) excluded.delete(analysis.preferredDate);
+  // Lo que pide ahora pesa más que lo que descartó antes (“¿me podéis llamar a las 10?” tras “a las 10 no puedo”).
+  if (analysis?.preferredTime) {
+    excludedTimes.delete(analysis.preferredTime);
+    if (analysis.preferredDate) excludedTimes.delete(`${analysis.preferredDate} ${analysis.preferredTime}`);
+  }
+  // “No puedo antes de las 18:00”: se le ofrecen primero los huecos más cercanos a esa hora (los anteriores, nunca).
+  const notBefore = [...excludedTimes].filter((t) => t.startsWith('<')).map((t) => t.slice(1)).sort().pop();
+  const time = analysis?.preferredTime ?? notBefore;
+  // Con un lead de otro país, “a las 10” puede ser su hora: no se busca por ella, salvo que ya se sepa de qué zona es
+  // (“las 10 de México”, o “la mía” al preguntárselo: el análisis la pasa a la hora del negocio).
+  const unknownZone = foreignLead && !(analysis?.preferredTime && analysis.timeInBusinessZone);
   // Franja que dice que no puede (“por la mañana no puedo”) y no pide otra: se buscan en la contraria.
   const avoidPart = analysis?.rejectedPartOfDay;
-  const partOfDay = analysis?.preferredPartOfDay ?? (avoidPart ? (avoidPart === 'afternoon' ? 'morning' : 'afternoon') : partOfDayOfTime(analysis?.preferredTime, foreignLead));
+  const partOfDay = analysis?.preferredPartOfDay ?? (avoidPart ? (avoidPart === 'afternoon' ? 'morning' : 'afternoon') : partOfDayOfTime(time, unknownZone));
   return {
     date: analysis?.preferredDate ?? null,
     partOfDay,
     ...(excluded.size ? { excludeDates: [...excluded].sort() } : {}),
     ...(excludedTimes.size ? { excludeTimes: [...excludedTimes].sort() } : {}),
-    // Con un lead de otro país, “a las 10” puede ser su hora: no se busca por ella.
-    ...(analysis?.preferredTime && !foreignLead ? { time: analysis.preferredTime } : {}),
+    ...(time && !unknownZone ? { time } : {}),
   };
 }
 
@@ -215,7 +230,13 @@ function exclusionNote(query: NonNullable<Directive['slotQuery']>, rejected: boo
   if (rejected) parts.push('Acaba de decirte que los horarios que le ofreciste no le van: no empieces con “Genial” ni “Perfecto” (mejor algo como “Sin problema”) y no le repitas esos horarios.');
   if (days.length) parts.push(`No le ofrezcas horarios del ${days.join(' ni del ')}: ha dicho que ese día no puede (o ya los descartó).`);
   const times = (query.excludeTimes ?? []).map((t) =>
-    /^\d{4}-/.test(t) ? `el ${DateTime.fromISO(t.slice(0, 10), { zone: tz }).setLocale('es').toFormat('cccc d')} a las ${t.slice(11)}` : `a las ${t}`,
+    t.startsWith('<')
+      ? `antes de las ${t.slice(1)}`
+      : t.startsWith('>')
+        ? `después de las ${t.slice(1)}`
+        : /^\d{4}-/.test(t)
+          ? `el ${DateTime.fromISO(t.slice(0, 10), { zone: tz }).setLocale('es').toFormat('cccc d')} a las ${t.slice(11)}`
+          : `a las ${t}`,
   );
   if (times.length) parts.push(`Tampoco le ofrezcas horarios ${times.join(' ni ')}: ha dicho que a esa hora no puede.`);
   return parts.length ? ` ${parts.join(' ')}` : '';
@@ -232,10 +253,14 @@ function clarifyDirective(
   // Etiquetas recalculadas ahora: “mañana” de ayer es “hoy”. Con un lead de otro país, con su hora también.
   const offered = slots.map((s) => `“${humanSlotLabel(s.start, timezone, now, { leadPhone })}”`).join(' o ');
   if (ambiguousTime) {
+    // Con el nombre de cada país (“¿las 11:00 de España o las 11:00 de México?”): “de aquí” sería ambiguo para él.
+    const ours = `de ${zonePlace(timezone)}`;
+    const country = leadZone(leadPhone, timezone, now)?.country;
+    const theirs = country ? `de ${country}` : 'de su país';
     return {
       kind: 'clarify_slot',
       ambiguousTime,
-      instruction: `Ya le ofreciste estos horarios: ${offered}. Ha dicho “a las ${ambiguousTime}”, pero escribe desde otro país y esa hora puede ser la de aquí o la suya, y cada una es un horario distinto. No reserves nada ni consultes la agenda: pregúntale, en UNA sola pregunta, si se refiere a las ${ambiguousTime} de aquí o a las ${ambiguousTime} de su país.`,
+      instruction: `Ya le ofreciste estos horarios: ${offered}. Ha dicho “a las ${ambiguousTime}”, pero escribe desde otro país y esa hora puede ser la de aquí o la suya, y cada una es un horario distinto. No reserves nada ni consultes la agenda: pregúntale, en UNA sola pregunta, si se refiere a las ${ambiguousTime} ${ours} o a las ${ambiguousTime} ${theirs}.`,
       answerQuestionFirst,
     };
   }
@@ -286,17 +311,22 @@ export function decideDirective(input: StrategyInput): Directive {
   const offer = recentOffer(state, now, minNotice);
   // Lead de otro país: “a las 11” encaja con un horario en la hora de aquí y con otro en la suya. Se le pregunta cuál.
   if (analysis?.ambiguousSlotTime && offer.length) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now, leadPhone, analysis.ambiguousSlotTime);
-  const hasPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay);
+  // Pide un día, una franja o una hora (“mejor a las 18”, “a las 11 me va bien” cuando se le ofrecieron otras).
+  const hasPreference = Boolean(analysis?.preferredDate || analysis?.preferredPartOfDay || analysis?.preferredTime);
   // Lo que pide ya lo cumplen todos los horarios que se le acaban de ofrecer (“mejor el jueves” y los dos son el
   // jueves): consultar otra vez la agenda devolvería los mismos y repetiría el mensaje. Se le pregunta cuál prefiere.
   const tz = biz.business.timezone;
+  // La hora, en la zona del negocio o (lead de otro país) en la suya.
+  const leadTz = leadZone(leadPhone, tz, now)?.timezone;
+  const atTime = (start: string, time: string) => [tz, ...(leadTz ? [leadTz] : [])].some((z) => DateTime.fromISO(start).setZone(z).toFormat('HH:mm') === time);
   const offerFitsPreference =
     hasPreference &&
     offer.length > 0 &&
     offer.every(
       (s) =>
         (!analysis?.preferredDate || DateTime.fromISO(s.start).setZone(tz).toISODate() === analysis.preferredDate) &&
-        (!analysis?.preferredPartOfDay || partOfDay(new Date(s.start), tz) === analysis.preferredPartOfDay),
+        (!analysis?.preferredPartOfDay || partOfDay(new Date(s.start), tz) === analysis.preferredPartOfDay) &&
+        (!analysis?.preferredTime || atTime(s.start, analysis.preferredTime)),
     );
   const newPreference = hasPreference && !offerFitsPreference;
 
@@ -458,7 +488,22 @@ export function decideDirective(input: StrategyInput): Directive {
   // que se le acaban de ofrecer (“el lunes no puedo”, “ninguna me va bien”), sigue queriendo la llamada: otros horarios,
   // nunca los mismos (repetírselos sería un bucle).
   const rejectsOffer = Boolean(analysis?.rejectsOffer) && offer.length > 0 && !callDeclined;
-  if ((flags?.wantsCall || rejectsOffer) && !flags?.declinesCall) {
+  // Con horarios recién ofrecidos, pedir otro día u hora (“a las 11 me va bien”, sin que se le ofreciera) es seguir
+  // queriendo la llamada a otra hora: se busca en la agenda, no se cambia de tema.
+  const asksOtherSlot = offer.length > 0 && newPreference && Boolean(analysis?.aboutSchedule) && !callDeclined;
+  // Lead de otro país que pide una hora sin decir de qué país es: se le pregunta antes de buscar (cada zona daría
+  // huecos distintos y buscar sin la hora le volvería a ofrecer los mismos).
+  const zoneCountry = foreignLead ? leadZone(leadPhone, tz, now)?.country : null;
+  if (asksOtherSlot && zoneCountry && analysis?.preferredTime && !analysis.timeInBusinessZone && !analysis.preferredDate && !flags?.declinesCall) {
+    return {
+      kind: 'clarify_slot',
+      ambiguousTime: analysis.preferredTime,
+      askZoneOnly: true,
+      instruction: `Ha pedido otra hora (“a las ${analysis.preferredTime}”) que no estaba entre las que le ofreciste, pero escribe desde otro país y no sabes si es la hora de ${zonePlace(tz)} o la de ${zoneCountry}. No reserves nada ni consultes la agenda: pregúntale, en UNA sola pregunta y sin escribir la hora en cifras, si esa hora es la de ${zonePlace(tz)} o la de ${zoneCountry}.`,
+      answerQuestionFirst,
+    };
+  }
+  if ((flags?.wantsCall || rejectsOffer || asksOtherSlot) && !flags?.declinesCall) {
     if (offer.length && !newPreference && !rejectsOffer) return clarifyDirective(offer, biz.business.timezone, answerQuestionFirst, now, leadPhone);
     const slotQuery = slotQueryFor(analysis, rejectsOffer ? offer : [], tz, foreignLead, state, now);
     return {
@@ -531,6 +576,17 @@ export function decideDirective(input: StrategyInput): Directive {
       instruction: `Es tu primer mensaje en esta conversación. Saluda con naturalidad (usa su nombre si lo sabes), preséntate según las reglas de transparencia, responde a lo que haya escrito y haz UNA pregunta para empezar a entender su situación${rule ? ` (objetivo: conocer “${rule.label}”; pregunta sugerida: “${rule.question}”)` : ''}.`,
       answerQuestionFirst,
     };
+  }
+
+  // Acaba de cerrar una objeción sin insistir (“cuando te venga mejor, me escribes”) y el lead solo contesta (“Vale”,
+  // “Gracias”), sin contar nada nuevo ni preguntar: seguir cualificando ahora sería insistir. Se sigue por aquí, sin
+  // preguntas. Solo justo después del cierre: si vuelve a escribir días más tarde, la conversación sigue con normalidad.
+  const objectionClosed =
+    Boolean(state.callDeclinedAt) &&
+    now.getTime() - Date.parse(state.callDeclinedAt!) < 12 * 3_600_000 &&
+    (state.objectionsHandled ?? []).some((k, _, all) => all.filter((x) => x === k).length >= 3);
+  if (objectionClosed && analysis && !flags?.asksQuestion && !flags?.wantsCall && !Object.keys(analysis.qualification ?? {}).length) {
+    return keepTalking(answerQuestionFirst);
   }
 
   // 9) Seguir cualificando.

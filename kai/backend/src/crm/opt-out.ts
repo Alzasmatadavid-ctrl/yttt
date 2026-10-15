@@ -37,10 +37,17 @@ const COURTESY_WORDS = new Set(
 );
 
 /**
+ * Palabras de la lista que por sí solas no son una despedida: saludos («Buenas», «Buenos días», «Muy buenas
+ * tardes») y relleno. Un saludo solo es como un «Hola»: suele ser el comienzo de una conversación nueva.
+ */
+const GREETING_OR_FILLER_WORDS = new Set('buenas buenos buen noches tardes dias dia muy a y de que un una'.split(' '));
+
+/**
  * Mensaje que solo es cortesía o despedida, sin nada que contestar: «Gracias», «Vale, igualmente», «👍», «🙏🏻»…
  * Se usa con los leads dados de baja: lo habitual es que contesten «Gracias» a la despedida de KAI, y eso no es
  * «volver a escribir» (no tiene que salir en «Pendientes» ni generar un aviso). Es estricta: una pregunta o
- * cualquier palabra fuera de la lista ya no cuenta como cortesía.
+ * cualquier palabra fuera de la lista ya no cuenta como cortesía, y un saludo solo («Buenas tardes») tampoco:
+ * el lead que vuelve semanas después suele saludar antes de preguntar, y el entrenador tiene que enterarse.
  */
 export function isCourtesyOnly(text: string): boolean {
   if (!text.trim() || text.length > 80 || text.includes('?')) return false;
@@ -51,5 +58,5 @@ export function isCourtesyOnly(text: string): boolean {
     .filter(Boolean);
   // Solo emojis o signos («👍», «🙏», «!!»): una reacción a la despedida.
   if (words.length === 0) return true;
-  return words.length <= 8 && words.every((w) => COURTESY_WORDS.has(w));
+  return words.length <= 8 && words.every((w) => COURTESY_WORDS.has(w)) && words.some((w) => !GREETING_OR_FILLER_WORDS.has(w));
 }

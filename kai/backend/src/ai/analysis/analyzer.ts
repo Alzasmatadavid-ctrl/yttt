@@ -11,7 +11,8 @@ import { DateTime } from 'luxon';
 import type { ConversationState, LeadQualification, LeadSignals, OfferedSlot } from '../../lib/domain.js';
 import type { SetterState } from '../setter/strategy.js';
 import { fold, normalize } from '../../lib/text.js';
-import { leadZone } from '../../lib/time.js';
+import { leadZone, zonePlace } from '../../lib/time.js';
+import { timeIsExcluded } from '../../calendar/availability.js';
 import type { LLMProvider } from '../providers/types.js';
 import type { BusinessContext, LeadRow, MessageRow } from '../context/context.js';
 import { buildAnalysisSystemPrompt, formatTranscript } from '../prompts/analysis.prompt.js';
@@ -71,6 +72,11 @@ export interface LeadAnalysis {
    * ninguno: se le pregunta a cuál se refiere (“HH:mm”).
    */
   ambiguousSlotTime?: string | null;
+  /**
+   * Lead de otro país: `preferredTime` ya está en la hora del negocio porque dijo de qué zona hablaba (“las 11 de
+   * México”, o “la mía” al preguntárselo). Sin esto, su hora puede ser la suya y no se busca por ella.
+   */
+  timeInBusinessZone?: boolean;
 }
 
 export interface AnalysisInput {
@@ -215,6 +221,7 @@ export async function analyzeWithLLM(provider: LLMProvider, input: AnalysisInput
   analysis.keepsAppointment = safety.keepsAppointment;
   // Si solo da un día u hora (“Vale, el lunes”), la estrategia comprueba que no sea el de la llamada que ya tiene.
   analysis.preferredTime = safety.preferredTime;
+  if (safety.timeInBusinessZone) analysis.timeInBusinessZone = true;
   analysis.rescheduleImplicit = Boolean(safety.rescheduleImplicit) && analysis.flags.wantsReschedule;
   analysis.aboutSchedule =
     Boolean(safety.aboutSchedule || analysis.selectedSlotId || analysis.preferredDate || analysis.preferredPartOfDay || analysis.flags.wantsReschedule) &&
@@ -411,13 +418,55 @@ function rejectedTimesIn(matches: string[], now: Date, tz: string): string[] {
   return [...out];
 }
 
-/** ¿El horario coincide con uno que ha rechazado (“HH:mm” o “YYYY-MM-DD HH:mm”)? */
+/** ¿El horario coincide con uno que ha rechazado (“HH:mm”, “YYYY-MM-DD HH:mm”, “<HH:mm” o “>HH:mm”)? */
 export function matchesRejectedTime(start: string | Date, tz: string, rejected: string[]): boolean {
-  const local = (typeof start === 'string' ? DateTime.fromISO(start) : DateTime.fromJSDate(start)).setZone(tz);
-  const time = local.toFormat('HH:mm');
-  const stamp = `${local.toISODate()} ${time}`;
-  return rejected.some((r) => r === time || r === stamp);
+  return timeIsExcluded(start, tz, rejected);
 }
+
+/** Hora de un límite (“las 18:00”, “las 6 de la tarde”). */
+const BOUND_TIME = String.raw`las? \d{1,2}(?:[:.]\d{2})?(?:\s*y media)?(?:\s+(?:de|por) la (?:manana|tarde|noche))?`;
+/**
+ * Dice que no puede antes o después de una hora (“no puedo hacer llamadas antes de las 18:00”, “antes de las 18 no
+ * puedo”, “hasta las 18 no puedo”, “después de las 20 no me va bien”): acota cuándo puede.
+ */
+const RX_BOUND_REJECTED = new RegExp(
+  String.raw`\bno (?:puedo|podre|podria|voy a poder|me (?:va|viene|encaja|cuadra|pilla|sirve)(?: bien)?)(?:\s+[^\s.,;!?]+){0,3}?\s+(?:(?:antes|despues|mas tarde) de|hasta) ${BOUND_TIME}|\b(?:antes|despues|mas tarde) de ${BOUND_TIME}\s*,?\s*(?:${SLOT_NO})|\bhasta ${BOUND_TIME}\s*,?\s*(?:${SLOT_NO})`,
+  'g',
+);
+/**
+ * Dice desde qué hora puede (“a partir de las 18”, “desde las 7 de la tarde”, “después de las 19 me va bien”): no
+ * antes. Se mira cuando ya se han quitado los “no puedo después de…”. “Desde las 9 hasta las 14” no cuenta: puede ser
+ * cuando puede o cuando trabaja.
+ */
+const RX_BOUND_FROM = new RegExp(String.raw`\b(?:(?:a partir|despues|mas tarde) de|desde) ${BOUND_TIME}(?!\s*,?\s*(?:y\s+)?hasta\b)`, 'g');
+
+/**
+ * Límites que pone, como “<HH:mm” (no puede antes) o “>HH:mm” (no puede después): “no puedo antes de las 18:00” →
+ * “<18:00”; `from` = dice desde cuándo puede (“a partir de las 18” → “<18:00”). Sin franja, se elige la lectura que
+ * descarta menos: “antes de las 6” o “a partir de las 7” son de la tarde (nadie pone así una llamada a las 6 de la
+ * mañana) y “después de las 9 no puedo”, de la noche (a las 9 de la mañana descartaría el día entero).
+ */
+function boundsIn(matches: string[], from = false): string[] {
+  const out = new Set<string>();
+  for (const t of matches) {
+    const m = /\blas? (\d{1,2})(?:[:.](\d{2}))?(\s*y media)?/.exec(t);
+    if (!m) continue;
+    let hour = Number(m[1]);
+    const minute = m[2] ? Number(m[2]) : m[3] ? 30 : 0;
+    const before = from || /\b(?:antes|hasta)\b/.test(t);
+    const evening = /\b(?:de|por) la (?:tarde|noche)\b/.test(t);
+    if (hour < 12 && (evening || (hour >= 1 && !/\bde la manana\b/.test(t) && (!before || hour < 8)))) hour += 12;
+    if (hour > 23 || minute > 59) continue;
+    out.add(`${before ? '<' : '>'}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
+  }
+  return [...out];
+}
+/** Pide un horario más tarde o más pronto que los ofrecidos: “¿no tienes nada más tarde?”, “mejor algo más temprano”. */
+const RX_LATER_SLOT =
+  /\b(?:algo|nada|alguno|alguna|otr[oa]s?|huecos?|horarios?|horas?|opcion(?:es)?|un poco|mejor|prefiero|preferiria|puede ser|podria ser|seria|tienes|teneis|hay|si puede ser)\b[^.!?]{0,25}?\bmas (tarde|pronto|temprano)\b/;
+/** Pide mover la llamada (no solo dice que no podrá ir): “muévela”, “la pasamos al viernes”, “otro día”, “más tarde”. */
+const RX_MOVE_WORDS =
+  /\b(?:cambiar|cambiarla|cambiala|cambiamos|mover|moverla|muevela|movemos|aplazar|aplazarla|aplazala|reprogramar|reprogramarla|reprogramala|retrasar|retrasarla|retrasala|adelantar|adelantarla|adelantala|pasar|pasarla|pasala|pasamos|pasame)\b|\botr[oa] (?:dia|hora|horario|hueco|momento|fecha)\b|\bmas (?:tarde|pronto|temprano)\b/;
 /** Rechaza la oferta sin decir un día (“ninguna me va bien”, “¿no tienes otro día?”, “mejor otro día”). */
 const RX_OFFER_REJECTED =
   /\b(?:ninguna|ninguno)\b(?! (?:duda|pregunta|problema|preferencia|pega|en especial|en concreto))|\b(?:tienes|teneis|tendrias|tendriais|hay|habria|queda|quedan) (?:algun |alguna |algo )?(?:otro|otra|otros|otras|mas) (?:dia|dias|hora|horas|horario|horarios|hueco|huecos|opcion|opciones|fecha|fechas)\b|\b(?:mejor|prefiero|preferiria|puede ser|podria ser|seria|podemos|podriamos) (?:en )?(?:otro|otra) (?:dia|hora|horario|momento|fecha|semana)\b|\b(?:otro|otra) (?:dia|hora|horario|fecha) (?:mejor|si puede ser|porfa|por favor)\b|^\s*¿?\s*(?:y |o )?(?:otro|otra) (?:dia|hora|horario|fecha)\s*\?|\b(?:a|para) otro dia\b|\bno me (?:va|viene|encaja|cuadra|sirve|pilla) (?:bien )?(?:ninguna|ninguno|ese dia|esa hora|esas horas|ese horario|esos horarios)\b/;
@@ -638,6 +687,19 @@ export function matchOfferedSlot(
   return null;
 }
 
+/**
+ * Lead de otro país: ¿dice de qué hora habla? “Las 11 de México”, “la mía”, “hora de aquí” → la suya; “las 11 de
+ * España”, “la tuya”, “la vuestra” → la del negocio. null si no lo dice (o dice las dos).
+ */
+function spokenZone(n: string, country: string | null, tz: string): 'lead' | 'business' | null {
+  const lead =
+    Boolean(country && containsPhrase(n, country)) ||
+    /\b(?:mi hora|hora mia|la mia|las mias|(?:de|en) mi pais|hora local|(?:hora|la|las|las \d{1,2}(?::\d{2})?) de (?:aqui|aca))\b/.test(n);
+  const business =
+    containsPhrase(n, zonePlace(tz)) || /\b(?:tu hora|hora tuya|la tuya|las tuyas|vuestra hora|la vuestra|las vuestras|de alli|de alla|hora espanola)\b/.test(n);
+  return lead === business ? null : lead ? 'lead' : 'business';
+}
+
 /** “Quiero hablar con Álex”, “pásame con Álex”: pide hablar con el entrenador por su nombre. */
 function asksForTrainer(n: string, trainerName: string): boolean {
   const name = normalize(trainerName).split(' ')[0];
@@ -782,15 +844,22 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     ['reminder_24h', 'reminder_1h', 'confirmation'].includes(lastKind) && wordCount <= 8 && RX_NO_TO_REMINDER.test(n) && !RX_REMINDER_OK.test(n);
   // Una hora que dice que no puede (“a las 10 no puedo”, “el lunes a las 10 no me va”) nunca es su preferencia ni
   // descarta el día entero: se guarda aparte. Lo mismo un día (“el lunes no puedo”) o una franja (“por la mañana no
-  // puedo”). Lo que queda (nPreference) es lo que sí pide.
-  const timeRejections = n.match(RX_TIME_REJECTED) ?? [];
-  const nNoTimes = timeRejections.length ? n.replace(RX_TIME_REJECTED, ' ') : n;
-  const rejectedTimes = rejectedTimesIn(timeRejections, input.now, tz);
+  // puedo”) o un límite (“no puedo antes de las 18:00”). Lo que queda (nPreference) es lo que sí pide.
+  const boundRejections = n.match(RX_BOUND_REJECTED) ?? [];
+  const nNoBounds = boundRejections.length ? n.replace(RX_BOUND_REJECTED, ' ') : n;
+  const timeRejections = nNoBounds.match(RX_TIME_REJECTED) ?? [];
+  const nNoTimes = timeRejections.length ? nNoBounds.replace(RX_TIME_REJECTED, ' ') : nNoBounds;
+  // “No puedo entrenar antes de las 18:00” habla de su entrenamiento, no de la llamada: no acota la llamada.
+  const fromBounds = RX_NOT_ABOUT_CALL.test(nNoBounds) ? [] : (nNoBounds.match(RX_BOUND_FROM) ?? []);
+  const callBounds = [...new Set([...boundsIn(boundRejections.filter((t) => !RX_NOT_ABOUT_CALL.test(t))), ...boundsIn(fromBounds, true)])];
+  const rejectedTimes = [...rejectedTimesIn(timeRejections, input.now, tz), ...callBounds];
   const rejectedDays = (nNoTimes.match(RX_DAY_REJECTED) ?? []).join(' ');
   const nNoDays = rejectedDays ? nNoTimes.replace(RX_DAY_REJECTED, ' ') : nNoTimes;
-  const partRejections = (nNoDays.match(RX_PART_REJECTED) ?? []).join(' ');
+  // “No puedo entrenar por la mañana” habla de su entrenamiento, no de la llamada: no descarta esa franja (pero
+  // tampoco es su preferencia).
+  const partRejections = (nNoDays.match(RX_PART_REJECTED) ?? []).filter((t) => !RX_NOT_ABOUT_CALL.test(t)).join(' ');
   const rejectedPartOfDay = partRejections ? resolvePartOfDay(partRejections.replace(/\blas (manana|tarde|noche)s\b/g, 'la $1')) : null;
-  const nPreference = partRejections ? nNoDays.replace(RX_PART_REJECTED, ' ') : nNoDays;
+  const nPreference = nNoDays.replace(RX_PART_REJECTED, ' ');
   const excludedDate = rejectedDays ? resolvePreferredDate(rejectedDays, input.now, tz) : null;
   const preferredDate = resolvePreferredDate(nPreference, input.now, tz);
   const preferredPartOfDay = resolvePartOfDay(nPreference);
@@ -806,7 +875,10 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // Desiste de moverla (“mejor la dejamos como estaba”): no es pedir otro horario.
   const keepsAppointment = RX_KEEP_BOOKED.test(n);
   const explicitReschedule = RX.reschedule.test(n) || noToReminder;
-  const wantsReschedule = !keepsAppointment && (explicitReschedule || asksOtherTime);
+  // “Al final no voy a poder, tengo que cancelar la llamada”: no poder ir y pedir cancelarla es cancelarla; solo es
+  // moverla si además pide otro día u hora (“cancélala y la pasamos al viernes”).
+  const cancelsInstead = RX.cancel.test(n) && !asksOtherTime && !RX_MOVE_WORDS.test(n);
+  const wantsReschedule = !keepsAppointment && (explicitReschedule || asksOtherTime) && !cancelsInstead;
   // Rechaza la llamada (“no quiero hacer la llamada”, “prefiero por aquí”), salvo que solo acote cuándo puede (“no
   // puedo hacer llamadas en horario de trabajo, ¿podría ser por la tarde?”, “no puedo antes de las 18:00”) o empiece
   // por un sí (“Sí, pero no puedo hacer llamadas…”): eso pone condiciones a la llamada, no la rechaza.
@@ -852,8 +924,12 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // Pedirla en forma de pregunta (“¿hacemos la llamada?”, “¿me podéis llamar?”, “¿cuándo sería?”) sí cuenta.
   const onlyAsksAboutCall = onlyQuestion && !RX.callRequest.test(n) && !RX_CALL_ASK.test(n) && !asksWhenCall;
   const mentionsCall = RX.callYes.test(n) && !RX_CALL_NEGATED.test(n.replace(RX_NOT_A_NEGATION, ' ')) && !onlyAsksAboutCall;
-  // Tras proponerle la llamada, dar una franja u hora para ella (“¿podría ser por la tarde?”) es aceptarla.
-  const givesSlotForCall = callWasProposed && Boolean(preferredPartOfDay || preferredTime) && RX_SCHEDULE_PREFERENCE.test(nPreference) && !RX_NOT_ABOUT_CALL.test(n);
+  // Tras proponerle la llamada, dar una franja u hora para ella (“¿podría ser por la tarde?”) o decir cuándo no puede
+  // (“no puedo hacer llamadas por la mañana”, “sí, pero no puedo antes de las 18:00”) es aceptarla con esa condición.
+  const givesSlotForCall =
+    callWasProposed &&
+    !RX_NOT_ABOUT_CALL.test(n) &&
+    ((Boolean(preferredPartOfDay || preferredTime) && RX_SCHEDULE_PREFERENCE.test(nPreference)) || Boolean(rejectedPartOfDay) || callBounds.length > 0);
   const wantsCall =
     !declinesCall &&
     (callDeclined
@@ -884,14 +960,27 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
   // Horarios ofrecidos: ¿elige uno, los rechaza (“el lunes no puedo”, “ninguna me va bien”, “¿no tienes otro día?”) o
   // habla de otra cosa (“gracias”, otro tema)? Repetir los mismos horarios a quien no puede o ya no los quiere es un bucle.
   // Se mira solo lo que pide (nPreference): en “Mañana no, mejor el lunes” el día elegido es el lunes, nunca mañana.
-  const inBusinessTz = matchOfferedSlot(nPreference, offered, tz, input.now, lastOfferIds, { offerIsLastMessage });
   // Lead de otro país: la etiqueta del horario le da también su hora (“18:00, hora de España; en México, a las
-  // 10:00”), así que “a las 10” puede ser la suya. Si en cada zona apunta a un horario distinto, no se elige ninguno:
-  // se le pregunta a cuál se refiere (reservar el que para él es de madrugada sería peor que preguntar).
-  const leadTz = leadZone(input.lead.whatsappId ?? input.lead.phone, tz, input.now)?.timezone;
+  // 10:00”), así que “a las 10” puede ser la suya. Si dice de qué hora habla (“las 11 de México”, “la mía”), se busca
+  // en esa; si no, y en cada zona apunta a un horario distinto, no se elige ninguno: se le pregunta a cuál se refiere
+  // (reservar el que para él es de madrugada sería peor que preguntar).
+  const zone = leadZone(input.lead.whatsappId ?? input.lead.phone, tz, input.now);
+  const leadTz = zone?.timezone ?? null;
+  const zoneSaid = leadTz ? spokenZone(n, zone?.country ?? null, tz) : null;
+  const hasClockTime = (t: string) => /\blas \d{1,2}\b|\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*h\b/.test(t);
+  let slotText = nPreference;
+  // Contesta a «¿las 11:00 de España o las de México?» sin repetir la hora (“la mía”, “las de México”): la hora es la
+  // de su mensaje anterior.
+  if (zoneSaid && !hasClockTime(nPreference) && lastOutbound?.metadata?.directive === 'clarify_slot') {
+    // El mensaje del lead ANTERIOR a la aclaración (el historial puede traer ya al final el que se está analizando).
+    const clarifiedAt = input.history.map((m) => m.direction).lastIndexOf('outbound');
+    const previous = input.history.slice(0, Math.max(clarifiedAt, 0)).reverse().find((m) => m.direction === 'inbound');
+    if (previous && hasClockTime(normalize(previous.content))) slotText = normalize(previous.content);
+  }
+  const inBusinessTz = zoneSaid === 'lead' && hasClockTime(slotText) ? null : matchOfferedSlot(slotText, offered, tz, input.now, lastOfferIds, { offerIsLastMessage });
   const inLeadTz =
-    leadTz && /\blas \d{1,2}\b|\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*h\b/.test(nPreference)
-      ? matchOfferedSlot(nPreference, offered, leadTz, input.now, lastOfferIds, { offerIsLastMessage })
+    leadTz && zoneSaid !== 'business' && hasClockTime(slotText)
+      ? matchOfferedSlot(slotText, offered, leadTz, input.now, lastOfferIds, { offerIsLastMessage })
       : null;
   let selectedSlotId = inBusinessTz ?? inLeadTz;
   let ambiguousSlotTime: string | null = null;
@@ -900,12 +989,36 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     ambiguousSlotTime = said ? DateTime.fromISO(said.start).setZone(tz).toFormat('HH:mm') : null;
     selectedSlotId = null;
   }
+  // Pide una hora que no se le ofreció y dice de qué zona es (“las 11 de México”, o “la mía” al preguntárselo): se
+  // pasa a la hora del negocio para buscar huecos cerca de ella.
+  let zonedTime: string | null = null;
+  if (zoneSaid && leadTz && !selectedSlotId && !ambiguousSlotTime && hasClockTime(slotText)) {
+    const said = resolvePreferredTime(slotText) ?? resolvePreferredTime(slotText.replace(/\blas (\d)/, 'a las $1'));
+    if (said) {
+      const [h, m] = said.split(':').map(Number);
+      const from = DateTime.fromJSDate(input.now).setZone(zoneSaid === 'lead' ? leadTz : tz).set({ hour: h, minute: m, second: 0, millisecond: 0 });
+      zonedTime = from.setZone(tz).toFormat('HH:mm');
+    }
+  }
   // Nunca un horario del día u hora que acaba de descartar.
   const chosen = selectedSlotId ? offered.find((s) => s.id === selectedSlotId) : null;
   if (chosen && ((excludedDate && DateTime.fromISO(chosen.start).setZone(tz).toISODate() === excludedDate) || matchesRejectedTime(chosen.start, tz, rejectedTimes)))
     selectedSlotId = null;
   const latestOffer = lastOfferIds.map((id) => offered.find((o) => o.id === id)).filter((s): s is OfferedSlot => Boolean(s));
   const offeredDays = new Set(latestOffer.map((s) => DateTime.fromISO(s.start).setZone(tz).toISODate()));
+  // “¿No tienes nada más tarde?”, “¿algo más temprano?” a los horarios recién ofrecidos: a otra hora del día, más tarde
+  // (o más pronto) que todos ellos. No “te digo algo más tarde” (eso es que ya contestará).
+  if (offerIsLastMessage && latestOffer.length && !selectedSlotId && !RX_WILL_GET_BACK.test(n) && !RX_NOT_ABOUT_CALL.test(n)) {
+    const later = RX_LATER_SLOT.exec(nPreference)?.[1];
+    if (later) {
+      const minutes = latestOffer.map((s) => DateTime.fromISO(s.start).setZone(tz)).map((d) => d.hour * 60 + d.minute);
+      const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const latest = Math.max(...minutes);
+      const earliest = Math.min(...minutes);
+      if (later === 'tarde' && latest < 23 * 60 + 59) rejectedTimes.push(`<${hhmm(latest + 1)}`);
+      if (later !== 'tarde' && earliest > 0) rejectedTimes.push(`>${hhmm(earliest - 1)}`);
+    }
+  }
   const rejectsOffer =
     latestOffer.length > 0 &&
     !selectedSlotId &&
@@ -920,6 +1033,7 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     Boolean(
       selectedSlotId ||
         ambiguousSlotTime ||
+        zonedTime ||
         rejectsOffer ||
         ordinalChoice(n) !== null ||
         preferredDate ||
@@ -966,7 +1080,8 @@ export function analyzeHeuristically(input: AnalysisInput): LeadAnalysis {
     selectedSlotId,
     summary: 'Análisis heurístico (modo simulación).',
     engine: 'heuristic',
-    preferredTime,
+    preferredTime: zonedTime ?? preferredTime,
+    ...(zonedTime ? { timeInBusinessZone: true } : {}),
     rescheduleImplicit: wantsReschedule && !explicitReschedule && !RX_PREFERS_CHANGE.test(nPreference),
     excludedDate,
     rejectsOffer,

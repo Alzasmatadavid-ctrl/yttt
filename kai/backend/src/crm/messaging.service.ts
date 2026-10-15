@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../database/client.js';
 import { alerts, conversations, leads, messages } from '../database/schema.js';
 import type { TemplateRef } from '../lib/domain.js';
@@ -183,6 +183,23 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     });
     return { message, delivered: false, blockedReason: reason };
   }
+}
+
+/** Tiempo tras el que un envío en cola ya no puede seguir en marcha (la llamada al canal se corta a los 15 s). */
+export const INTERRUPTED_SEND_AFTER_MS = 2 * 60_000;
+
+/**
+ * Envíos que se quedaron «en cola» porque el proceso se detuvo mientras se llamaba al canal (despliegue, caída…):
+ * ya nadie los va a terminar y, mientras sigan así, cuentan como respuesta al lead. Se dan por no enviados: al
+ * repetirse el trabajo, KAI vuelve a contestar, o la conversación sale en «Pendientes» con el mensaje «no enviado».
+ */
+export async function failInterruptedSends(olderThanMs = INTERRUPTED_SEND_AFTER_MS): Promise<number> {
+  const rows = await getDb()
+    .update(messages)
+    .set({ status: 'failed', error: 'Envío interrumpido: KAI se reinició mientras lo enviaba y puede que no le haya llegado al lead.' })
+    .where(and(eq(messages.direction, 'outbound'), eq(messages.status, 'queued'), lt(messages.createdAt, new Date(Date.now() - olderThanMs))))
+    .returning({ id: messages.id });
+  return rows.length;
 }
 
 /**

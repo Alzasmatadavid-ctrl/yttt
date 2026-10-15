@@ -30,8 +30,8 @@ import {
 } from './jobs.js';
 import { composeFollowUp, runFirstContact, runSetterReply } from '../ai/setter/setter-engine.js';
 import { expireOldActions } from '../ai/copilot/copilot-actions.js';
-import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, scheduleNoReplyFollowUp, stopBusinessAutomations } from './followups.js';
-import { sendMessage } from '../crm/messaging.service.js';
+import { canSendFollowUpNow, conversationIsActiveForKai, getFollowUp, markFollowUp, quietPeriodStart, scheduleNoReplyFollowUp, stopBusinessAutomations } from './followups.js';
+import { failInterruptedSends, sendMessage } from '../crm/messaging.service.js';
 import { autopilotEnabled } from '../crm/conversations.service.js';
 import { applyPipelineEvent, recordLeadEvent } from '../crm/leads.service.js';
 import { appointmentMessageEnabled, getAutomation } from './reminders.js';
@@ -52,11 +52,23 @@ type Handler = (job: Job) => Promise<void>;
  */
 async function quietHoursEnd(businessId: string, quietHours?: { start: string; end: string }): Promise<Date | null> {
   if (!quietHours) return null;
-  const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  const timezone = biz?.timezone ?? 'Europe/Madrid';
+  const timezone = await businessTimezone(businessId);
   const now = new Date();
   return isWithinQuietHours(now, timezone, quietHours) ? shiftOutOfQuietHours(now, timezone, quietHours) : null;
 }
+
+async function businessTimezone(businessId: string): Promise<string> {
+  const [biz] = await getDb().select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return biz?.timezone ?? 'Europe/Madrid';
+}
+
+/**
+ * Un seguimiento de Instagram (o de WhatsApp sin plantilla) se coloca justo antes del descanso cuando la ventana de
+ * 24 h se cierra durante él. Si se ejecuta con algo de retraso (cola con varios a la vez, servidor dormido, cron
+ * externo…) ya cae dentro del descanso: hasta este margen desde que empezó todavía sale, porque aplazarlo al final
+ * del descanso sería perderlo (la ventana ya estaría cerrada).
+ */
+const FOLLOWUP_QUIET_GRACE_MS = 30 * 60_000;
 
 /**
  * Márgenes para no enviar recordatorios a destiempo cuando el trabajo se ejecuta tarde
@@ -176,11 +188,22 @@ const handlers: Record<string, Handler> = {
     // (el simulador: el entrenador lo está probando y quiere verlo ya).
     const forced = Boolean((job.payload as { forceNow?: boolean }).forceNow);
     const deferTo = forced ? null : await quietHoursEnd(businessId, automation.config.quietHours);
-    if (deferTo) {
-      const next = await scheduleJob({ businessId, type: 'followup', runAt: deferTo, payload: job.payload, dedupeKey: `followup:${fu.id}` });
-      await getDb().update(followUps).set({ scheduledFor: deferTo, jobId: next.id }).where(eq(followUps.id, fu.id));
-      logger.info('followup.quiet_hours', { followUpId: fu.id, deferTo: deferTo.toISOString() });
-      return;
+    if (deferTo && automation.config.quietHours) {
+      if (await canSendFollowUpNow(businessId, fu.conversationId, deferTo)) {
+        const next = await scheduleJob({ businessId, type: 'followup', runAt: deferTo, payload: job.payload, dedupeKey: `followup:${fu.id}` });
+        await getDb().update(followUps).set({ scheduledFor: deferTo, jobId: next.id }).where(eq(followUps.id, fu.id));
+        logger.info('followup.quiet_hours', { followUpId: fu.id, deferTo: deferTo.toISOString() });
+        return;
+      }
+      // Al terminar el descanso ya no se podrá escribir al lead (ventana de 24 h cerrada): si el descanso acaba de
+      // empezar, sale ya; si no, se da por perdido con el motivo.
+      const quietStart = quietPeriodStart(new Date(), await businessTimezone(businessId), automation.config.quietHours);
+      if (Date.now() - quietStart.getTime() > FOLLOWUP_QUIET_GRACE_MS) {
+        return markFollowUp(fu.id, 'skipped', {
+          note: 'Horario de descanso: cuando termine, ya habrá pasado la ventana de 24 h del canal y no se puede escribir al lead hasta que vuelva a escribir.',
+        });
+      }
+      logger.info('followup.quiet_hours_grace', { followUpId: fu.id, quietStart: quietStart.toISOString() });
     }
     const hoursSilent = (Date.now() - (lead.lastOutboundAt ?? fu.createdAt).getTime()) / 3_600_000;
     const composed = await composeFollowUp(businessId, fu.conversationId, { step: fu.step, totalSteps: steps.length, angle: step.angle, hoursSilent });
@@ -388,6 +411,9 @@ async function housekeeping(force = false) {
   if (!force && Date.now() - lastHousekeepingAt < HOUSEKEEPING_EVERY_MS) return;
   lastHousekeepingAt = Date.now();
   try {
+    // Antes de liberar los trabajos: los envíos que cortó un reinicio dejan de contar como respuesta, y así la
+    // respuesta de KAI que se repite tiene algo que contestar.
+    await failInterruptedSends();
     await releaseStaleJobs();
     await ensureSystemJobs();
   } catch (err) {

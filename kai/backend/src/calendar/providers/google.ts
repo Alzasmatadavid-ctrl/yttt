@@ -117,7 +117,10 @@ export async function googleCreateEvent(
 
 /**
  * Lee un evento para saber si el entrenador lo ha movido o borrado en su Google Calendar.
- * Devuelve null si ya no existe. `start`/`end` son null en eventos de día completo (sin hora).
+ * Google devuelve los eventos borrados con `status: 'cancelled'` (y 410 si ya no los guarda): eso es un borrado.
+ * Devuelve null si no lo encuentra en este calendario (404), lo que NO significa que se haya borrado: p. ej. el
+ * entrenador ha vuelto a conectar Google con otra cuenta y el evento sigue en la anterior.
+ * `start`/`end` son null en eventos de día completo (sin hora).
  */
 export async function googleGetEvent(token: string, calendarId: string, eventId: string): Promise<{ status: string; start: Date | null; end: Date | null } | null> {
   try {
@@ -132,7 +135,8 @@ export async function googleGetEvent(token: string, calendarId: string, eventId:
     };
   } catch (err) {
     const status = (err as { status?: number }).status;
-    if (status === 404 || status === 410) return null;
+    if (status === 410) return { status: 'cancelled', start: null, end: null };
+    if (status === 404) return null;
     throw err;
   }
 }

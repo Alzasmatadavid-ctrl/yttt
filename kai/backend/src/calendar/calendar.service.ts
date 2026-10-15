@@ -552,7 +552,8 @@ export async function setAppointmentOutcome(
 /**
  * KAI no recibe los cambios que el entrenador hace en su Google Calendar. Antes de escribir al lead por una
  * llamada (confirmación, recordatorios) o de pedir su resultado, se comprueba que sigue como está en KAI:
- * - Borrada allí → se cancela también en KAI (sin recordatorios) y se avisa al entrenador.
+ * - Borrada allí → se cancela también en KAI (sin recordatorios) y se avisa al entrenador. Que no aparezca en el
+ *   calendario conectado (404, p. ej. tras conectar otra cuenta de Google) no es un borrado: no se toca.
  * - Movida allí → se actualiza la hora, se reprograman los recordatorios con la nueva y se avisa al entrenador.
  * Devuelve 'unchanged' si sigue igual o no se puede comprobar (con Google caído se usa lo que hay en KAI).
  * Con 'cancelled' o 'moved', el mensaje que se iba a enviar ya no vale: no se envía.
@@ -568,9 +569,15 @@ export async function syncAppointmentWithCalendar(businessId: string, appt: Appo
     await logError('calendar.google.get_event', err, { appointmentId: appt.id }, businessId, 'warn');
     return 'unchanged';
   }
+  if (!ev) {
+    // No está en el calendario conectado, pero no consta como borrada: lo normal es que se haya vuelto a conectar
+    // Google con otra cuenta y el evento siga en la anterior. La llamada sigue en pie: se usa lo que hay en KAI.
+    await logError('calendar.google.event_not_found', new Error('El evento no está en el Google Calendar conectado.'), { appointmentId: appt.id }, businessId, 'warn');
+    return 'unchanged';
+  }
   const { timezone } = await getAvailabilityConfig(businessId);
   const when = formatInZone(appt.startsAt, timezone);
-  if (!ev || ev.status === 'cancelled') {
+  if (ev.status === 'cancelled') {
     await cancelAppointment(businessId, appt.id, { type: 'integration' }, 'Borrada en Google Calendar', { keepExternal: true });
     await createAlert({
       businessId,

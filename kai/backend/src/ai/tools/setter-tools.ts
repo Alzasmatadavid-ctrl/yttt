@@ -31,7 +31,10 @@ const CALENDAR_TOOLS = ['get_available_slots', 'book_call', 'reschedule_call'];
  * un horario que el lead aún no ha visto ni cancela una llamada que el lead no ha pedido cancelar.
  */
 export interface ToolboxPolicy {
-  /** `slotQuery.excludeDates`: días que el lead ha descartado (“el lunes no puedo”): get_available_slots no los ofrece. */
+  /**
+   * `slotQuery.excludeDates` y `slotQuery.excludeTimes`: días y horas que el lead ha descartado (“el lunes no puedo”, “a
+   * las 10 no puedo”): get_available_slots no los ofrece aunque la IA no los pase.
+   */
   directive: { kind: string; slotId?: string; slotQuery?: { excludeDates?: string[]; excludeTimes?: string[]; time?: string } };
   /** El lead ha pedido cancelar su llamada de forma explícita (permite cancel_call al moverla). */
   leadAskedToCancel?: boolean;
@@ -222,9 +225,9 @@ export class SetterToolbox {
         const excludeDates = [...(this.policy?.directive.slotQuery?.excludeDates ?? []), ...(Array.isArray(input.exclude_dates) ? input.exclude_dates : [])].filter(
           (d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d),
         );
-        // Horas que el lead ha dicho que no puede (“a las 10 no puedo”): tampoco se le ofrecen.
+        // Horas que el lead ha dicho que no puede (“a las 10 no puedo”, “no puedo antes de las 18:00”): tampoco se le ofrecen.
         const excludeTimes = [...(this.policy?.directive.slotQuery?.excludeTimes ?? []), ...(Array.isArray(input.exclude_times) ? input.exclude_times : [])].filter(
-          (t): t is string => typeof t === 'string' && /^(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}$/.test(t),
+          (t): t is string => typeof t === 'string' && /^(?:\d{4}-\d{2}-\d{2} |[<>])?\d{2}:\d{2}$/.test(t),
         );
         // Hora concreta que pide el lead (“a las 10”): primero los huecos más cercanos a ella.
         const nearRaw = typeof input.near_time === 'string' ? input.near_time : this.policy?.directive.slotQuery?.time;

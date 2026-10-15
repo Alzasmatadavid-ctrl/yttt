@@ -117,6 +117,21 @@ export function partOfDay(d: Date, tz: string): Exclude<PartOfDay, 'any'> {
 }
 
 /**
+ * ¿Cae el horario en una hora que el lead ha dicho que no puede? Cada entrada es “HH:mm” (esa hora, cualquier día),
+ * “YYYY-MM-DD HH:mm” (esa hora, solo ese día), “<HH:mm” (no puede antes de esa hora) o “>HH:mm” (no puede después).
+ */
+export function timeIsExcluded(start: Date | string, tz: string, excludeTimes: string[]): boolean {
+  const local = (typeof start === 'string' ? DateTime.fromISO(start) : DateTime.fromJSDate(start)).setZone(tz);
+  const time = local.toFormat('HH:mm');
+  const stamp = `${local.toISODate()} ${time}`;
+  return excludeTimes.some((t) => {
+    if (t.startsWith('<')) return time < t.slice(1);
+    if (t.startsWith('>')) return time > t.slice(1);
+    return t === time || t === stamp;
+  });
+}
+
+/**
  * Elige pocos huecos variados para ofrecer (no una lista enorme): por defecto 2–3,
  * repartidos en días/franjas distintas para que el lead elija fácil.
  */
@@ -130,14 +145,8 @@ export function pickOfferSlots(
   if (opts.date) pool = pool.filter((s) => DateTime.fromJSDate(s.start).setZone(tz).toISODate() === opts.date);
   // Días que el lead ha dicho que no puede (“el lunes no puedo”) o cuyos horarios acaba de rechazar.
   if (opts.excludeDates?.length) pool = pool.filter((s) => !opts.excludeDates!.includes(DateTime.fromJSDate(s.start).setZone(tz).toISODate() ?? ''));
-  // Horas que ha dicho que no puede (“a las 10 no puedo”): “HH:mm” cualquier día o “YYYY-MM-DD HH:mm” solo ese día.
-  if (opts.excludeTimes?.length) {
-    pool = pool.filter((s) => {
-      const local = DateTime.fromJSDate(s.start).setZone(tz);
-      const time = local.toFormat('HH:mm');
-      return !opts.excludeTimes!.some((t) => t === time || t === `${local.toISODate()} ${time}`);
-    });
-  }
+  // Horas que ha dicho que no puede (“a las 10 no puedo”, “no puedo antes de las 18:00”).
+  if (opts.excludeTimes?.length) pool = pool.filter((s) => !timeIsExcluded(s.start, tz, opts.excludeTimes!));
   // «Una hora más tarde» / «un poco antes» que la llamada que ya tiene: solo horarios posteriores (o anteriores).
   if (opts.after) pool = pool.filter((s) => s.start.getTime() > opts.after!.getTime());
   if (opts.before) pool = pool.filter((s) => s.start.getTime() < opts.before!.getTime());

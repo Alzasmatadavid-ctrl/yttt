@@ -332,7 +332,7 @@ describe('cambios hechos en Google Calendar', () => {
   let G: Trainer;
   let eventCounter = 0;
   const calls: { method: string; url: string }[] = [];
-  /** Lo que devuelve Google al leer cada evento: 'deleted' (404), 'down' (500) o la hora que tiene ahora. */
+  /** Lo que devuelve Google al leer cada evento: 'deleted' (status 'cancelled', como Google con los borrados), 'down' (500) o la hora que tiene ahora. */
   const remote = new Map<string, 'deleted' | 'down' | { start: Date; end: Date }>();
 
   beforeAll(async () => {
@@ -359,7 +359,7 @@ describe('cambios hechos en Google Calendar', () => {
         const id = decodeURIComponent(url.split('/events/')[1]?.split('?')[0] ?? '');
         if (method === 'GET' && remote.has(id)) {
           const state = remote.get(id)!;
-          if (state === 'deleted') return jsonResponse(404, { error: { message: 'Not Found' } });
+          if (state === 'deleted') return jsonResponse(200, { id, status: 'cancelled' });
           if (state === 'down') return jsonResponse(500, { error: { message: 'Backend Error' } });
           return jsonResponse(200, { id, status: 'confirmed', start: { dateTime: state.start.toISOString() }, end: { dateTime: state.end.toISOString() } });
         }
