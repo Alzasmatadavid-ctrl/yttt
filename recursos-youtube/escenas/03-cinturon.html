@@ -22,7 +22,8 @@
   #b3h .title{font-size:80px}
   .col{position:absolute;top:400px;width:760px}
   .col .list{gap:30px}
-  #verd{left:480px;top:760px}
+  #verd{left:480px;top:700px}
+  #verd2{left:480px;top:850px}
   #belt{display:none}
 </style>
 </head>
@@ -51,12 +52,12 @@
     </svg>
     <div class="pcard" id="b3a" style="left:960px;top:300px;width:860px;height:516px"><div class="ly"><img src="img/cinturon/buffalo.jpg" alt=""><div class="brand">PBS <b>·</b> Pro Buffalo</div><div class="feat">Palanca · 13 mm</div></div></div>
     <div class="pcard" id="b3b" style="left:120px;top:640px;width:560px;height:336px"><div class="ly"><img src="img/cinturon/ohio.jpg" alt=""><div class="brand">PBS <b>·</b> Ohio</div><div class="feat">Hebilla · 10 mm</div></div></div>
-    <div class="photo" id="b3c" style="left:520px;top:190px;width:420px;height:513px"><img src="img/cinturon/buffalo_puesto.jpg" alt=""><div class="brand">Bien ajustado</div></div>
-    <div class="photo" id="b3d" style="left:980px;top:190px;width:420px;height:513px"><img src="img/cinturon/ohio_gym.jpg" alt=""><div class="brand">PBS <b>·</b> Ohio</div></div>
+    <div class="photo" id="b3c" style="left:520px;top:180px;width:420px;height:460px"><img src="img/cinturon/buffalo_puesto.jpg" alt=""><div class="brand">Bien ajustado</div></div>
+    <div class="photo" id="b3d" style="left:980px;top:180px;width:420px;height:460px"><img src="img/cinturon/ohio_gym.jpg" alt=""><div class="brand">PBS <b>·</b> Ohio</div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Soporte para cargas altas</div>
       <div class="title" id="ht">Cinturón de<br><em>powerlifting</em></div>
-      <div class="sub" id="hs">Útil en algunos levantamientos. <em>Obligatorio</em> en ninguno.</div>
+      <div class="sub" id="hs">Tu aliado cuando las cargas <em>empiezan a subir</em>.</div>
     </div>
 
     <!-- B: sección de la cintura -->
@@ -88,11 +89,12 @@
 
     <!-- C: cuándo sí / cuándo no -->
     <div class="abs" id="b3">
-      <div class="abs" id="b3h"><div class="kicker" id="b3k">Antes de comprarlo</div><div class="title" id="b3t" style="margin-top:14px">¿Cuándo tiene <em>sentido</em>?</div></div>
-      <div class="col" id="c1" style="left:120px"><div class="colhead pro">Puede ayudar</div><div class="plist"></div></div>
-      <div class="col" id="c2" style="left:1000px"><div class="colhead con">No hace falta</div><div class="plist"></div></div>
+      <div class="abs" id="b3h"><div class="kicker" id="b3k">Cuándo usarlo</div><div class="title" id="b3t" style="margin-top:14px">Depende de <em>tu nivel</em></div></div>
+      <div class="col" id="c1" style="left:120px"><div class="colhead pro">Al empezar · Recomendable</div><div class="plist"></div></div>
+      <div class="col" id="c2" style="left:1000px"><div class="colhead pro">Con cargas altas · Imprescindible</div><div class="plist"></div></div>
     </div>
     <div id="verd"></div>
+    <div id="verd2"></div>
   </div>
   <div class="grain"></div><div class="vig"></div>
 </div>
@@ -132,9 +134,10 @@ for (let i = 0; i < 14; i++) {
 }
 $('#arrows').innerHTML = ar.join('');
 
-list($('#c1 .plist'), [['pro', 'Series pesadas de sentadilla y peso muerto'], ['pro', 'Cuando ya dominas la técnica y el bloqueo del abdomen']]);
-list($('#c2 .plist'), [['con', 'Para empezar a entrenar fuerza'], ['con', 'Con cargas moderadas o en máquinas'], ['con', 'No sustituye aprender a estabilizar el tronco']]);
-verdict($('#verd'), 0, 'Un apoyo para cargas altas, no un requisito para progresar.', 'Cinturón');
+list($('#c1 .plist'), [['pro', 'Te ayuda a sentir el bloqueo del abdomen'], ['pro', 'Úsalo en tus series más exigentes'], ['con', 'No sustituye aprender a estabilizar el tronco']]);
+list($('#c2 .plist'), [['pro', 'Series pesadas de sentadilla y peso muerto'], ['pro', 'Más estabilidad del tronco cuando la carga aprieta']]);
+verdict($('#verd'), 1, '', 'Al empezar');
+verdict($('#verd2'), 2, '', 'Con cargas altas');
 
 K.scene({
   num: 3, name: 'Cinturón', duration: 24,
@@ -206,7 +209,8 @@ K.scene({
     });
 
     /* --- D: veredicto --- */
-    verdictAnim($('#verd'), t, 19.2);
+    verdictAnim($('#verd'), t, 19.4);
+    verdictAnim($('#verd2'), t, 20.1);
   },
 });
 </script>

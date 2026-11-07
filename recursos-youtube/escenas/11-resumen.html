@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="shared/kit.css">
 <style>
   .spot{left:200px;top:200px;width:1500px;height:900px;background:radial-gradient(closest-side,rgba(17,65,163,.38),rgba(17,65,163,0))}
-  #head{left:120px;top:180px;width:1700px}
+  #head{left:120px;top:170px;width:1700px}
   #head .title{font-size:76px;margin-top:14px;line-height:1.05}
   .tier{position:absolute;left:120px;width:1680px;height:150px;border-top:1.5px solid var(--line);display:flex;align-items:center}
   .tier .tl{width:380px;flex:0 0 380px}
@@ -23,7 +23,8 @@
     background:radial-gradient(circle at 50% 40%,#ffffff,#e3e8f0);box-shadow:0 0 0 2px rgba(234,245,253,.5)}
   .pill .th img{width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply;transform:scale(1.35)}
   .pill{padding:10px 24px 10px 14px;font-size:27px}
-  #foot{left:120px;top:960px}
+  #foot{left:120px;top:965px}
+  .pills{row-gap:14px}
 </style>
 </head>
 <body>
@@ -31,13 +32,13 @@
   <div class="glow spot" id="spot"></div>
   <div id="cam">
     <div class="abs" id="head"><div class="kicker" id="hk">Resumen del kit</div><div class="title" id="ht">Empieza por lo básico.<br><em>Lo demás, cuando lo necesites.</em></div></div>
-    <div class="tier t1" id="r1" style="top:430px"><div class="tl"><div class="lv" style="color:var(--blue)">Imprescindible</div><div class="ds">Para todos desde el día 1</div></div>
+    <div class="tier t1" id="r1" style="top:410px"><div class="tl"><div class="lv" style="color:var(--blue)">Imprescindible</div><div class="ds">Para todos desde el día 1</div></div>
       <div class="pills"><div class="pill"><span class="th"><img src="img/basculas/s100_top.jpg" alt=""></span><b>05</b>Báscula corporal</div><div class="pill"><span class="th"><img src="img/cinta/renpho.jpg" alt=""></span><b>07</b>Cinta métrica</div><div class="pill"><span class="th"><img src="img/cocina/producto.jpg" alt=""></span><b>09</b>Báscula de cocina</div></div></div>
-    <div class="tier t2" id="r2" style="top:600px"><div class="tl"><div class="lv" style="color:var(--blue2)">Recomendable</div><div class="ds">Te facilitan mucho el proceso</div></div>
-      <div class="pills"><div class="pill"><span class="th"><img src="img/zapatillas/converse.jpg" alt=""></span><b>01</b>Zapatillas planas</div><div class="pill"><span class="th"><img src="img/tripode/atumtek.jpg" alt=""></span><b>08</b>Trípode</div><div class="pill"><span class="th"><img src="img/tuppers/abierto.jpg" alt=""></span><b>10</b>Tuppers</div><div class="pill"><span class="th"><img src="img/bandas/lote4.jpg" alt=""></span><b>04</b>Bandas elásticas*</div></div></div>
-    <div class="tier t3" id="r3" style="top:770px"><div class="tl"><div class="lv" style="color:var(--muted)">Opcional</div><div class="ds">Solo si tu caso lo pide</div></div>
-      <div class="pills"><div class="pill"><span class="th"><img src="img/straps/amarillo.jpg" alt=""></span><b>02</b>Straps</div><div class="pill"><span class="th"><img src="img/cinturon/buffalo.jpg" alt=""></span><b>03</b>Cinturón</div><div class="pill"><span class="th"><img src="img/basculas/nova_frente.jpg" alt=""></span><b>06</b>Bioimpedancia</div></div></div>
-    <div class="abs note" id="foot">* Recomendables si entrenas en casa; opcionales si entrenas en el gimnasio.</div>
+    <div class="tier t2" id="r2" style="top:560px;height:230px"><div class="tl"><div class="lv" style="color:var(--blue2)">Recomendable</div><div class="ds">Te facilitan mucho el proceso</div></div>
+      <div class="pills"><div class="pill"><span class="th"><img src="img/zapatillas/converse.jpg" alt=""></span><b>01</b>Zapatillas planas</div><div class="pill"><span class="th"><img src="img/tripode/atumtek.jpg" alt=""></span><b>08</b>Trípode</div><div class="pill"><span class="th"><img src="img/tuppers/abierto.jpg" alt=""></span><b>10</b>Tuppers</div><div class="pill"><span class="th"><img src="img/bandas/lote4.jpg" alt=""></span><b>04</b>Bandas elásticas*</div><div class="pill"><span class="th"><img src="img/straps/amarillo.jpg" alt=""></span><b>02</b>Straps</div><div class="pill"><span class="th"><img src="img/cinturon/buffalo.jpg" alt=""></span><b>03</b>Cinturón**</div></div></div>
+    <div class="tier t3" id="r3" style="top:790px;height:140px"><div class="tl"><div class="lv" style="color:var(--muted)">Opcional</div><div class="ds">Solo si tu caso lo pide</div></div>
+      <div class="pills"><div class="pill"><span class="th"><img src="img/basculas/nova_frente.jpg" alt=""></span><b>06</b>Bioimpedancia</div></div></div>
+    <div class="abs note" id="foot">* Bandas: recomendables en casa, opcionales en el gimnasio. &nbsp;** Cinturón: recomendable al empezar, imprescindible con cargas altas.</div>
   </div>
   <div class="grain"></div><div class="vig"></div>
 </div>

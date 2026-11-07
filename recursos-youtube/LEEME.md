@@ -51,8 +51,8 @@ Tiempos aproximados en segundos, para que sepas dónde cortar.
 | # | Clip | Duración | Tramos | Veredicto |
 |---|---|---|---|---|
 | 01 | Zapatillas | 30 s | 0–3,6 presentación de los 3 tipos · 3,8–10 suela plana (Converse, Vans, Nike Metcon 10) · 10,2–16,5 talón elevado (Nike Romaleos 4, detalle del talón, Adidas Adipower 3) · 16,6–22,6 amortiguación (Nike Pegasus Premium, Nike Air Monarch IV) · 22,6–30 resumen y veredicto | Recomendable (suela plana) |
-| 02 | Straps | 24 s | 0–6 straps PBS · 6–12,7 cómo se usan (fotos en la barra) y ejercicios de tirón · 12,6–17,4 ¿qué se cansa primero? · 17,4–24 ventajas, limitaciones y veredicto | Opcional |
-| 03 | Cinturón | 24 s | 0–5,8 cinturones PBS · 5,9–12,8 cómo funciona (sección de la cintura) · 12,8–18,4 cuándo tiene sentido · 18,4–24 fotos del cinturón puesto y veredicto | Opcional |
+| 02 | Straps | 24 s | 0–6 straps PBS · 6–12,7 cómo se usan (fotos en la barra) y ejercicios de tirón · 12,6–17,4 ¿qué se cansa primero? · 17,4–24 ventajas, limitaciones y veredicto | Recomendable |
+| 03 | Cinturón | 24 s | 0–5,8 cinturones PBS · 5,9–12,8 cómo funciona (sección de la cintura) · 12,8–18,4 según tu nivel · 18,4–24 fotos del cinturón puesto y veredicto doble | Al empezar: recomendable · Con cargas altas: imprescindible |
 | 04 | Bandas elásticas | 25 s | 0–6 bodegón de bandas · 6,1–12,8 cuatro ventajas · 12,7–18,6 tensión de la banda y limitaciones · 18,7–25 veredicto doble | Casa: recomendable · Gimnasio: opcional |
 | 05 | Báscula corporal | 25 s | 0–5,9 producto · 6–12,9 tendencia semanal · 12,9–18,8 un número que lo mezcla todo · 18,8–25 veredicto | Imprescindible |
 | 06 | Bioimpedancia | 26 s | 0–7 convencional vs bioimpedancia · 7,4–13 medido vs estimado · 13,3–19,3 qué altera la lectura · 19,4–26 conclusión y veredicto | Opcional |
@@ -99,8 +99,9 @@ cada clip. Es el elemento "firma" que da coherencia a toda la serie.
 Tú eres el entrenador: estos veredictos son una propuesta y debes validarlos.
 
 - **Imprescindible**: báscula corporal, cinta métrica, báscula de cocina.
-- **Recomendable**: zapatillas de suela plana, trípode, tuppers, bandas (si entrenas en casa).
-- **Opcional**: straps, cinturón, báscula de bioimpedancia, bandas (si entrenas en el gimnasio).
+- **Recomendable**: zapatillas de suela plana, trípode, tuppers, straps, bandas (si entrenas en casa), cinturón (al empezar).
+- **Imprescindible con cargas altas**: cinturón.
+- **Opcional**: báscula de bioimpedancia, bandas (si entrenas en el gimnasio).
 
 Los he planteado así porque transmiten un mensaje coherente con tu método: **lo
 esencial para progresar es sencillo y barato**; lo demás se añade cuando tu caso lo
