@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>02 · Straps</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  #bigword{left:0;top:300px;width:1920px;text-align:center;font-family:'Montserrat';font-weight:900;font-size:430px;letter-spacing:.02em;line-height:1;
+    color:transparent;-webkit-text-stroke:2px rgba(140,180,245,.16);white-space:nowrap}
+  #hero{left:0;top:0;width:1920px;height:1080px}
+  #head{left:120px;top:780px;width:1100px}
+  #head .title{font-size:96px;margin:10px 0 8px}
+  #head .sub{font-size:36px}
+  .spot{left:360px;top:60px;width:1300px;height:900px;background:radial-gradient(closest-side,rgba(22,80,201,.4),rgba(22,80,201,0))}
+  #b2{left:0;top:0;width:1920px;height:1080px}
+  #b2h{left:1080px;top:250px;width:740px}
+  #b2h .title{font-size:64px;margin:16px 0 36px}
+  #chips{display:flex;flex-wrap:wrap;gap:16px;width:720px}
+  #chips .chip{font-size:20px}
+  #b2n{left:1080px;top:760px;width:720px}
+  #b3{left:0;top:0;width:1920px;height:1080px}
+  #b3h{left:0;right:0;top:210px;text-align:center}
+  #b3h .title{font-size:72px}
+  .scen{position:absolute;top:400px;width:700px;height:330px;padding:40px 50px}
+  .scen .label{margin-bottom:34px}
+  .bar{position:relative;margin-bottom:34px}
+  .bar .bl{font-family:'Inter';font-weight:600;font-size:28px;margin-bottom:14px;display:flex;justify-content:space-between}
+  .bar .bl span{font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:.18em;text-transform:uppercase}
+  .track{height:26px;border-radius:13px;background:rgba(140,180,245,.12);overflow:hidden;position:relative}
+  .fillb{position:absolute;left:0;top:0;bottom:0;border-radius:13px;width:0}
+  #ilus{left:0;right:0;top:770px;text-align:center}
+  #b4{left:0;top:0;width:1920px;height:1080px}
+  .pc{position:absolute;top:290px;width:760px;height:340px;padding:44px 50px}
+  #verd{left:480px;top:730px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow spot" id="spot"></div>
+  <div class="abs" id="bigword">STRAPS</div>
+  <div id="cam">
+    <!-- A: producto -->
+    <svg class="abs" id="hero" viewBox="0 0 1920 1080">
+      <defs>
+        <linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#121826"/></linearGradient>
+        <pattern id="weave" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="8" height="8" fill="none"/><path d="M0 4 H8" stroke="#ffffff" stroke-width="1.2" opacity=".05"/></pattern>
+        <linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="300" y2="140">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset=".5" stop-color="#cfe0ff" stop-opacity=".5"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+        </linearGradient>
+        <filter id="ds" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="40" stdDeviation="30" flood-color="#000" flood-opacity=".6"/></filter>
+      </defs>
+      <ellipse id="hshadow" cx="1040" cy="755" rx="440" ry="30" fill="#000" opacity=".45" style="filter:blur(18px)"/>
+      <g id="strapB"></g>
+      <g id="strapA"></g>
+    </svg>
+    <div class="abs" id="head">
+      <div class="kicker" id="hk">Accesorio de agarre</div>
+      <div class="title" id="ht">Straps</div>
+      <div class="sub" id="hs">Para cuando tu agarre <em>falla antes</em> que tu espalda</div>
+    </div>
+
+    <!-- B: cómo funciona -->
+    <div class="abs" id="b2">
+      <svg class="abs" viewBox="0 0 1920 1080" width="1920" height="1080">
+        <defs>
+          <radialGradient id="barg" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#e9eef8"/><stop offset=".5" stop-color="#9aa6bd"/><stop offset="1" stop-color="#4a5468"/></radialGradient>
+          <pattern id="knurl" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M0 0 L10 10 M10 0 L0 10" stroke="#2c3446" stroke-width="1.2" opacity=".55"/></pattern>
+        </defs>
+        <g id="xsec">
+          <circle cx="560" cy="600" r="250" fill="none" stroke="rgba(140,180,245,.12)" stroke-width="2" stroke-dasharray="4 10"/>
+          <circle cx="560" cy="600" r="96" fill="url(#barg)"/>
+          <circle cx="560" cy="600" r="96" fill="url(#knurl)"/>
+          <circle cx="560" cy="600" r="96" fill="none" stroke="#c8d3e8" stroke-width="2" opacity=".6"/>
+          <path id="wrap" d="M250 250 L478 534 A106 106 0 1 1 454 600 A106 106 0 0 1 560 494 A118 118 0 0 1 678 600" fill="none" stroke="#1a2131" stroke-width="40" stroke-linecap="butt"/>
+          <path id="wrapS" d="M250 250 L478 534 A106 106 0 1 1 454 600 A106 106 0 0 1 560 494 A118 118 0 0 1 678 600" fill="none" stroke="#6D9CFF" stroke-width="34" stroke-dasharray="7 6"/>
+          <path id="wrapC" d="M250 250 L478 534 A106 106 0 1 1 454 600 A106 106 0 0 1 560 494 A118 118 0 0 1 678 600" fill="none" stroke="#1d2536" stroke-width="30"/>
+          <g id="xl1"><path d="M370 400 L440 330 H640" fill="none" stroke="#6D9CFF" stroke-width="2"/><circle cx="370" cy="400" r="6" fill="#6D9CFF"/>
+            <text x="452" y="316" font-family="Space Grotesk" font-weight="700" font-size="20" letter-spacing="3" fill="#8CB4F5">DESDE TU MUÑECA</text></g>
+          <g id="xl2"><path d="M640 690 L700 790 H860" fill="none" stroke="#6D9CFF" stroke-width="2"/><circle cx="640" cy="690" r="6" fill="#6D9CFF"/>
+            <text x="704" y="830" font-family="Space Grotesk" font-weight="700" font-size="20" letter-spacing="3" fill="#8CB4F5">SE ENROLLA EN LA BARRA</text></g>
+          <text id="xl3" x="560" y="900" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="4" fill="#6a7fa6">VISTA EN SECCIÓN DE LA BARRA</text>
+        </g>
+      </svg>
+      <div class="abs" id="b2h">
+        <div class="kicker">Dónde marcan la diferencia</div>
+        <div class="title" id="b2t">En los ejercicios<br>de <em>tirón</em></div>
+        <div id="chips">
+          <span class="chip">Peso muerto</span><span class="chip">Remos</span><span class="chip">Jalones</span><span class="chip">Dominadas</span><span class="chip">Encogimientos</span>
+        </div>
+      </div>
+      <div class="abs sub" id="b2n" style="font-size:30px">La barra queda sujeta y tu mano <em>no tiene que hacer todo el trabajo</em>.</div>
+    </div>
+
+    <!-- C: el eslabón débil -->
+    <div class="abs" id="b3">
+      <div class="abs" id="b3h"><div class="title" id="b3t">¿Qué se cansa <em>primero</em>?</div></div>
+      <div class="card scen" id="sc1" style="left:220px">
+        <div class="label">Sin straps</div>
+        <div class="bar"><div class="bl">Agarre <span class="st" style="color:var(--coral)">Límite</span></div><div class="track"><div class="fillb" style="background:linear-gradient(90deg,#c76a5e,#FF8A7A)"></div></div></div>
+        <div class="bar"><div class="bl">Espalda <span class="st" style="color:var(--muted)">Aún puede más</span></div><div class="track"><div class="fillb" style="background:linear-gradient(90deg,#1650C9,#6D9CFF)"></div></div></div>
+      </div>
+      <div class="card scen" id="sc2" style="left:1000px">
+        <div class="label" style="color:var(--blue)">Con straps</div>
+        <div class="bar"><div class="bl">Agarre <span class="st" style="color:var(--muted)">Asistido</span></div><div class="track"><div class="fillb" style="background:linear-gradient(90deg,#3d4a66,#6a7fa6)"></div></div></div>
+        <div class="bar"><div class="bl">Espalda <span class="st" style="color:var(--blue)">Trabajo completo</span></div><div class="track"><div class="fillb" style="background:linear-gradient(90deg,#1650C9,#6D9CFF)"></div></div></div>
+      </div>
+      <div class="abs note" id="ilus">Esquema ilustrativo</div>
+    </div>
+
+    <!-- D: balance -->
+    <div class="abs" id="b4">
+      <div class="card pc" id="pc1" style="left:160px"><div class="colhead pro">Ventajas</div><div class="plist"></div></div>
+      <div class="card pc" id="pc2" style="left:1000px"><div class="colhead con">Limitaciones</div><div class="plist"></div></div>
+      <div id="verd"></div>
+    </div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
+
+/* ---------- strap de tipo lazo ---------- */
+function strap(g, c) {
+  const loop = `M${c.lx} ${c.ly - c.lr} A${c.lr * 0.78} ${c.lr} 0 1 1 ${c.lx - 0.1} ${c.ly - c.lr}`;
+  const band = c.band;
+  const layers = (d) => `
+    <path d="${d}" fill="none" stroke="#070b14" stroke-width="66" transform="translate(0 6)"/>
+    <path d="${d}" fill="none" stroke="#141a27" stroke-width="62"/>
+    <path d="${d}" fill="none" stroke="#6D9CFF" stroke-width="53" stroke-dasharray="6 5" opacity=".85"/>
+    <path d="${d}" fill="none" stroke="#141a27" stroke-width="49"/>
+    <path d="${d}" fill="none" stroke="url(#weave)" stroke-width="49"/>
+    <path d="${d}" fill="none" stroke="#9fb8e6" stroke-width="8" opacity=".10" transform="translate(0 -15)"/>
+    <path d="${d}" fill="none" stroke="#000" stroke-width="10" opacity=".25" transform="translate(0 18)"/>
+    <path class="sh" d="${d}" fill="none" stroke="url(#sheen)" stroke-width="58"/>`;
+  g.innerHTML = `<g filter="url(#ds)">${layers(loop)}${layers(band)}
+    <g transform="translate(${c.bx} ${c.by}) rotate(${c.br})">
+      <rect x="-34" y="-28" width="68" height="56" fill="#1b2232"/>
+      <rect x="-30" y="-24" width="60" height="48" fill="none" stroke="#6D9CFF" stroke-width="2.5"/>
+      <path d="M-30 -24 L30 24 M30 -24 L-30 24" stroke="#6D9CFF" stroke-width="2.5"/>
+    </g>
+    <g transform="translate(${c.px} ${c.py}) rotate(${c.pr})"><rect x="-38" y="-16" width="76" height="32" rx="5" fill="#1141A3"/><rect x="-32" y="-10" width="64" height="20" rx="3" fill="none" stroke="#8CB4F5" stroke-width="1.5" opacity=".7"/></g>
+  </g>`;
+}
+strap($('#strapA'), { lx: 600, ly: 560, lr: 120, band: 'M620 678 C800 730 880 520 1060 510 C1240 500 1280 650 1460 630', bx: 635, by: 676, br: 12, px: 1130, py: 508, pr: 2 });
+strap($('#strapB'), { lx: 760, ly: 440, lr: 112, band: 'M780 550 C960 600 1030 400 1210 390 C1380 382 1420 530 1580 510', bx: 792, by: 548, br: 12, px: 1270, py: 388, pr: 0 });
+
+list($('#pc1 .plist'), [['pro', 'El agarre deja de limitar la serie'], ['pro', 'Pueden ayudarte a mover más carga en tirones']]);
+list($('#pc2 .plist'), [['con', 'No los necesita todo el mundo'], ['con', 'No sustituyen entrenar tu agarre'], ['con', 'En empujes no aportan nada']]);
+verdict($('#verd'), 0, 'Úsalos cuando el agarre te frene, no por costumbre.', 'Straps');
+
+K.scene({
+  num: 2, name: 'Straps', duration: 24,
+  stills: [3.6, 10.2, 16.8, 22.4],
+  render(t) {
+    set($('#spot'), { x: Math.sin(t * 0.35) * 60, s: 1 + Math.sin(t * 0.5) * 0.04 });
+    // palabra gigante de fondo
+    const bw = win(t, 0.1, 5.6, 1.4, 0.8);
+    set($('#bigword'), { x: lerp(120, -120, t / 24), o: bw.v * 1 + P(t, 17.4, 1.2) * 0.6 * (1 - P(t, 23, 1)) });
+
+    /* --- A: producto flotando --- */
+    const aIn = P(t, 0.2, 1.6, 'out4'), aOut = P(t, 5.6, 0.8, 'in2');
+    const bob = Math.sin(t * 1.4) * 8;
+    svgT($('#strapA'), { x: 0, y: (1 - aIn) * -220 + bob + aOut * -40, r: (1 - aIn) * -14 + Math.sin(t * 0.9) * 1.2, cx: 1000, cy: 480, o: aIn * (1 - aOut) });
+    svgT($('#strapB'), { x: 0, y: (1 - P(t, 0.4, 1.7, 'out4')) * -260 - bob * 0.6 + aOut * -60, r: (1 - P(t, 0.4, 1.7, 'out4')) * 10 + Math.sin(t * 0.8 + 1) * 1, cx: 1100, cy: 400, o: P(t, 0.4, 1.0) * (1 - aOut) * 0.85 });
+    $('#hshadow').setAttribute('opacity', (0.45 * aIn * (1 - aOut)).toFixed(3));
+    // barrido de luz
+    const sw = P(t, 2.0, 1.6, 'inOut');
+    const g = $('#sheen'), sx = lerp(300, 1800, sw);
+    g.setAttribute('x1', sx - 260); g.setAttribute('x2', sx + 60); g.setAttribute('y1', 200); g.setAttribute('y2', 420);
+    words($('#hk'), t, 0.8, 5.4, 0.04);
+    words($('#ht'), t, 1.0, 5.45, 0.06);
+    words($('#hs'), t, 1.5, 5.5, 0.04);
+
+    /* --- B: cómo se usa --- */
+    const b2 = win(t, 6.0, 12.4, 0.6, 0.6);
+    set($('#b2'), { o: b2.v, blur: (1 - b2.i) * 6 });
+    $('#b2').style.visibility = t > 5.9 && t < 13.2 ? 'visible' : 'hidden';
+    svgT($('#xsec'), { s: lerp(0.9, 1, P(t, 6.0, 1.2, 'out4')), cx: 560, cy: 600 });
+    ['#wrap', '#wrapS', '#wrapC'].forEach((id) => draw($(id), P(t, 6.6, 1.8, 'inOut')));
+    draw($('#xl1 path'), P(t, 7.4, 0.5)); svgT($('#xl1'), { o: P(t, 7.4, 0.4) });
+    draw($('#xl2 path'), P(t, 8.4, 0.5)); svgT($('#xl2'), { o: P(t, 8.4, 0.4) });
+    svgT($('#xl3'), { o: P(t, 7.0, 0.6) });
+    words($('#b2h .kicker'), t, 6.6, null, 0.04);
+    words($('#b2t'), t, 6.8, null, 0.06);
+    $$('#chips .chip').forEach((c, i) => { const w = P(t, 7.8 + i * 0.16, 0.6, 'back'); set(c, { s: 0.6 + 0.4 * w, o: P(t, 7.8 + i * 0.16, 0.3) }); });
+    words($('#b2n'), t, 9.2, null, 0.035);
+
+    /* --- C: ¿qué se cansa primero? --- */
+    const b3 = win(t, 12.6, 17.2, 0.6, 0.6);
+    set($('#b3'), { o: b3.v });
+    $('#b3').style.visibility = t > 12.5 && t < 18 ? 'visible' : 'hidden';
+    words($('#b3t'), t, 12.7, null, 0.06);
+    [['#sc1', 13.1], ['#sc2', 13.35]].forEach(([id, t0]) => set($(id), { y: (1 - P(t, t0, 0.8, 'out4')) * 50, o: P(t, t0, 0.6) }));
+    const fills = $$('.fillb'), sts = $$('.st');
+    const run = P(t, 13.9, 2.2, 'inOut');
+    // sin straps: el agarre llega al límite cuando la espalda va por ~2/3
+    fills[0].style.width = (Math.min(1, run * 1.5) * 100).toFixed(1) + '%';
+    fills[1].style.width = (Math.min(1, run * 1.5) * 66).toFixed(1) + '%';
+    // con straps: la espalda completa el trabajo
+    fills[2].style.width = (run * 55).toFixed(1) + '%';
+    fills[3].style.width = (run * 100).toFixed(1) + '%';
+    sts.forEach((s, i) => set(s, { o: P(t, i < 2 ? 15.2 : 16.0, 0.4) }));
+    set($('#ilus'), { o: P(t, 14, 0.6) * 0.9 });
+
+    /* --- D: ventajas / limitaciones + veredicto --- */
+    const b4 = win(t, 17.4, null, 0.6);
+    $('#b4').style.visibility = t > 17.3 ? 'visible' : 'hidden';
+    [['#pc1', 17.5], ['#pc2', 17.75]].forEach(([id, t0]) => set($(id), { y: (1 - P(t, t0, 0.8, 'out4')) * 50, o: P(t, t0, 0.6) }));
+    set($$('.colhead'), { o: P(t, 17.9, 0.5) });
+    listAnim($('#pc1 .plist'), t, 18.1, null, 0.3);
+    listAnim($('#pc2 .plist'), t, 18.5, null, 0.3);
+    verdictAnim($('#verd'), t, 19.8);
+  },
+});
+</script>
+</body>
+</html>

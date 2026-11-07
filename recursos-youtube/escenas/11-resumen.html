@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>11 · Resumen del kit</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  .spot{left:200px;top:200px;width:1500px;height:900px;background:radial-gradient(closest-side,rgba(17,65,163,.38),rgba(17,65,163,0))}
+  #head{left:120px;top:180px;width:1700px}
+  #head .title{font-size:76px;margin-top:14px;line-height:1.05}
+  .tier{position:absolute;left:120px;width:1680px;height:150px;border-top:1.5px solid var(--line);display:flex;align-items:center}
+  .tier .tl{width:380px;flex:0 0 380px}
+  .tier .tl .lv{font-family:'Space Grotesk';font-weight:700;font-size:24px;letter-spacing:.2em;text-transform:uppercase}
+  .tier .tl .ds{font-family:'Inter';font-size:21px;color:var(--ink2);margin-top:8px}
+  .pills{display:flex;flex-wrap:wrap;gap:16px}
+  .pill{display:flex;align-items:center;gap:14px;padding:16px 26px;border-radius:44px;border:1.5px solid var(--line2);background:rgba(10,22,44,.7);
+    font-family:'Inter';font-weight:600;font-size:28px;color:var(--ink)}
+  .pill b{font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:.1em;color:var(--blue)}
+  .t1 .pill{background:linear-gradient(90deg,rgba(91,140,245,.95),rgba(140,180,245,.95));border-color:transparent;color:var(--bg);box-shadow:0 0 30px rgba(109,156,255,.45)}
+  .t1 .pill b{color:#0a1a3e}
+  .t3 .pill{color:var(--ink2);border-style:dashed}
+  #foot{left:120px;top:960px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow spot" id="spot"></div>
+  <div id="cam">
+    <div class="abs" id="head"><div class="kicker" id="hk">Resumen del kit</div><div class="title" id="ht">Empieza por lo básico.<br><em>Lo demás, cuando lo necesites.</em></div></div>
+    <div class="tier t1" id="r1" style="top:430px"><div class="tl"><div class="lv" style="color:var(--blue)">Imprescindible</div><div class="ds">Para todos desde el día 1</div></div>
+      <div class="pills"><div class="pill"><b>05</b>Báscula corporal</div><div class="pill"><b>07</b>Cinta métrica</div><div class="pill"><b>09</b>Báscula de cocina</div></div></div>
+    <div class="tier t2" id="r2" style="top:600px"><div class="tl"><div class="lv" style="color:var(--blue2)">Recomendable</div><div class="ds">Te facilitan mucho el proceso</div></div>
+      <div class="pills"><div class="pill"><b>01</b>Zapatillas de suela plana</div><div class="pill"><b>08</b>Trípode</div><div class="pill"><b>10</b>Tuppers</div><div class="pill"><b>04</b>Bandas elásticas*</div></div></div>
+    <div class="tier t3" id="r3" style="top:770px"><div class="tl"><div class="lv" style="color:var(--muted)">Opcional</div><div class="ds">Solo si tu caso lo pide</div></div>
+      <div class="pills"><div class="pill"><b>02</b>Straps</div><div class="pill"><b>03</b>Cinturón</div><div class="pill"><b>06</b>Bioimpedancia</div></div></div>
+    <div class="abs note" id="foot">* Recomendables si entrenas en casa; opcionales si entrenas en el gimnasio.</div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, $, $$, set, words } = K;
+K.scene({
+  num: 0, name: 'Resumen', duration: 16,
+  stills: [9.5],
+  render(t) {
+    set($('#spot'), { x: Math.sin(t * 0.3) * 60, s: 1 + Math.sin(t * 0.5) * 0.03 });
+    words($('#hk'), t, 0.3, null, 0.04);
+    words($('#ht'), t, 0.45, null, 0.06);
+    ['#r1', '#r2', '#r3'].forEach((id, r) => {
+      const t0 = 1.8 + r * 1.3, row = $(id);
+      const w = P(t, t0, 0.8, 'out4');
+      row.style.borderTopColor = `rgba(140,180,245,${(0.22 * w).toFixed(3)})`;
+      set($('.tl', row), { x: (1 - w) * -40, o: w });
+      $$('.pill', row).forEach((p, i) => { const q = P(t, t0 + 0.3 + i * 0.14, 0.6, 'back'); set(p, { s: 0.6 + 0.4 * q, o: P(t, t0 + 0.3 + i * 0.14, 0.3) }); });
+    });
+    // brillo que recorre los imprescindibles
+    $$('#r1 .pill').forEach((p, i) => { const g = Math.max(0, Math.sin((t - 6 - i * 0.25) * 1.6)); p.style.boxShadow = `0 0 ${(24 + 26 * g).toFixed(0)}px rgba(109,156,255,${(0.35 + 0.35 * g).toFixed(2)})`; });
+    set($('#foot'), { o: P(t, 6.0, 0.8) });
+  },
+});
+</script>
+</body>
+</html>

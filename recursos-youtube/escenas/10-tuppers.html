@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>10 · Tuppers y recipientes herméticos</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  #counter{left:0;top:0;width:1920px;height:1080px;background:radial-gradient(1300px 900px at 66% 45%,rgba(36,62,120,.5),rgba(6,12,26,0) 70%),linear-gradient(160deg,#0b1428,#050a16)}
+  #art{left:0;top:0;width:1920px;height:1080px}
+  #head{left:120px;top:300px;width:720px}
+  #head .title{font-size:92px;margin:16px 0 26px}
+  #b2h{left:120px;top:170px}
+  #b2h .title{font-size:66px;margin-top:14px}
+  .day{position:absolute;top:330px;width:250px;text-align:center;font-family:'Space Grotesk';font-weight:700;font-size:20px;letter-spacing:.24em;color:var(--blue2)}
+  .rowl{position:absolute;left:120px;width:140px;font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+  #b3h{left:120px;top:190px}
+  #b3h .title{font-size:70px;margin-top:14px}
+  #ben{left:120px;top:400px;width:900px}
+  .bn{display:flex;align-items:baseline;gap:30px;margin-bottom:34px}
+  .bn .n{font-family:'Space Grotesk';font-weight:700;font-size:56px;color:transparent;-webkit-text-stroke:1.5px var(--blue);width:90px}
+  .bn .v{font-family:'Inter';font-weight:600;font-size:36px}
+  .bn .v small{display:block;font-weight:400;font-size:24px;color:var(--ink2);margin-top:6px}
+  #d4h{left:120px;top:250px;width:900px}
+  #d4h .title{font-size:80px;margin-top:14px}
+  #verd{left:120px;top:620px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="counter"></div>
+  <div id="cam">
+    <svg class="abs" id="art" viewBox="0 0 1920 1080">
+      <defs>
+        <radialGradient id="rice" cx=".45" cy=".4" r=".7"><stop offset="0" stop-color="#fffaf0"/><stop offset="1" stop-color="#e2d8c4"/></radialGradient>
+        <pattern id="grains" width="22" height="18" patternUnits="userSpaceOnUse"><ellipse cx="5" cy="5" rx="4.2" ry="1.9" fill="#d8ccb3" transform="rotate(30 5 5)"/><ellipse cx="15" cy="12" rx="4.2" ry="1.9" fill="#d8ccb3" transform="rotate(-40 15 12)"/></pattern>
+        <linearGradient id="chk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e9b77a"/><stop offset="1" stop-color="#b9783e"/></linearGradient>
+        <linearGradient id="slm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa784"/><stop offset="1" stop-color="#e2704e"/></linearGradient>
+        <radialGradient id="stew" cx=".5" cy=".45" r=".7"><stop offset="0" stop-color="#9a5f36"/><stop offset="1" stop-color="#5e361c"/></radialGradient>
+        <radialGradient id="yog" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe6f2"/></radialGradient>
+        <linearGradient id="lid" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8CB4F5" stop-opacity=".55"/><stop offset=".5" stop-color="#6D9CFF" stop-opacity=".32"/><stop offset="1" stop-color="#1650C9" stop-opacity=".5"/></linearGradient>
+        <filter id="osh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="8" dy="20" stdDeviation="14" flood-color="#000" flood-opacity=".55"/></filter>
+      </defs>
+      <g id="hero"></g>
+      <g id="grid"></g>
+      <g id="stack"></g>
+    </svg>
+
+    <div class="abs" id="head">
+      <div class="kicker" id="hk">Organización de comidas</div>
+      <div class="title" id="ht">Tuppers y<br>recipientes<br>herméticos</div>
+      <div class="sub" id="hs">Tu semana de comidas, <em>lista con antelación</em></div>
+    </div>
+
+    <div class="abs" id="b2h"><div class="kicker" id="b2k">Meal prep</div><div class="title" id="b2t">Una sesión de cocina, <em>varios días resueltos</em></div></div>
+    <div id="days"></div>
+    <div class="rowl" id="rl1" style="top:470px">Comida</div>
+    <div class="rowl" id="rl2" style="top:690px">Cena</div>
+
+    <div class="abs" id="b3h"><div class="kicker" id="b3k">Ventajas</div><div class="title" id="b3t">Menos improvisación, <em>más constancia</em></div></div>
+    <div class="abs" id="ben">
+      <div class="bn"><div class="n">01</div><div class="v">Facilitan la planificación</div></div>
+      <div class="bn"><div class="n">02</div><div class="v">Ahorran tiempo entre semana</div></div>
+      <div class="bn"><div class="n">03</div><div class="v">Ordenan tus comidas y raciones</div></div>
+      <div class="bn"><div class="n">04</div><div class="v">Comes bien también fuera de casa</div></div>
+    </div>
+
+    <div class="abs" id="d4h"><div class="kicker" id="dk">Un hábito que sostiene el plan</div><div class="title" id="dt">Si está preparado,<br><em>es más fácil cumplirlo</em></div></div>
+    <div id="verd"></div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, rng } = K;
+
+/* ---------- comidas vistas desde arriba ---------- */
+const R = rng(21);
+const broc = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})">${[[0, 0, 16], [-14, 8, 12], [13, 9, 12], [-4, -12, 11], [10, -8, 10]].map(([a, b, r]) => `<circle cx="${a}" cy="${b}" r="${r}" fill="#3f8a3a"/><circle cx="${a - 3}" cy="${b - 3}" r="${r * 0.5}" fill="#5aa94f"/>`).join('')}</g>`;
+const MEALS = {
+  pollo(x, y, w, h) {
+    const rw = w * 0.5;
+    return `<rect x="${x}" y="${y}" width="${rw}" height="${h}" rx="14" fill="url(#rice)"/><rect x="${x}" y="${y}" width="${rw}" height="${h}" rx="14" fill="url(#grains)"/>
+      ${[0, 1, 2].map((i) => `<rect x="${x + rw + 12 + i * 4}" y="${y + 8 + i * (h * 0.22)}" width="${w * 0.42}" height="${h * 0.2}" rx="10" fill="url(#chk)" transform="rotate(${-8 + i * 6} ${x + rw + w * 0.2} ${y + 20 + i * h * 0.22})"/><path d="M${x + rw + 24} ${y + 16 + i * h * 0.22} l${w * 0.3} 0" stroke="#8b5226" stroke-width="3" opacity=".5"/>`).join('')}
+      ${broc(x + rw + w * 0.14, y + h * 0.82, 0.9)}${broc(x + rw + w * 0.36, y + h * 0.8, 0.8)}`;
+  },
+  salmon(x, y, w, h) {
+    return `<rect x="${x + 6}" y="${y + 6}" width="${w * 0.5}" height="${h * 0.62}" rx="22" fill="url(#slm)"/>
+      ${[0, 1, 2, 3].map((i) => `<path d="M${x + 22 + i * w * 0.11} ${y + 14} q10 ${h * 0.25} 0 ${h * 0.5}" stroke="#fff" stroke-width="3" opacity=".55" fill="none"/>`).join('')}
+      ${[0, 1, 2, 3, 4].map((i) => `<circle cx="${x + w * 0.62 + (i % 3) * w * 0.12}" cy="${y + h * 0.25 + Math.floor(i / 3) * h * 0.28}" r="${h * 0.12}" fill="#e7c25a"/><circle cx="${x + w * 0.6 + (i % 3) * w * 0.12}" cy="${y + h * 0.22 + Math.floor(i / 3) * h * 0.28}" r="${h * 0.05}" fill="#f6dc8a"/>`).join('')}
+      ${[0, 1, 2, 3, 4, 5].map((i) => `<path d="M${x + 10 + i * w * 0.07} ${y + h * 0.95} l${w * 0.05} ${-h * 0.24}" stroke="#4f9a44" stroke-width="7" stroke-linecap="round"/>`).join('')}`;
+  },
+  ensalada(x, y, w, h) {
+    let s = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="#2f6b2c"/>`;
+    for (let i = 0; i < 16; i++) { const ex = x + 26 + R() * (w - 52), ey = y + 22 + R() * (h - 44); s += `<ellipse cx="${ex}" cy="${ey}" rx="${12 + R() * 8}" ry="${8 + R() * 5}" fill="${R() > 0.5 ? '#5aa94f' : '#7cc46a'}" transform="rotate(${R() * 180} ${ex} ${ey})"/>`; }
+    for (let i = 0; i < 6; i++) s += `<circle cx="${x + 18 + R() * (w - 36)}" cy="${y + 14 + R() * (h - 28)}" r="11" fill="#e2463a"/>`;
+    for (let i = 0; i < 8; i++) s += `<circle cx="${x + 14 + R() * (w - 28)}" cy="${y + 12 + R() * (h - 24)}" r="6" fill="#e8cf96"/>`;
+    return s;
+  },
+  lentejas(x, y, w, h) {
+    let s = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="url(#stew)"/>`;
+    for (let i = 0; i < 40; i++) s += `<circle cx="${x + 8 + R() * (w - 16)}" cy="${y + 8 + R() * (h - 16)}" r="${2.5 + R() * 2}" fill="#7a4a28"/>`;
+    for (let i = 0; i < 9; i++) s += `<rect x="${x + 10 + R() * (w - 30)}" y="${y + 10 + R() * (h - 26)}" width="14" height="9" rx="3" fill="#e9893a"/>`;
+    return s;
+  },
+};
+/* recipiente rectangular (vista cenital) */
+function tup(x, y, w, h, meal, id) {
+  const p = 14;
+  return `<g class="tp" id="${id}" filter="url(#osh)">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="26" fill="#0d1526" stroke="rgba(234,245,253,.55)" stroke-width="3"/>
+    <g>${MEALS[meal](x + p, y + p, w - 2 * p, h - 2 * p)}</g>
+    <rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" rx="22" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="6"/>
+    <g class="lid"><rect x="${x - 4}" y="${y - 4}" width="${w + 8}" height="${h + 8}" rx="28" fill="url(#lid)" stroke="#8CB4F5" stroke-width="3"/>
+      <rect x="${x + w / 2 - 34}" y="${y - 12}" width="68" height="18" rx="6" fill="#6D9CFF"/><rect x="${x + w / 2 - 34}" y="${y + h - 6}" width="68" height="18" rx="6" fill="#6D9CFF"/>
+      <rect x="${x - 12}" y="${y + h / 2 - 30}" width="18" height="60" rx="6" fill="#6D9CFF"/><rect x="${x + w - 6}" y="${y + h / 2 - 30}" width="18" height="60" rx="6" fill="#6D9CFF"/>
+      <path d="M${x + 24} ${y + 20} L${x + w * 0.45} ${y + 20}" stroke="#fff" stroke-width="4" opacity=".35" stroke-linecap="round"/></g></g>`;
+}
+function bowlTup(cx, cy, r, id) {
+  let s = `<g class="tp" id="${id}" filter="url(#osh)"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#0d1526" stroke="rgba(234,245,253,.55)" stroke-width="3"/><circle cx="${cx}" cy="${cy}" r="${r - 14}" fill="url(#yog)"/>`;
+  for (let i = 0; i < 12; i++) { const a = R() * 6.28, d = R() * (r - 34); s += `<circle cx="${cx + Math.cos(a) * d}" cy="${cy + Math.sin(a) * d}" r="${7 + R() * 4}" fill="${R() > 0.5 ? '#3b3aa8' : '#8450EA'}"/>`; }
+  s += `<path d="M${cx - r * 0.5} ${cy - r * 0.2} q${r * 0.5} -20 ${r} 0" stroke="#e9c06a" stroke-width="7" fill="none" stroke-linecap="round"/>`;
+  s += `<g class="lid"><circle cx="${cx}" cy="${cy}" r="${r + 4}" fill="url(#lid)" stroke="#8CB4F5" stroke-width="3"/></g></g>`;
+  return s;
+}
+
+// A: composición de producto
+$('#hero').innerHTML =
+  tup(960, 170, 470, 300, 'pollo', 'h0') + tup(1460, 210, 360, 250, 'ensalada', 'h1') +
+  tup(1000, 520, 380, 270, 'salmon', 'h2') + tup(1410, 500, 300, 230, 'lentejas', 'h3') + bowlTup(1600, 860, 120, 'h4');
+
+// B: planificador semanal
+const DAYS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE'], MEAL_ORDER = ['pollo', 'salmon', 'lentejas', 'pollo', 'salmon', 'ensalada', 'lentejas', 'ensalada', 'pollo', 'salmon'];
+let g = '', k = 0;
+for (let r = 0; r < 2; r++) for (let c = 0; c < 5; c++) g += tup(300 + c * 310, 400 + r * 220, 270, 180, MEAL_ORDER[k++], `g${r}${c}`);
+$('#grid').innerHTML = g;
+$('#days').innerHTML = DAYS.map((d, i) => `<div class="day" style="left:${310 + i * 310}px">${d}</div>`).join('');
+
+// C: pila lista para llevar
+$('#stack').innerHTML = tup(1260, 520, 440, 280, 'pollo', 's0') + tup(1290, 470, 400, 260, 'lentejas', 's1') + tup(1320, 420, 360, 240, 'salmon', 's2');
+$$('#stack .lid').forEach((l) => l.setAttribute('opacity', 1));
+
+verdict($('#verd'), 1, 'Especialmente si comes fuera de casa.', 'Tuppers');
+
+K.scene({
+  num: 10, name: 'Tuppers', duration: 25,
+  stills: [4.8, 11.6, 17.6, 23.4],
+  render(t) {
+    /* --- A: composición --- */
+    const aOut = P(t, 6.6, 0.7, 'in2'), dIn = P(t, 19.2, 1.2, 'out4');
+    $$('#hero .tp').forEach((tp, i) => {
+      const t0 = 0.4 + i * 0.25, w = P(t, t0, 0.8, 'out4');
+      tp.setAttribute('opacity', (P(t, t0, 0.4) * (1 - aOut) + (t > 19 ? dIn * 0.9 : 0)).toFixed(3));
+      const dx = t > 19 ? 200 : 0;
+      tp.setAttribute('transform', `translate(${dx} ${((1 - w) * -40 + aOut * 30).toFixed(1)})`);
+      const lid = $('.lid', tp);
+      // las tapas se cierran al final de A y en D
+      const closes = i === 1 || i === 3;
+      const lc = !closes ? 0 : t > 19 ? P(t, 20.0 + i * 0.12, 0.5, 'out4') : P(t, 3.6 + i * 0.18, 0.5, 'out4');
+      lid.setAttribute('opacity', lc.toFixed(3));
+      lid.setAttribute('transform', `translate(0 ${((1 - lc) * -40).toFixed(1)})`);
+    });
+    words($('#hk'), t, 0.5, 6.4, 0.04);
+    words($('#ht'), t, 0.7, 6.45, 0.07);
+    words($('#hs'), t, 1.5, 6.5, 0.04);
+
+    /* --- B: semana --- */
+    const bOn = t > 6.8 && t < 14.4, bOut = P(t, 13.6, 0.7, 'in2');
+    ['#b2h', '#days', '#rl1', '#rl2', '#grid'].forEach((id) => $(id).style.visibility = bOn ? 'visible' : 'hidden');
+    words($('#b2k'), t, 6.9, 13.5, 0.04);
+    words($('#b2t'), t, 7.05, 13.5, 0.05);
+    $$('#days .day').forEach((d, i) => set(d, { o: P(t, 7.6 + i * 0.08, 0.4) * (1 - bOut) }));
+    set($('#rl1'), { o: P(t, 7.6, 0.4) * (1 - bOut) }); set($('#rl2'), { o: P(t, 7.8, 0.4) * (1 - bOut) });
+    $$('#grid .tp').forEach((tp, i) => {
+      const t0 = 8.0 + i * 0.16, w = P(t, t0, 0.7, 'out4');
+      tp.setAttribute('opacity', (P(t, t0, 0.3) * (1 - bOut)).toFixed(3));
+      tp.setAttribute('transform', `translate(${((1 - w) * 80).toFixed(1)} 0)`);
+      const lc = P(t, 10.4 + i * 0.12, 0.45, 'out4'), lid = $('.lid', tp);
+      lid.setAttribute('opacity', lc.toFixed(3)); lid.setAttribute('transform', `translate(0 ${((1 - lc) * -30).toFixed(1)})`);
+    });
+
+    /* --- C: ventajas --- */
+    const cOn = t > 13.9 && t < 19.6, cOut = P(t, 18.8, 0.6, 'in2');
+    ['#b3h', '#ben', '#stack'].forEach((id) => $(id).style.visibility = cOn ? 'visible' : 'hidden');
+    words($('#b3k'), t, 14.0, 18.7, 0.04);
+    words($('#b3t'), t, 14.15, 18.7, 0.05);
+    $$('#ben .bn').forEach((b, i) => { const w = P(t, 14.8 + i * 0.4, 0.7, 'out4'); set(b, { x: (1 - w) * -40, o: P(t, 14.8 + i * 0.4, 0.5) * (1 - cOut) }); });
+    $$('#stack .tp').forEach((tp, i) => {
+      const w = P(t, 14.4 + i * 0.3, 0.8, 'out4');
+      tp.setAttribute('opacity', (P(t, 14.4 + i * 0.3, 0.4) * (1 - cOut)).toFixed(3));
+      tp.setAttribute('transform', `translate(0 ${((1 - w) * -70 + Math.sin(t * 1.2 + i) * 3).toFixed(1)})`);
+    });
+
+    /* --- D: veredicto --- */
+    $('#d4h').style.visibility = t > 19.2 ? 'visible' : 'hidden';
+    words($('#dk'), t, 19.3, null, 0.04);
+    words($('#dt'), t, 19.45, null, 0.06);
+    verdictAnim($('#verd'), t, 20.6);
+  },
+});
+</script>
+</body>
+</html>

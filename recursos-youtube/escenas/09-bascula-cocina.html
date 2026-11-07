@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>09 · Báscula de cocina</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  #counter{left:0;top:0;width:1920px;height:1080px;
+    background:radial-gradient(1200px 900px at 68% 40%,rgba(36,62,120,.55),rgba(6,12,26,0) 70%),linear-gradient(160deg,#0b1428,#050a16)}
+  #counter:after{content:'';position:absolute;inset:0;opacity:.09;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.012 .03' numOctaves='4' seed='9'/><feColorMatrix values='0 0 0 0 .6  0 0 0 0 .7  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+  #art{left:0;top:0;width:1920px;height:1080px}
+  #head{left:120px;top:300px;width:700px}
+  #head .title{font-size:100px;margin:16px 0 26px}
+  #b2h{left:0;right:0;top:160px;text-align:center}
+  #b2h .title{font-size:72px;margin-top:14px}
+  .lab2{position:absolute;top:850px;width:600px;text-align:center}
+  #b2n{left:0;right:0;top:935px;text-align:center}
+  #b3h{left:120px;top:190px}
+  #b3h .title{font-size:72px;margin-top:14px}
+  .node{position:absolute;top:640px;width:440px}
+  .node .k{font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:.22em;color:var(--blue);text-transform:uppercase;margin-bottom:12px}
+  .node .v{font-family:'Montserrat';font-weight:800;font-size:38px;line-height:1.12}
+  #chips3{left:120px;top:880px;display:flex;gap:16px}
+  #d4h{left:120px;top:250px;width:900px}
+  #d4h .title{font-size:84px;margin-top:14px}
+  #verd{left:120px;top:620px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="counter"></div>
+  <div id="cam">
+    <svg class="abs" id="art" viewBox="0 0 1920 1080">
+      <defs>
+        <linearGradient id="kTop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b3956"/><stop offset=".5" stop-color="#151e33"/><stop offset="1" stop-color="#0c1322"/></linearGradient>
+        <linearGradient id="kRefl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
+        <radialGradient id="bowl" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#f5f8ff"/><stop offset=".7" stop-color="#c9d3e6"/><stop offset="1" stop-color="#8a96ae"/></radialGradient>
+        <radialGradient id="rice" cx=".45" cy=".4" r=".65"><stop offset="0" stop-color="#fffaf0"/><stop offset="1" stop-color="#e2d8c4"/></radialGradient>
+        <radialGradient id="egg" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#fff6ea"/><stop offset=".7" stop-color="#e8cfae"/><stop offset="1" stop-color="#b98f63"/></radialGradient>
+        <radialGradient id="alm" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#c58a57"/><stop offset="1" stop-color="#6e4226"/></radialGradient>
+        <radialGradient id="oil" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#e9d36a"/><stop offset="1" stop-color="#9c8418"/></radialGradient>
+        <pattern id="grains" width="26" height="22" patternUnits="userSpaceOnUse"><ellipse cx="6" cy="6" rx="5" ry="2.2" fill="#d8ccb3" transform="rotate(30 6 6)"/><ellipse cx="18" cy="15" rx="5" ry="2.2" fill="#d8ccb3" transform="rotate(-40 18 15)"/><ellipse cx="20" cy="4" rx="4" ry="2" fill="#efe6d4" transform="rotate(80 20 4)"/></pattern>
+        <filter id="osh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="10" dy="22" stdDeviation="16" flood-color="#000" flood-opacity=".55"/></filter>
+      </defs>
+
+      <!-- ingredientes alrededor -->
+      <g id="eggs" filter="url(#osh)"><ellipse cx="1660" cy="300" rx="62" ry="80" fill="url(#egg)" transform="rotate(-24 1660 300)"/><ellipse cx="1780" cy="410" rx="60" ry="78" fill="url(#egg)" transform="rotate(18 1780 410)"/></g>
+      <g id="alms" filter="url(#osh)"></g>
+      <g id="oild" filter="url(#osh)"><circle cx="880" cy="840" r="92" fill="url(#bowl)"/><circle cx="880" cy="840" r="70" fill="url(#oil)"/><ellipse cx="860" cy="822" rx="26" ry="12" fill="#fff" opacity=".35"/>
+        <path d="M950 790 L1090 650" stroke="#c9d3e6" stroke-width="16" stroke-linecap="round"/><ellipse cx="930" cy="812" rx="40" ry="26" fill="#d7dfee" transform="rotate(-45 930 812)"/></g>
+
+      <!-- báscula -->
+      <g id="kscale" filter="url(#osh)">
+        <rect x="1000" y="190" width="520" height="640" rx="56" fill="#070c17"/>
+        <rect x="1006" y="196" width="508" height="628" rx="52" fill="url(#kTop)" stroke="rgba(140,180,245,.25)" stroke-width="2"/>
+        <rect x="1006" y="196" width="508" height="628" rx="52" fill="url(#kRefl)"/>
+        <rect x="1080" y="690" width="230" height="96" rx="16" fill="#040810" stroke="rgba(140,180,245,.2)"/>
+        <text id="kgr" x="1290" y="758" text-anchor="end" font-family="Space Grotesk" font-weight="700" font-size="56" fill="#8CB4F5" style="filter:drop-shadow(0 0 10px rgba(109,156,255,.9))">0</text>
+        <text x="1298" y="758" font-family="Space Grotesk" font-weight="700" font-size="26" fill="#8CB4F5" opacity=".8"></text>
+        <circle cx="1380" cy="720" r="22" fill="#1a2336" stroke="rgba(140,180,245,.3)"/><text x="1380" y="764" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="14" letter-spacing="2" fill="#6a7fa6">TARA</text>
+        <circle id="taraB" cx="1380" cy="720" r="22" fill="#6D9CFF" opacity="0"/>
+        <circle cx="1450" cy="720" r="22" fill="#1a2336" stroke="rgba(140,180,245,.3)"/><text x="1450" y="764" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="14" letter-spacing="2" fill="#6a7fa6">ON</text>
+        <text x="1300" y="758" font-family="Space Grotesk" font-weight="700" font-size="26" fill="#8CB4F5">g</text>
+      </g>
+      <g id="kbowl" filter="url(#osh)">
+        <circle cx="1260" cy="430" r="190" fill="url(#bowl)"/>
+        <circle cx="1260" cy="430" r="160" fill="#b9c4d8"/>
+        <circle cx="1260" cy="430" r="150" fill="url(#rice)"/>
+        <circle cx="1260" cy="430" r="150" fill="url(#grains)" opacity=".85"/>
+        <ellipse cx="1200" cy="360" rx="70" ry="30" fill="#fff" opacity=".18" transform="rotate(-30 1200 360)"/>
+      </g>
+
+      <!-- B: a ojo -->
+      <g id="eye">
+        <circle cx="560" cy="540" r="210" fill="url(#bowl)" filter="url(#osh)"/>
+        <circle cx="560" cy="540" r="176" fill="#b9c4d8"/>
+        <path d="M430 560 C440 450 520 400 600 420 C690 440 720 520 690 600 C660 670 470 680 430 560 Z" fill="url(#rice)"/>
+        <path d="M430 560 C440 450 520 400 600 420 C690 440 720 520 690 600 C660 670 470 680 430 560 Z" fill="url(#grains)" opacity=".85"/>
+        <text id="qm" x="560" y="590" text-anchor="middle" font-family="Playfair Display" font-style="italic" font-weight="700" font-size="190" fill="#6D9CFF" style="filter:drop-shadow(0 0 20px rgba(109,156,255,.9))">?</text>
+      </g>
+
+      <!-- C: progresión -->
+      <g id="prog">
+        <path id="pline" d="M180 560 H1740" stroke="rgba(140,180,245,.35)" stroke-width="3"/>
+        <g id="pn"></g>
+      </g>
+    </svg>
+
+    <div class="abs" id="head">
+      <div class="kicker" id="hk">Nutrición sin adivinar</div>
+      <div class="title" id="ht">Báscula<br>de cocina</div>
+      <div class="sub" id="hs">Saber cuánto comes, <em>no suponerlo</em></div>
+    </div>
+
+    <div class="abs" id="b2h"><div class="kicker" id="b2k">La diferencia</div><div class="title" id="b2t">A ojo vs <em>con báscula</em></div></div>
+    <div class="lab2" id="l1" style="left:260px"><span class="chip coral">A ojo · ¿cuánto es?</span></div>
+    <div class="lab2" id="l2" style="left:960px"><span class="chip solid">Con báscula · 125 g</span></div>
+    <div class="abs sub" id="b2n" style="font-size:28px">Sobre todo en aceites, frutos secos y salsas: <em>a ojo es fácil equivocarse.</em></div>
+
+    <div class="abs" id="b3h"><div class="kicker" id="b3k">Una herramienta para aprender</div><div class="title" id="b3t">Con el tiempo, <em>entrenas el ojo</em></div></div>
+    <div class="node" id="n0" style="left:150px"><div class="k">Al empezar</div><div class="v">Pesas casi todo</div></div>
+    <div class="node" id="n1" style="left:740px"><div class="k">Unas semanas después</div><div class="v">Reconoces las raciones</div></div>
+    <div class="node" id="n2" style="left:1330px"><div class="k">Más adelante</div><div class="v">La usas para revisar</div></div>
+    <div class="abs" id="chips3"><span class="chip">Sencilla</span><span class="chip">Económica</span><span class="chip solid">Precisa</span></div>
+
+    <div class="abs" id="d4h"><div class="kicker" id="dk">La base de tu plan de nutrición</div><div class="title" id="dt">Cantidades <em>reales</em>,<br>progreso real</div></div>
+    <div id="verd"></div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, rng } = K;
+
+const R = rng(11);
+$('#alms').innerHTML = Array.from({ length: 9 }, (_, i) => {
+  const x = 1560 + R() * 260, y = 620 + R() * 300, r = R() * 180;
+  return `<ellipse cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" rx="22" ry="38" fill="url(#alm)" transform="rotate(${r.toFixed(0)} ${x.toFixed(0)} ${y.toFixed(0)})"/>`;
+}).join('');
+
+// nodos de la línea temporal: báscula que se hace pequeña, ojo que crece
+$('#pn').innerHTML = [0, 1, 2].map((i) => {
+  const x = 180 + i * 590, sc = [1, 0.7, 0.45][i], ey = [0.45, 0.75, 1][i];
+  return `<g class="pnode"><circle cx="${x}" cy="560" r="12" fill="#6D9CFF" style="filter:drop-shadow(0 0 10px rgba(109,156,255,.9))"/>
+    <g transform="translate(${x + 60} 430) scale(${sc})" opacity="${0.4 + 0.6 * sc}"><rect x="-60" y="-70" width="120" height="140" rx="20" fill="none" stroke="#8CB4F5" stroke-width="${3.5 / sc}"/><rect x="-36" y="34" width="56" height="22" rx="5" fill="none" stroke="#8CB4F5" stroke-width="${3 / sc}"/><circle cx="0" cy="-12" r="34" fill="none" stroke="#8CB4F5" stroke-width="${3 / sc}"/></g>
+    <g transform="translate(${x + 230} 440) scale(${ey})" opacity="${0.3 + 0.7 * ey}"><path d="M-70 0 C-40 -46 40 -46 70 0 C40 46 -40 46 -70 0 Z" fill="none" stroke="#EAF5FD" stroke-width="${3.5 / ey}"/><circle cx="0" cy="0" r="22" fill="#6D9CFF"/><circle cx="-7" cy="-7" r="7" fill="#EAF5FD"/></g></g>`;
+}).join('');
+
+verdict($('#verd'), 2, 'Sobre todo al empezar.', 'Báscula de cocina');
+
+K.scene({
+  num: 9, name: 'Báscula de cocina', duration: 25,
+  stills: [4.6, 10.4, 16.6, 23.2],
+  render(t) {
+    /* --- A: bodegón cenital --- */
+    const ai = P(t, 0.3, 1.2, 'out4');
+    // la báscula: A derecha; B se desplaza a la derecha; C fuera; D vuelve a la derecha
+    const bMove = P(t, 6.3, 1.0, 'inOut'), cOut = P(t, 12.4, 0.7, 'in2'), dIn = P(t, 18.8, 1.2, 'out4');
+    const sx = t < 18.8 ? lerp(0, -40, bMove) : lerp(260, 220, dIn);
+    const so = t < 18.8 ? ai * (1 - cOut) : dIn;
+    const ss = t < 18.8 ? lerp(1, 0.78, bMove) : 0.86;
+    const sy = t < 18.8 ? bMove * 50 : 0;
+    svgT($('#kscale'), { x: sx, y: (1 - ai) * 40 + sy, s: ss, cx: 1260, cy: 510, o: so });
+    const bowlIn = P(t, 1.7, 0.7, 'out4');
+    svgT($('#kbowl'), { x: sx, y: (1 - bowlIn) * -80 + sy, s: ss * lerp(1.25, 1, bowlIn), cx: 1260, cy: 510, o: P(t, 1.7, 0.35) * (t < 18.8 ? (1 - cOut) : dIn) });
+    const cnt = P(t, 2.3, 1.4, 'out4');
+    $('#kgr').textContent = Math.round(cnt * 125);
+    svgT($('#eggs'), { y: (1 - P(t, 0.8, 1, 'out4')) * -40, o: P(t, 0.8, 0.6) * (1 - bMove) });
+    svgT($('#alms'), { y: (1 - P(t, 1.0, 1, 'out4')) * -40, o: P(t, 1.0, 0.6) * (1 - bMove) });
+    svgT($('#oild'), { y: (1 - P(t, 1.2, 1, 'out4')) * 40, o: P(t, 1.2, 0.6) * (1 - bMove) });
+    words($('#hk'), t, 0.5, 6.0, 0.04);
+    words($('#ht'), t, 0.7, 6.05, 0.08);
+    words($('#hs'), t, 1.3, 6.1, 0.04);
+
+    /* --- B: a ojo vs con báscula --- */
+    const bOn = t > 6.3 && t < 13.2;
+    ['#b2h', '#l1', '#l2', '#b2n'].forEach((id) => $(id).style.visibility = bOn ? 'visible' : 'hidden');
+    words($('#b2k'), t, 6.6, 12.3, 0.04);
+    words($('#b2t'), t, 6.75, 12.3, 0.06);
+    const ei = P(t, 7.0, 1.0, 'out4');
+    svgT($('#eye'), { y: (1 - ei) * 60 + 30, o: P(t, 7.0, 0.6) * (1 - cOut) });
+    const q = P(t, 8.0, 0.6, 'back');
+    svgT($('#qm'), { s: lerp(0.4, 1, q) + Math.sin(t * 3) * 0.03, cx: 560, cy: 540, o: P(t, 8.0, 0.3) });
+    [['#l1', 8.4], ['#l2', 8.7]].forEach(([id, t0]) => set($(id), { y: (1 - P(t, t0, 0.6, 'out4')) * 20, o: P(t, t0, 0.4) * (1 - cOut) }));
+    const tara = P(t, 9.2, 0.15) * (1 - P(t, 9.45, 0.3));
+    $('#taraB').setAttribute('opacity', (tara * 0.9).toFixed(3));
+    words($('#b2n'), t, 10.0, 12.3, 0.035);
+
+    /* --- C: entrenas el ojo --- */
+    const cOn = t > 12.8 && t < 19.0;
+    ['#b3h', '#n0', '#n1', '#n2', '#chips3'].forEach((id) => $(id).style.visibility = cOn ? 'visible' : 'hidden');
+    const cEnd = P(t, 18.2, 0.6, 'in2');
+    $('#prog').style.visibility = cOn ? 'visible' : 'hidden';
+    svgT($('#prog'), { o: 1 - cEnd });
+    words($('#b3k'), t, 12.9, 18.1, 0.04);
+    words($('#b3t'), t, 13.05, 18.1, 0.06);
+    draw($('#pline'), P(t, 13.4, 1.6, 'inOut'));
+    $$('.pnode').forEach((g, i) => { const w = P(t, 13.6 + i * 0.6, 0.7, 'out4'); g.setAttribute('opacity', (w * (1 - cEnd)).toFixed(3)); g.setAttribute('transform', `translate(0 ${((1 - w) * 30).toFixed(1)})`); });
+    ['#n0', '#n1', '#n2'].forEach((id, i) => set($(id), { y: (1 - P(t, 13.8 + i * 0.6, 0.7, 'out4')) * 24, o: P(t, 13.8 + i * 0.6, 0.5) * (1 - cEnd) }));
+    $$('#chips3 .chip').forEach((c, i) => set(c, { s: 0.7 + 0.3 * P(t, 15.8 + i * 0.18, 0.6, 'back'), o: P(t, 15.8 + i * 0.18, 0.3) * (1 - cEnd) }));
+
+    /* --- D: veredicto --- */
+    $('#d4h').style.visibility = t > 18.8 ? 'visible' : 'hidden';
+    words($('#dk'), t, 19.0, null, 0.04);
+    words($('#dt'), t, 19.15, null, 0.06);
+    verdictAnim($('#verd'), t, 20.2);
+  },
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>03 · Cinturón de powerlifting</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  .spot{left:500px;top:180px;width:1400px;height:900px;background:radial-gradient(closest-side,rgba(17,65,163,.42),rgba(17,65,163,0))}
+  #belt{left:0;top:0;width:1920px;height:1080px}
+  #head{left:120px;top:190px;width:1200px}
+  #head .title{font-size:104px;margin:16px 0 22px}
+  #head .sub{font-size:34px;max-width:900px}
+  #b2{left:0;top:0;width:1920px;height:1080px}
+  #steps{left:1120px;top:330px;width:700px;display:flex;flex-direction:column;gap:46px}
+  .step{display:flex;gap:28px;align-items:flex-start}
+  .step .n{font-family:'Space Grotesk';font-weight:700;font-size:22px;letter-spacing:.14em;color:var(--blue);border:1.5px solid var(--line2);border-radius:14px;padding:12px 14px;line-height:1}
+  .step .tx{font-family:'Inter';font-weight:600;font-size:36px;line-height:1.22}
+  .step .tx em{font-family:'Playfair Display';font-style:italic;color:var(--blue);text-shadow:var(--glow)}
+  #b2h{left:1120px;top:220px}
+  #b3{left:0;top:0;width:1920px;height:1080px}
+  #b3h{left:120px;top:200px}
+  #b3h .title{font-size:80px}
+  .col{position:absolute;top:400px;width:760px}
+  .col .list{gap:30px}
+  #verd{left:480px;top:760px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow spot" id="spot"></div>
+  <div id="cam">
+    <svg class="abs" id="belt" viewBox="0 0 1920 1080">
+      <defs>
+        <filter id="grain" filterUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1080"><feTurbulence type="fractalNoise" baseFrequency="1.6" numOctaves="2" seed="3"/><feColorMatrix values="0 0 0 0 .6  0 0 0 0 .7  0 0 0 0 .9  0 0 0 .22 0"/><feComposite in2="SourceGraphic" operator="in"/></filter>
+        <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f7fd"/><stop offset=".35" stop-color="#9aa5bb"/><stop offset=".6" stop-color="#e3e9f5"/><stop offset="1" stop-color="#5b6579"/></linearGradient>
+        <filter id="bds" x="-10%" y="-30%" width="120%" height="180%"><feDropShadow dx="0" dy="46" stdDeviation="34" flood-color="#000" flood-opacity=".65"/></filter>
+      </defs>
+      <g id="beltg" filter="url(#bds)">
+        <path class="bl" id="b0" fill="none" stroke="#0a0d14" stroke-width="166" stroke-linecap="butt"/>
+        <path class="bl" id="b1" fill="none" stroke="#161b26" stroke-width="156" stroke-linecap="butt"/>
+        <path class="bl" id="b2s" fill="none" stroke="#6D9CFF" stroke-width="138" stroke-dasharray="10 8" opacity=".75"/>
+        <path class="bl" id="b3s" fill="none" stroke="#161b26" stroke-width="134"/>
+        <path class="bl" id="b4s" fill="none" stroke="#6D9CFF" stroke-width="112" stroke-dasharray="10 8" opacity=".5"/>
+        <path class="bl" id="b5" fill="none" stroke="#1a202c" stroke-width="108"/>
+        <path class="bl" id="b6" fill="none" stroke="#000" stroke-width="108" filter="url(#grain)"/>
+        <path class="bl" id="b7" fill="none" stroke="#a9bfe8" stroke-width="10" opacity=".08" transform="translate(0 -52)"/>
+        <g id="holes"></g>
+        <g id="buckle"></g>
+      </g>
+    </svg>
+    <div class="abs" id="head">
+      <div class="kicker" id="hk">Soporte para cargas altas</div>
+      <div class="title" id="ht">Cinturón de<br><em>powerlifting</em></div>
+      <div class="sub" id="hs">Útil en algunos levantamientos. <em>Obligatorio</em> en ninguno.</div>
+    </div>
+
+    <!-- B: sección de la cintura -->
+    <div class="abs" id="b2">
+      <svg class="abs" viewBox="0 0 1920 1080" width="1920" height="1080">
+        <defs>
+          <radialGradient id="abd" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#1d3f86"/><stop offset="1" stop-color="#0b1a3a"/></radialGradient>
+          <marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#8CB4F5"/></marker>
+        </defs>
+        <g id="sec">
+          <ellipse cx="620" cy="610" rx="300" ry="226" fill="none" stroke="rgba(140,180,245,.1)" stroke-width="2" stroke-dasharray="3 9"/>
+          <ellipse id="abdo" cx="620" cy="610" rx="236" ry="172" fill="url(#abd)" stroke="#2c5bc4" stroke-width="2"/>
+          <rect x="560" y="744" width="120" height="40" rx="14" fill="#0a1226" stroke="#3a5aa0" stroke-width="2"/>
+          <text x="620" y="770" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="13" letter-spacing="2" fill="#6a7fa6">COLUMNA</text>
+          <g id="arrows"></g>
+          <ellipse id="ring" cx="620" cy="610" rx="262" ry="198" fill="none" stroke="#141a26" stroke-width="34"/>
+          <ellipse id="ringE" cx="620" cy="610" rx="262" ry="198" fill="none" stroke="#6D9CFF" stroke-width="3"/>
+          <text id="ringL" x="620" y="392" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="4" fill="#8CB4F5">CINTURÓN</text>
+          <text id="secL" x="620" y="900" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="4" fill="#6a7fa6">VISTA EN SECCIÓN DE LA CINTURA · ESQUEMA SIMPLIFICADO</text>
+        </g>
+      </svg>
+      <div class="abs kicker" id="b2h">Cómo funciona</div>
+      <div class="abs" id="steps">
+        <div class="step"><div class="n">01</div><div class="tx">Coges aire y <em>aprietas</em> el abdomen</div></div>
+        <div class="step"><div class="n">02</div><div class="tx">El cinturón te da una <em>pared</em> contra la que empujar</div></div>
+        <div class="step"><div class="n">03</div><div class="tx">El tronco gana <em>estabilidad</em> en las series pesadas</div></div>
+      </div>
+    </div>
+
+    <!-- C: cuándo sí / cuándo no -->
+    <div class="abs" id="b3">
+      <div class="abs" id="b3h"><div class="kicker" id="b3k">Antes de comprarlo</div><div class="title" id="b3t" style="margin-top:14px">¿Cuándo tiene <em>sentido</em>?</div></div>
+      <div class="col" id="c1" style="left:120px"><div class="colhead pro">Puede ayudar</div><div class="plist"></div></div>
+      <div class="col" id="c2" style="left:1000px"><div class="colhead con">No hace falta</div><div class="plist"></div></div>
+    </div>
+    <div id="verd"></div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
+
+const BELT = 'M250 820 C560 700 880 650 1200 668 C1450 682 1640 640 1800 560';
+$$('#beltg .bl').forEach((p) => p.setAttribute('d', BELT));
+const ref = $('#b1'); const L = ref.getTotalLength();
+// agujeros en el extremo
+const holes = [];
+for (let i = 0; i < 9; i++) {
+  const d = L - 120 - i * 46; const p = ref.getPointAtLength(d);
+  holes.push(`<g class="hole" data-d="${d}"><ellipse cx="${p.x}" cy="${p.y}" rx="12" ry="12" fill="#04060b" stroke="#3b4458" stroke-width="2.5"/><ellipse cx="${p.x}" cy="${p.y + 3}" rx="7" ry="6" fill="#000"/></g>`);
+}
+$('#holes').innerHTML = holes.join('');
+// hebilla de palanca al inicio
+const p0 = ref.getPointAtLength(70), p1 = ref.getPointAtLength(72);
+const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+$('#buckle').innerHTML = `<g transform="translate(${p0.x} ${p0.y}) rotate(${ang})">
+  <rect x="-70" y="-78" width="150" height="156" rx="16" fill="url(#metal)"/>
+  <rect x="-58" y="-66" width="126" height="132" rx="10" fill="none" stroke="#ffffff" stroke-width="2" opacity=".5"/>
+  <rect x="-40" y="-40" width="70" height="80" rx="8" fill="#2a3245" opacity=".55"/>
+  <circle cx="58" cy="-52" r="9" fill="#3e475b"/><circle cx="58" cy="52" r="9" fill="#3e475b"/>
+  <rect x="-6" y="-90" width="12" height="180" rx="6" fill="#c7d0e2"/>
+</g>`;
+$('#buckle').dataset.d = 70;
+
+// flechas de presión
+const ar = [];
+for (let i = 0; i < 14; i++) {
+  const a = (i / 14) * Math.PI * 2 + 0.11;
+  if (Math.abs(a - Math.PI / 2) < 0.35) continue;
+  ar.push(`<line class="ar" data-a="${a}" stroke="#8CB4F5" stroke-width="5" stroke-linecap="round" marker-end="url(#ah)"/>`);
+}
+$('#arrows').innerHTML = ar.join('');
+
+list($('#c1 .plist'), [['pro', 'Series pesadas de sentadilla y peso muerto'], ['pro', 'Cuando ya dominas la técnica y el bloqueo del abdomen']]);
+list($('#c2 .plist'), [['con', 'Para empezar a entrenar fuerza'], ['con', 'Con cargas moderadas o en máquinas'], ['con', 'No sustituye aprender a estabilizar el tronco']]);
+verdict($('#verd'), 0, 'Un apoyo para cargas altas, no un requisito para progresar.', 'Cinturón');
+
+K.scene({
+  num: 3, name: 'Cinturón', duration: 24,
+  stills: [3.8, 10.6, 16.4, 22.2],
+  render(t) {
+    set($('#spot'), { x: Math.sin(t * 0.3) * 50, s: 1 + Math.sin(t * 0.5) * 0.03 });
+
+    /* --- A: el cinturón se despliega --- */
+    const un = P(t, 0.2, 1.8, 'inOut');
+    $$('#beltg .bl').forEach((p) => {
+      if (p.id === 'b2s' || p.id === 'b4s') { p.style.opacity = un > 0.98 ? (p.id === 'b2s' ? 0.75 : 0.5) : 0; return; }
+      draw(p, un);
+    });
+    const head = un * L;
+    $$('.hole').forEach((h) => { const d = +h.dataset.d; const v = clamp((head - d) / 60); h.setAttribute('opacity', v); });
+    const bk = P(t, 1.6, 0.7, 'back');
+    svgT($('#buckle'), { s: 0.6 + 0.4 * bk, cx: p0.x, cy: p0.y, o: P(t, 1.6, 0.3) });
+    // fases del cinturón: protagonista → fondo
+    const toBg = P(t, 5.4, 1.0, 'inOut'), back = P(t, 18.4, 1.0, 'inOut');
+    const bo = lerp(1, 0.0, toBg) + 1.0 * back;
+    svgT($('#belt'), { x: 0, y: toBg * 60 - back * 330 + Math.sin(t * 0.8) * 4, o: bo });
+    words($('#hk'), t, 0.6, 5.2, 0.04);
+    words($('#ht'), t, 0.8, 5.25, 0.07);
+    words($('#hs'), t, 1.6, 5.3, 0.04);
+
+    /* --- B: sección --- */
+    const b2 = win(t, 5.9, 12.4, 0.7, 0.6);
+    set($('#b2'), { o: b2.v });
+    $('#b2').style.visibility = t > 5.8 && t < 13.2 ? 'visible' : 'hidden';
+    svgT($('#sec'), { s: lerp(0.85, 1, P(t, 5.9, 1.2, 'out4')), cx: 620, cy: 610 });
+    // respiración y bloqueo: 2 ciclos
+    const brace = (a) => P(t, a, 0.9, 'inOut') * (1 - P(t, a + 1.9, 0.9, 'inOut'));
+    const bc = Math.max(brace(7.2), brace(10.0));
+    const ringIn = P(t, 8.6, 0.8, 'out4');
+    svgT($('#abdo'), { s: 1 + bc * 0.06, cx: 620, cy: 610 });
+    const rx = 262, ry = 198;
+    $$('.ar').forEach((l, i) => {
+      const a = +l.dataset.a, r0 = 70 + bc * 30, r1 = lerp(150, ringIn > 0.5 ? 236 : 285, bc);
+      const cx = 620, cy = 610, k = ry / rx;
+      l.setAttribute('x1', cx + Math.cos(a) * r0); l.setAttribute('y1', cy + Math.sin(a) * r0 * k);
+      l.setAttribute('x2', cx + Math.cos(a) * r1); l.setAttribute('y2', cy + Math.sin(a) * r1 * k);
+      l.setAttribute('opacity', (P(t, 7.0, 0.4) * (0.3 + 0.7 * bc)).toFixed(3));
+    });
+    $('#ring').setAttribute('opacity', ringIn);
+    $('#ringE').setAttribute('opacity', ringIn * (0.5 + 0.5 * bc));
+    $('#ringE').style.filter = `drop-shadow(0 0 ${(6 + bc * 16).toFixed(1)}px rgba(109,156,255,.9))`;
+    $('#ringL').setAttribute('opacity', ringIn);
+    $('#secL').setAttribute('opacity', P(t, 6.6, 0.6));
+    set($('#b2h'), { o: P(t, 6.3, 0.5) });
+    $$('.step').forEach((s, i) => { const w = P(t, [7.0, 8.6, 10.2][i], 0.8, 'out4'); set(s, { x: (1 - w) * 40, o: w }); });
+
+    /* --- C: cuándo sí / cuándo no --- */
+    const b3 = win(t, 12.8, 18.2, 0.6, 0.6);
+    set($('#b3'), { o: b3.o > 0 ? 1 - b3.o : 1 });
+    $('#b3').style.visibility = t > 12.7 && t < 19 ? 'visible' : 'hidden';
+    words($('#b3k'), t, 12.8, 18.0, 0.04);
+    words($('#b3t'), t, 12.9, 18.0, 0.06);
+    [['#c1', 13.5], ['#c2', 14.6]].forEach(([id, t0]) => {
+      set($('.colhead', $(id)), { o: P(t, t0, 0.5) });
+      listAnim($('.plist', $(id)), t, t0 + 0.2, null, 0.35);
+    });
+
+    /* --- D: veredicto --- */
+    verdictAnim($('#verd'), t, 19.2);
+  },
+});
+</script>
+</body>
+</html>

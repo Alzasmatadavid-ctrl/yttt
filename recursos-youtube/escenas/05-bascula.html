@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>05 · Báscula corporal</title>
+<link rel="stylesheet" href="shared/kit.css">
+<style>
+  .spot{left:820px;top:120px;width:1200px;height:950px;background:radial-gradient(closest-side,rgba(17,65,163,.42),rgba(17,65,163,0))}
+  /* suelo de baño en perspectiva */
+  #floor3d{left:-400px;top:420px;width:2720px;height:1100px;transform-origin:50% 0;
+    background-image:linear-gradient(rgba(140,180,245,.08) 2px,transparent 2px),linear-gradient(90deg,rgba(140,180,245,.08) 2px,transparent 2px);
+    background-size:180px 180px;-webkit-mask-image:linear-gradient(180deg,transparent,#000 35%,#000 70%,transparent);mask-image:linear-gradient(180deg,transparent,#000 35%,#000 70%,transparent)}
+  #scaleWrap{left:880px;top:300px;width:820px;height:620px;perspective:1500px;transform-origin:50% 50%}
+  #scale3d{position:absolute;left:150px;top:40px;width:520px;height:520px;transform-style:preserve-3d;transform-origin:50% 50%}
+  .slab{position:absolute;inset:0;border-radius:72px}
+  .top{background:linear-gradient(150deg,#1d2a44 0%,#0e1628 55%,#0a1120 100%);
+    box-shadow:inset 0 2px 0 rgba(255,255,255,.18),inset 0 0 0 2px rgba(140,180,245,.18)}
+  .top:after{content:'';position:absolute;inset:0;border-radius:72px;background:linear-gradient(125deg,rgba(255,255,255,.14) 0%,rgba(255,255,255,0) 38%)}
+  .disp{position:absolute;left:150px;top:70px;width:220px;height:92px;border-radius:18px;background:#050a14;border:1.5px solid rgba(140,180,245,.18);
+    display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:54px;color:#8CB4F5;
+    text-shadow:0 0 14px rgba(109,156,255,.9)}
+  .disp small{font-size:22px;margin-left:8px;margin-top:16px}
+  .pad{position:absolute;width:120px;height:170px;border-radius:60px;background:rgba(140,180,245,.04);border:1.5px dashed rgba(140,180,245,.14)}
+  #sshadow{left:930px;top:640px;width:760px;height:180px;transform-origin:50% 50%;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.8),rgba(0,0,0,0))}
+  #callout{left:1500px;top:250px}
+  #head{left:120px;top:300px;width:760px}
+  #head .title{font-size:100px;margin:16px 0 26px}
+  #b2{left:0;top:0;width:1920px;height:1080px}
+  #b2h{left:120px;top:190px}
+  #b2h .title{font-size:70px;margin-top:14px}
+  #b2n{left:1260px;top:420px;width:560px}
+  #b2n .item{margin-bottom:40px}
+  #b2n .k{font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:.22em;text-transform:uppercase;margin-bottom:10px}
+  #b2n .v{font-family:'Inter';font-weight:600;font-size:34px;line-height:1.22}
+  #b3{left:0;top:0;width:1920px;height:1080px}
+  #b3h{left:0;right:0;top:200px;text-align:center}
+  #b3h .title{font-size:72px;margin-top:14px}
+  #big{left:0;right:0;top:390px;text-align:center;font-family:'Space Grotesk';font-weight:700;font-size:150px;color:#8CB4F5;text-shadow:0 0 30px rgba(109,156,255,.8)}
+  #big small{font-size:56px;margin-left:12px}
+  .part{position:absolute;top:640px;width:330px;height:150px;padding:28px 30px}
+  .part .k{font-family:'Montserrat';font-weight:800;font-size:34px}
+  .part .q{position:absolute;right:26px;top:22px;font-family:'Playfair Display';font-style:italic;font-weight:700;font-size:56px;color:var(--blue);text-shadow:var(--glow)}
+  .part .s{font-family:'Inter';font-size:21px;color:var(--ink2);margin-top:8px}
+  #b3n{left:0;right:0;top:850px;text-align:center}
+  #verd{left:480px;top:740px}
+  #b4h{left:0;right:0;top:180px;text-align:center}
+  #b4h .title{font-size:76px;margin-top:14px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow spot" id="spot"></div>
+  <div id="cam">
+    <div class="abs" id="floor3d"></div>
+    <div class="abs" id="sshadow"></div>
+    <div class="abs" id="scaleWrap"><div id="scale3d"></div></div>
+    <div class="abs" id="head">
+      <div class="kicker" id="hk">Seguimiento semanal</div>
+      <div class="title" id="ht">Báscula<br>corporal</div>
+      <div class="sub" id="hs">El dato más fácil de registrar <em>cada día</em></div>
+    </div>
+
+    <!-- B: tendencia -->
+    <div class="abs" id="b2">
+      <div class="abs" id="b2h"><div class="kicker">Cómo leerla</div><div class="title" id="b2t">Mira la <em>tendencia</em>, no el día</div></div>
+      <svg class="abs" viewBox="0 0 1920 1080" width="1920" height="1080">
+        <g id="tchart" font-family="Space Grotesk" font-weight="700" letter-spacing="3">
+          <path id="tax" d="M140 380 V860 H1160" fill="none" stroke="rgba(140,180,245,.4)" stroke-width="2"/>
+          <text x="140" y="360" font-size="16" fill="#A9BFE8">PESO</text>
+          <text x="1160" y="900" font-size="16" fill="#A9BFE8" text-anchor="end">SEMANAS →</text>
+          <g id="weeks"></g>
+          <g id="dots"></g>
+          <path id="trend" fill="none" stroke="#6D9CFF" stroke-width="7" stroke-linecap="round" style="filter:drop-shadow(0 0 10px rgba(109,156,255,.8))"/>
+          <text id="tesq" x="140" y="940" font-size="14" fill="#6a7fa6" font-family="Inter" font-weight="400" letter-spacing="1">Ejemplo ilustrativo</text>
+        </g>
+      </svg>
+      <div class="abs" id="b2n">
+        <div class="item" id="n1"><div class="k" style="color:var(--ink2)">● El dato diario</div><div class="v">Sube y baja por agua, sal, comida o descanso</div></div>
+        <div class="item" id="n2"><div class="k" style="color:var(--blue)">━ La media semanal</div><div class="v">Te dice hacia dónde vas de verdad</div></div>
+      </div>
+    </div>
+
+    <!-- C: lo que el número no dice -->
+    <div class="abs" id="b3">
+      <div class="abs" id="b3h"><div class="kicker">Su gran limitación</div><div class="title" id="b3t">Un número que <em>lo mezcla todo</em></div></div>
+      <div class="abs" id="big"><span id="bign">78,4</span><small>kg</small></div>
+      <div class="card part" id="pt0" style="left:205px"><div class="k">Grasa</div><div class="s">Lo que quieres perder</div><div class="q">?</div></div>
+      <div class="card part" id="pt1" style="left:585px"><div class="k">Músculo</div><div class="s">Lo que quieres ganar</div><div class="q">?</div></div>
+      <div class="card part" id="pt2" style="left:965px"><div class="k">Agua</div><div class="s">Varía cada día</div><div class="q">?</div></div>
+      <div class="card part" id="pt3" style="left:1345px"><div class="k">Digestión</div><div class="s">Comida en tránsito</div><div class="q">?</div></div>
+      <div class="abs sub" id="b3n">La báscula suma todo. <em>No distingue qué ha cambiado.</em></div>
+    </div>
+
+    <!-- D: veredicto -->
+    <div class="abs" id="b4h"><div class="kicker" id="b4k">Para todos los clientes</div><div class="title" id="b4t">La base de tu <em>seguimiento</em></div></div>
+    <div id="verd"></div>
+  </div>
+  <div class="grain"></div><div class="vig"></div>
+</div>
+
+<script src="shared/kit.js"></script>
+<script>
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, rng } = K;
+
+/* ---------- báscula con grosor (capas apiladas en 3D) ---------- */
+const s3 = $('#scale3d');
+let layers = '';
+for (let i = 14; i >= 1; i--) layers += `<div class="slab" style="transform:translateZ(${-i * 2.2}px);background:${i > 11 ? '#04070d' : '#0b1222'};box-shadow:inset 0 0 0 1.5px rgba(140,180,245,${i < 3 ? 0.22 : 0.06})"></div>`;
+s3.innerHTML = layers + `<div class="slab top"><div class="pad" style="left:110px;top:220px"></div><div class="pad" style="left:290px;top:220px"></div><div class="disp"><span id="kg">0,0</span><small>kg</small></div></div>`;
+
+/* ---------- datos ilustrativos: oscilación diaria + tendencia descendente ---------- */
+const R = rng(7), N = 56, pts = [];
+for (let i = 0; i < N; i++) {
+  const x = 170 + (i / (N - 1)) * 960;
+  const base = 520 + i * 3.6 + Math.sin(i * 0.9) * 6;
+  const noise = (R() - 0.5) * 80 + (i % 7 === 0 ? -20 : 0) + (i % 7 === 5 ? 18 : 0);
+  pts.push([x, base + noise, base]);
+}
+$('#dots').innerHTML = pts.map((p, i) => `<circle class="dt" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="7" fill="#A9BFE8" opacity="0"/>`).join('');
+// media móvil de 7 días
+const avg = pts.map((p, i) => { const a = pts.slice(Math.max(0, i - 6), i + 1); return [p[0], a.reduce((s, q) => s + q[1], 0) / a.length]; });
+$('#trend').setAttribute('d', K.smooth(avg.filter((_, i) => i % 2 === 0 || i === N - 1), false, 1));
+$('#weeks').innerHTML = Array.from({ length: 8 }, (_, w) => { const x = 170 + (w * 7 / (N - 1)) * 960; return `<line x1="${x}" y1="380" x2="${x}" y2="860" stroke="rgba(140,180,245,.07)" stroke-width="2"/>`; }).join('');
+
+verdict($('#verd'), 2, 'Pésate en las mismas condiciones y fíjate en la media semanal.', 'Báscula corporal');
+
+K.scene({
+  num: 5, name: 'Báscula corporal', duration: 25,
+  stills: [4.4, 11.4, 17.4, 23.4],
+  render(t) {
+    set($('#spot'), { x: Math.sin(t * 0.3) * 40, s: 1 + Math.sin(t * 0.5) * 0.03 });
+
+    /* --- A: báscula en el suelo --- */
+    const a = win(t, 0.2, 5.6, 1.2, 0.8, 'out4', 'inOut');
+    const ry = lerp(-16, -8, P(t, 0, 6, 'sine'));
+    s3.style.transform = `rotateX(58deg) rotateZ(${ry.toFixed(2)}deg) translateZ(${((1 - a.i) * 140).toFixed(1)}px)`;
+    const bk = P(t, 19.0, 1.1, 'out4');
+    if (t < 18.9) {
+      set($('#scaleWrap'), { o: a.v, y: a.o * 40, s: 1.16 });
+      set($('#sshadow'), { o: a.v * (0.6 + 0.4 * a.i), s: lerp(1.5, 1.16, a.i) });
+    } else {
+      set($('#scaleWrap'), { x: -330, y: lerp(-40, -90, bk), s: 0.56, o: bk });
+      set($('#sshadow'), { x: -330, y: -170, s: 0.56, o: bk * 0.8 });
+    }
+    $('#floor3d').style.transform = `perspective(1200px) rotateX(64deg) translateY(${(-t * 20).toFixed(1)}px)`;
+    set($('#floor3d'), { o: (1 - P(t, 5.6, 0.8)) * P(t, 0, 1) + P(t, 18.6, 1) * 0.6 });
+    // el display cuenta hasta el peso de ejemplo
+    const c = P(t, 1.6, 1.6, 'out4');
+    const flick = t > 3.2 && t < 3.9 ? (Math.floor(t * 8) % 2 ? 1 : 0.35) : 1;
+    $('#kg').textContent = (c * 78.4).toFixed(1).replace('.', ',');
+    $('#kg').parentElement.style.opacity = P(t, 1.2, 0.4) * flick;
+    words($('#hk'), t, 0.5, 5.4, 0.04);
+    words($('#ht'), t, 0.7, 5.45, 0.08);
+    words($('#hs'), t, 1.3, 5.5, 0.04);
+
+    /* --- B: tendencia --- */
+    const b2 = win(t, 6.0, 12.6, 0.6, 0.6);
+    set($('#b2'), { o: b2.o > 0 ? 1 - b2.o : 1 });
+    $('#b2').style.visibility = t > 5.9 && t < 13.3 ? 'visible' : 'hidden';
+    words($('#b2h .kicker'), t, 6.0, null, 0.04);
+    words($('#b2t'), t, 6.15, null, 0.06);
+    draw($('#tax'), P(t, 6.4, 0.8, 'inOut'));
+    const dp = P(t, 6.9, 2.4, 'lin');
+    $$('.dt').forEach((d, i) => { const v = clamp((dp * N - i) / 3); d.setAttribute('opacity', (v * 0.75).toFixed(3)); d.setAttribute('r', (4 + 3 * v).toFixed(2)); });
+    draw($('#trend'), P(t, 8.6, 1.8, 'inOut'));
+    $('#tesq').setAttribute('opacity', P(t, 7, 0.5));
+    set($('#n1'), { x: (1 - P(t, 7.6, 0.7, 'out4')) * 30, o: P(t, 7.6, 0.5) });
+    set($('#n2'), { x: (1 - P(t, 9.2, 0.7, 'out4')) * 30, o: P(t, 9.2, 0.5) });
+
+    /* --- C: el número lo mezcla todo --- */
+    const b3 = win(t, 12.9, 18.6, 0.6, 0.6);
+    set($('#b3'), { o: b3.o > 0 ? 1 - b3.o : 1 });
+    $('#b3').style.visibility = t > 12.8 && t < 19.3 ? 'visible' : 'hidden';
+    words($('#b3h .kicker'), t, 12.9, null, 0.04);
+    words($('#b3t'), t, 13.05, null, 0.06);
+    const bg = win(t, 13.3, null, 0.8);
+    set($('#big'), { s: lerp(1.25, 1, P(t, 13.3, 0.9, 'out4')), o: bg.v, blur: (1 - bg.i) * 10 });
+    // se "rompe" en sus componentes
+    for (let i = 0; i < 4; i++) {
+      const w = P(t, 14.4 + i * 0.22, 0.8, 'out4');
+      set($('#pt' + i), { y: (1 - w) * -120, s: lerp(0.6, 1, w), o: P(t, 14.4 + i * 0.22, 0.4) });
+      set($('#pt' + i + ' .q'), { o: P(t, 15.4 + i * 0.15, 0.4), s: 0.5 + 0.5 * P(t, 15.4 + i * 0.15, 0.5, 'back') });
+    }
+    words($('#b3n'), t, 16.2, null, 0.04);
+
+    /* --- D: veredicto --- */
+    const d4 = t > 18.8;
+    $('#b4h').style.visibility = d4 ? 'visible' : 'hidden';
+    words($('#b4k'), t, 19.0, null, 0.04);
+    words($('#b4t'), t, 19.15, null, 0.06);
+    verdictAnim($('#verd'), t, 19.9);
+  },
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+/* =====================================================================
+   KIT DE INICIO — Sistema visual común para los recursos del vídeo
+   Identidad tomada de la landing: azul noche + azul eléctrico,
+   Montserrat (titulares), Playfair Display cursiva (acentos),
+   Space Grotesk (etiquetas y datos), Inter (texto).
+   ===================================================================== */
+
+@font-face{font-family:'Montserrat';font-weight:500;src:url(fonts/montserrat-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Montserrat';font-weight:700;src:url(fonts/montserrat-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'Montserrat';font-weight:800;src:url(fonts/montserrat-latin-800-normal.woff2) format('woff2')}
+@font-face{font-family:'Montserrat';font-weight:900;src:url(fonts/montserrat-latin-900-normal.woff2) format('woff2')}
+@font-face{font-family:'Space Grotesk';font-weight:500;src:url(fonts/space-grotesk-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Space Grotesk';font-weight:700;src:url(fonts/space-grotesk-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-weight:400;src:url(fonts/inter-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-weight:500;src:url(fonts/inter-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-weight:600;src:url(fonts/inter-latin-600-normal.woff2) format('woff2')}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:500;src:url(fonts/playfair-display-latin-500-italic.woff2) format('woff2')}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:700;src:url(fonts/playfair-display-latin-700-italic.woff2) format('woff2')}
+
+:root{
+  --bg:#020913;
+  --bg2:#071229;
+  --navy:#0a162c;
+  --ink:#EAF5FD;
+  --ink2:#A9BFE8;
+  --muted:#6a7fa6;
+  --line:rgba(140,180,245,.22);
+  --line2:rgba(140,180,245,.4);
+  --blue:#6D9CFF;
+  --blue2:#8CB4F5;
+  --deep:#1141A3;
+  --royal:#1650C9;
+  --violet:#8450EA;
+  --lilac:#B79BF3;
+  --coral:#FF8A7A;
+  --glow:0 0 18px rgba(64,118,232,.55),0 0 40px rgba(17,65,163,.5);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+body{-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+#stage{
+  position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;
+  transform-origin:0 0;color:var(--ink);font-family:'Inter',sans-serif;
+  background:radial-gradient(1400px 900px at 50% 42%,#0b1c3d 0%,#061229 42%,#020913 78%);
+}
+#stage svg{overflow:visible}
+.abs{position:absolute}
+.layer{position:absolute;inset:0}
+#cam,.chrome{position:absolute;inset:0;transform-origin:50% 50%}
+
+/* Fondo, luz y textura */
+.glow{position:absolute;border-radius:50%;pointer-events:none;filter:blur(10px)}
+.grain{position:absolute;inset:-50px;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1.2 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.vig{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(1500px 1000px at 50% 46%,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%)}
+
+/* Tipografía */
+.kicker{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:22px;letter-spacing:.26em;text-transform:uppercase;color:var(--blue2)}
+.title{font-family:'Montserrat',sans-serif;font-weight:800;font-size:92px;line-height:1.02;letter-spacing:-.025em;color:var(--ink)}
+.title em,.em{font-family:'Playfair Display',serif;font-style:italic;font-weight:700;letter-spacing:0;color:var(--blue);text-shadow:var(--glow)}
+.sub{font-family:'Inter',sans-serif;font-weight:500;font-size:34px;line-height:1.35;color:var(--ink2)}
+.sub em{font-family:'Playfair Display',serif;font-style:italic;font-weight:700;color:var(--blue);text-shadow:var(--glow)}
+.label{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink2)}
+.note{font-family:'Inter',sans-serif;font-weight:400;font-size:20px;color:var(--muted);letter-spacing:.02em}
+.mono{font-family:'Space Grotesk',sans-serif}
+
+/* Revelado por palabras */
+.w{display:inline-block;overflow:hidden;vertical-align:top;padding:0 .06em .12em 0;margin:0 -.06em -.12em 0}
+.wi{display:inline-block;will-change:transform}
+
+/* Capítulo (arriba izquierda) + progreso de la serie (arriba derecha) */
+.chap{position:absolute;left:96px;top:70px;display:flex;align-items:center;gap:22px}
+.chap-num{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:26px;color:var(--blue);
+  width:64px;height:64px;border:1.5px solid var(--line2);border-radius:18px;display:flex;align-items:center;justify-content:center;
+  background:rgba(17,65,163,.18);box-shadow:inset 0 0 20px rgba(109,156,255,.12)}
+.chap-k{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted)}
+.chap-name{font-family:'Montserrat',sans-serif;font-weight:700;font-size:24px;color:var(--ink);margin-top:4px;letter-spacing:-.005em}
+.prog{position:absolute;right:96px;top:94px;display:flex;align-items:center;gap:8px}
+.prog i{display:block;width:30px;height:4px;border-radius:2px;background:rgba(140,180,245,.2)}
+.prog i.done{background:rgba(140,180,245,.55)}
+.prog i.on{background:var(--blue);box-shadow:0 0 12px rgba(109,156,255,.8)}
+.prog b{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;letter-spacing:.14em;color:var(--ink2);margin-right:14px}
+
+/* Listas de ventajas / limitaciones */
+.list{display:flex;flex-direction:column;gap:22px}
+.li{display:flex;align-items:flex-start;gap:20px;font-family:'Inter',sans-serif;font-weight:600;font-size:33px;line-height:1.25;color:var(--ink)}
+.li .mk{flex:0 0 44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:28px;margin-top:-2px}
+.li.pro .mk{color:var(--bg);background:var(--blue);box-shadow:0 0 18px rgba(109,156,255,.55)}
+.li.con .mk{color:var(--coral);border:2px solid var(--coral);background:rgba(255,138,122,.08)}
+.li small{display:block;font-weight:400;font-size:24px;color:var(--ink2);margin-top:4px}
+.colhead{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;letter-spacing:.28em;text-transform:uppercase;padding-bottom:16px;margin-bottom:26px;border-bottom:1.5px solid var(--line)}
+.colhead.pro{color:var(--blue)}
+.colhead.con{color:var(--coral)}
+
+/* Chips */
+.chip{display:inline-flex;align-items:center;gap:12px;padding:14px 24px;border-radius:40px;border:1.5px solid var(--line2);
+  font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);background:rgba(10,22,44,.6)}
+.chip.solid{background:var(--blue);color:var(--bg);border-color:var(--blue);box-shadow:0 0 22px rgba(109,156,255,.45)}
+.chip.coral{border-color:rgba(255,138,122,.6);color:var(--coral)}
+
+/* Tarjeta de cristal */
+.card{border-radius:28px;border:1.5px solid var(--line);background:linear-gradient(160deg,rgba(23,45,92,.55),rgba(6,16,36,.75));
+  box-shadow:0 30px 80px rgba(0,0,0,.45),inset 0 1px 0 rgba(234,245,253,.06)}
+
+/* Veredicto (elemento firma de la serie) */
+.verdict{position:absolute;width:960px}
+.v-top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px}
+.v-label{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;letter-spacing:.32em;text-transform:uppercase;color:var(--blue2)}
+.v-ctx{font-family:'Inter',sans-serif;font-weight:500;font-size:22px;color:var(--ink2)}
+.v-bar{position:relative;height:82px;border-radius:41px;border:1.5px solid var(--line2);display:flex;background:rgba(6,16,36,.7);overflow:hidden}
+.v-seg{position:relative;z-index:2;flex:1;display:flex;align-items:center;justify-content:center;
+  font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:21px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.v-seg+.v-seg{border-left:1.5px solid var(--line)}
+.v-fill{position:absolute;z-index:1;top:5px;bottom:5px;border-radius:36px;
+  background:linear-gradient(90deg,#5b8cf5,#8CB4F5);box-shadow:0 0 30px rgba(109,156,255,.65),inset 0 1px 0 rgba(255,255,255,.45)}
+.v-note{margin-top:22px;font-family:'Playfair Display',serif;font-style:italic;font-weight:500;font-size:34px;color:var(--ink)}
+.v-ring{position:absolute;z-index:0;top:-2px;bottom:-2px;border-radius:44px;border:2px solid var(--blue);pointer-events:none}
+
+/* Controles de previsualización (no aparecen en el render) */
+#ctl{position:fixed;left:0;right:0;bottom:0;height:52px;display:flex;align-items:center;gap:14px;padding:0 18px;
+  background:#0b1120;color:#cfe0ff;font:13px/1 'Inter',sans-serif;z-index:10}
+#ctl button{background:#1a2a4a;color:#eaf5fd;border:0;border-radius:8px;padding:8px 14px;font:600 13px 'Inter',sans-serif;cursor:pointer}
+#ctl input{flex:1;accent-color:#6D9CFF}
+#ctl span{min-width:120px;text-align:right;font-variant-numeric:tabular-nums}
