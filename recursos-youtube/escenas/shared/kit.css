@@ -126,3 +126,23 @@ body{-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
 #ctl button{background:#1a2a4a;color:#eaf5fd;border:0;border-radius:8px;padding:8px 14px;font:600 13px 'Inter',sans-serif;cursor:pointer}
 #ctl input{flex:1;accent-color:#6D9CFF}
 #ctl span{min-width:120px;text-align:right;font-variant-numeric:tabular-nums}
+
+/* Tarjetas de producto con foto real (fondo de estudio claro) */
+.pcard{position:absolute;border-radius:30px;overflow:hidden;transform-origin:50% 50%;
+  background:radial-gradient(120% 90% at 50% 35%,#fbfcfe 0%,#eef1f6 55%,#dfe4ec 100%);
+  box-shadow:0 40px 90px rgba(0,0,0,.55),0 0 0 1.5px rgba(234,245,253,.35) inset}
+.pcard .ly{position:absolute;inset:0}
+.pcard img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply;transform-origin:50% 55%}
+.pcard img.cover{object-fit:cover;mix-blend-mode:normal}
+.pcard .brand{position:absolute;left:20px;top:18px;padding:9px 15px;border-radius:22px;background:rgba(2,9,19,.88);color:#EAF5FD;
+  font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;z-index:2}
+.pcard .brand b{color:#8CB4F5;font-weight:700}
+.pcard .feat{position:absolute;left:20px;bottom:18px;padding:9px 15px;border-radius:22px;background:#6D9CFF;color:#020913;
+  font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;z-index:2}
+.pcard .feat.coral{background:#FF8A7A}
+/* foto de ambiente a sangre */
+.photo{position:absolute;border-radius:26px;overflow:hidden;transform-origin:50% 50%;box-shadow:0 40px 90px rgba(0,0,0,.55),0 0 0 1.5px rgba(234,245,253,.25) inset}
+.photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+.photo .brand{position:absolute;left:20px;top:18px;padding:9px 15px;border-radius:22px;background:rgba(2,9,19,.85);color:#EAF5FD;
+  font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;z-index:2}
+.photo .brand b{color:#8CB4F5}

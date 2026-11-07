@@ -7,28 +7,23 @@
 <style>
   .spot{left:700px;top:80px;width:1300px;height:950px;background:radial-gradient(closest-side,rgba(132,80,234,.22),rgba(132,80,234,0))}
   .spot2{left:-100px;top:300px;width:900px;height:800px;background:radial-gradient(closest-side,rgba(17,65,163,.35),rgba(17,65,163,0))}
-  #mat{left:840px;top:130px;width:1160px;height:900px;border-radius:40px;transform-origin:50% 50%;
-    background:repeating-linear-gradient(90deg,rgba(255,255,255,.025) 0 2px,transparent 2px 14px),linear-gradient(160deg,#101a30,#0a1224);
-    box-shadow:0 50px 120px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05)}
-  #bands{left:0;top:0;width:1920px;height:1080px}
-  #head{left:120px;top:330px;width:720px}
+  #b2,#b3,#b4{left:0;top:0;width:1920px;height:1080px}
+  #head{left:120px;top:300px;width:700px}
   #head .title{font-size:100px;margin:16px 0 26px}
   #head .sub{font-size:36px}
-  #b2{left:0;top:0;width:1920px;height:1080px}
   #b2h{left:120px;top:190px}
   #b2h .title{font-size:72px;margin-top:14px}
-  .vc{position:absolute;top:400px;width:400px;height:430px;padding:0}
-  .vc svg{position:absolute;left:0;top:0}
-  .vc .tx{position:absolute;left:36px;right:30px;top:268px;font-family:'Inter';font-weight:600;font-size:31px;line-height:1.22}
-  .vc .n{position:absolute;left:36px;top:30px;font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:.2em;color:var(--blue)}
-  .cyc{position:absolute;left:0;right:0;top:120px;text-align:center;font-family:'Montserrat';font-weight:800;font-size:40px;color:var(--ink);height:60px;overflow:hidden}
-  .cyc span{position:absolute;left:0;right:0}
-  #b3{left:0;top:0;width:1920px;height:1080px}
+  .vc{position:absolute;top:390px;width:400px;height:460px;overflow:hidden}
+  .vc .im{position:absolute;left:0;top:0;width:400px;height:270px;overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 35%,#fbfcfe 0%,#eef1f6 55%,#dfe4ec 100%)}
+  .vc .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply}
+  .vc .im img.cover{object-fit:cover;mix-blend-mode:normal}
+  .vc .tx{position:absolute;left:30px;right:26px;top:300px;font-family:'Inter';font-weight:600;font-size:30px;line-height:1.22}
+  .vc .n{position:absolute;left:18px;top:16px;z-index:2;font-family:'Space Grotesk';font-weight:700;font-size:16px;letter-spacing:.2em;color:#EAF5FD;background:rgba(2,9,19,.85);padding:7px 12px;border-radius:16px}
   #b3h{left:120px;top:190px}
   #b3h .title{font-size:66px;margin-top:14px}
   #lim{left:1180px;top:420px;width:640px}
   #lim .li{font-size:30px}
-  #b4{left:0;top:0;width:1920px;height:1080px}
   #b4h{left:120px;top:200px}
   #b4h .title{font-size:72px;margin-top:14px}
   #v1{left:120px;top:440px}
@@ -41,24 +36,24 @@
   <div class="glow spot" id="spot"></div>
   <div class="glow spot2"></div>
   <div id="cam">
-    <div class="abs" id="mat"></div>
-    <svg class="abs" id="bands" viewBox="0 0 1920 1080">
-      <defs><filter id="bsh" x="-20%" y="-40%" width="140%" height="190%"><feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#000" flood-opacity=".55"/></filter></defs>
-      <g id="bandset"></g>
-    </svg>
+    <!-- A: producto -->
+    <div class="pcard" id="hero" style="left:900px;top:170px;width:900px;height:540px"><div class="ly"><img src="img/bandas/lote4.jpg" alt=""><div class="brand">Decathlon <b>·</b> Domyos</div><div class="feat">Lote de 4 bandas · 10 a 40 kg</div></div></div>
+    <div class="pcard hm" style="left:900px;top:735px;width:270px;height:270px"><div class="ly"><img src="img/bandas/minibandas.jpg" alt=""><div class="brand">Minibandas</div></div></div>
+    <div class="pcard hm" style="left:1215px;top:745px;width:270px;height:270px"><div class="ly"><img src="img/bandas/kit.jpg" alt=""><div class="brand">Kit con asas</div></div></div>
+    <div class="pcard hm" style="left:1530px;top:735px;width:270px;height:270px"><div class="ly"><img src="img/bandas/naranja.jpg" alt=""><div class="brand">Banda larga</div></div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Material para casa y viaje</div>
       <div class="title" id="ht">Bandas<br>elásticas</div>
       <div class="sub" id="hs">Un pequeño gimnasio que <em>cabe en la mochila</em></div>
     </div>
 
-    <!-- B: ventajas -->
+    <!-- B: ventajas con fotos -->
     <div class="abs" id="b2">
       <div class="abs" id="b2h"><div class="kicker">Ventajas</div><div class="title" id="b2t">Pequeñas, ligeras y <em>versátiles</em></div></div>
-      <div class="card vc" id="v_a" style="left:120px"><svg width="400" height="260" viewBox="0 0 400 260"><g id="ga"></g></svg><div class="n">01</div><div class="tx">Ocupan muy poco espacio</div></div>
-      <div class="card vc" id="v_b" style="left:546px"><svg width="400" height="260" viewBox="0 0 400 260"><g id="gb"></g></svg><div class="n">02</div><div class="tx">Fáciles de llevar a cualquier sitio</div></div>
-      <div class="card vc" id="v_c" style="left:972px"><div class="cyc" id="cyc"><span>Remos</span><span>Press</span><span>Sentadilla</span><span>Face pull</span><span>Aperturas</span></div><div class="n">03</div><div class="tx">Permiten muchos ejercicios distintos</div></div>
-      <div class="card vc" id="v_d" style="left:1398px"><svg width="400" height="260" viewBox="0 0 400 260"><g id="gd"></g></svg><div class="n">04</div><div class="tx">Muy útiles si entrenas en casa</div></div>
+      <div class="card vc" id="v_a" style="left:120px"><div class="im"><img src="img/bandas/verde.jpg" alt=""></div><div class="n">01</div><div class="tx">Ocupan muy poco espacio</div></div>
+      <div class="card vc" id="v_b" style="left:546px"><div class="im"><img src="img/bandas/bolsa.jpg" alt=""></div><div class="n">02</div><div class="tx">Fáciles de llevar a cualquier sitio</div></div>
+      <div class="card vc" id="v_c" style="left:972px"><div class="im"><img class="cover cyc" src="img/bandas/uso1.jpg" alt=""><img class="cover cyc" src="img/bandas/uso2.jpg" alt=""><img class="cover cyc" src="img/bandas/uso3.jpg" alt=""></div><div class="n">03</div><div class="tx">Permiten muchos ejercicios distintos</div></div>
+      <div class="card vc" id="v_d" style="left:1398px"><div class="im"><img src="img/bandas/mano.jpg" alt=""></div><div class="n">04</div><div class="tx">Muy útiles si entrenas en casa</div></div>
     </div>
 
     <!-- C: tensión -->
@@ -87,6 +82,7 @@
       <div id="v1"></div>
       <div id="v2"></div>
       <div class="abs" id="b4n">Un gran complemento, no un sustituto del gimnasio.</div>
+      <div class="pcard" id="dpile" style="left:1240px;top:300px;width:580px;height:580px"><div class="ly"><img src="img/bandas/pila.jpg" alt=""><div class="brand">Decathlon <b>·</b> Domyos</div></div></div>
     </div>
   </div>
   <div class="grain"></div><div class="vig"></div>
@@ -94,43 +90,7 @@
 
 <script src="shared/kit.js"></script>
 <script>
-const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim, rng } = K;
-
-/* ---------- bandas vistas desde arriba ---------- */
-function loopPath(cx, cy, w, h) {
-  const r = h / 2;
-  return `M${cx - w / 2 + r} ${cy - r} H${cx + w / 2 - r} A${r} ${r} 0 0 1 ${cx + w / 2 - r} ${cy + r} H${cx - w / 2 + r} A${r} ${r} 0 0 1 ${cx - w / 2 + r} ${cy - r} Z`;
-}
-function band(d, col, wid) {
-  return `<path d="${d}" fill="none" stroke="#000" stroke-opacity=".35" stroke-width="${wid + 4}" transform="translate(0 4)"/>
-    <path d="${d}" fill="none" stroke="${col[0]}" stroke-width="${wid}"/>
-    <path d="${d}" fill="none" stroke="${col[1]}" stroke-width="${wid * 0.55}"/>
-    <path d="${d}" fill="none" stroke="#ffffff" stroke-opacity=".22" stroke-width="${Math.max(2, wid * 0.12)}" transform="translate(0 -${wid * 0.22})"/>`;
-}
-const COLS = [['#5f86d9', '#8CB4F5'], ['#3a6be0', '#6D9CFF'], ['#0f3a9e', '#1f57d6'], ['#6a3bd1', '#8450EA'], ['#9b82e0', '#B79BF3']];
-const BANDS = [
-  { cx: 1430, cy: 330, w: 820, h: 120, wid: 22, c: 0, r: -8 },
-  { cx: 1400, cy: 470, w: 860, h: 130, wid: 30, c: 1, r: -5 },
-  { cx: 1420, cy: 615, w: 840, h: 136, wid: 40, c: 2, r: -3 },
-  { cx: 1390, cy: 770, w: 800, h: 140, wid: 52, c: 3, r: -6 },
-];
-const MINI = [
-  { cx: 1100, cy: 905, w: 220, h: 96, wid: 30, c: 4, r: 8 },
-  { cx: 1370, cy: 915, w: 220, h: 96, wid: 34, c: 1, r: -4 },
-  { cx: 1640, cy: 905, w: 220, h: 96, wid: 38, c: 3, r: 6 },
-];
-$('#bandset').innerHTML = [...BANDS, ...MINI].map((b, i) =>
-  `<g class="bd" data-i="${i}" filter="url(#bsh)"><g transform="rotate(${b.r} ${b.cx} ${b.cy})">${band(loopPath(b.cx, b.cy, b.w, b.h), COLS[b.c], b.wid)}</g></g>`).join('');
-const ALL = [...BANDS, ...MINI];
-
-/* pictogramas de línea */
-const LS = 'fill="none" stroke="#8CB4F5" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"';
-$('#ga').innerHTML = `<g id="gaBand">${band(loopPath(200, 130, 300, 60), COLS[1], 16)}</g>
-  <g id="gaRoll" opacity="0"><circle cx="200" cy="130" r="46" fill="none" stroke="#3a6be0" stroke-width="16"/><circle cx="200" cy="130" r="30" fill="none" stroke="#6D9CFF" stroke-width="12"/><circle cx="200" cy="130" r="16" fill="none" stroke="#8CB4F5" stroke-width="8"/></g>`;
-$('#gb').innerHTML = `<g ${LS}><path d="M140 96 C140 70 160 58 200 58 C240 58 260 70 260 96"/><rect x="118" y="96" width="164" height="140" rx="30"/><path d="M150 150 H250 V200 H150 Z"/></g>
-  <g id="gbBand">${band(loopPath(200, 40, 120, 34), COLS[3], 12)}</g>`;
-$('#gd').innerHTML = `<path id="house" d="M110 226 V130 L200 60 L290 130 V226 Z M170 226 V170 H230 V226" ${LS}/>
-  <g id="gdBand" opacity="0">${band(loopPath(200, 200, 140, 30), COLS[0], 10)}</g>`;
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
 
 list($('#lim .plist'), [['con', 'Cuesta medir y progresar la carga con precisión'], ['con', 'Poca tensión al inicio del movimiento'], ['con', 'Se quedan cortas para cargas altas de pierna y espalda']]);
 verdict($('#v1'), 1, '', 'Si entrenas en casa');
@@ -138,32 +98,22 @@ verdict($('#v2'), 0, '', 'Si entrenas en el gimnasio');
 
 K.scene({
   num: 4, name: 'Bandas elásticas', duration: 25,
-  stills: [4.2, 10.4, 16.6, 23.2],
+  stills: [4.4, 10.4, 16.8, 23.4],
   render(t) {
     set($('#spot'), { x: Math.sin(t * 0.3) * 50, s: 1 + Math.sin(t * 0.5) * 0.04 });
 
-    /* --- A: bodegón cenital --- */
-    const toSide = P(t, 5.8, 1.1, 'inOut'), back = P(t, 18.6, 1.1, 'inOut');
-    // la esterilla y las bandas se apartan en B/C y vuelven (más pequeñas) en D
-    const matX = lerp(0, 1000, toSide) - back * 1000 + back * 120, matS = lerp(1, 0.9, toSide) - back * 0.15, matO = lerp(1, 0.05, toSide) + back * 0.65;
-    set($('#mat'), { x: matX, s: matS, o: P(t, 0, 0.8) * matO, r: Math.sin(t * 0.2) * 0.3 });
-    $$('.bd').forEach((g, i) => {
-      const b = ALL[i], t0 = 0.5 + i * 0.22;
-      const d = P(t, t0, 0.8, 'out4');
-      const breathe = Math.sin(t * 1.3 + i) * (i < 4 ? 0.006 : 0.012);
-      const s = lerp(1.18, 1, d) + breathe;
-      const ox = 960 + 0, oy = 540;
-      // escala alrededor del centro de la esterilla para acompañarla
-      const mcx = 1420, mcy = 580;
-      const S = matS;
-      const X = (b.cx - mcx) * (S - 1) + matX;
-      const Y = (b.cy - mcy) * (S - 1);
-      g.setAttribute('transform', `translate(${X.toFixed(1)} ${Y.toFixed(1)}) translate(${b.cx} ${b.cy}) scale(${(s * S).toFixed(4)}) rotate(${((1 - d) * (i % 2 ? 8 : -8)).toFixed(2)}) translate(${-b.cx} ${-b.cy - (1 - d) * 30})`);
-      g.setAttribute('opacity', (P(t, t0, 0.4) * matO).toFixed(3));
+    /* --- A: producto --- */
+    const out = P(t, 5.8, 0.7, 'in2');
+    const hi = P(t, 0.4, 1.1, 'out4');
+    set($('#hero'), { y: (1 - hi) * 80 + out * 40 + Math.sin(t * 0.9) * 4, s: lerp(0.94, 1, hi), o: P(t, 0.4, 0.6) * (1 - out) });
+    set($('#hero img'), { s: 1 + 0.05 * clamp(t / 6) });
+    $$('.hm').forEach((c, i) => {
+      const w = P(t, 1.4 + i * 0.22, 0.8, 'back');
+      set(c, { y: (1 - P(t, 1.4 + i * 0.22, 0.8, 'out4')) * 60 + Math.sin(t * 1.1 + i) * 5 + out * 40, s: lerp(0.7, 1, w), r: [-4, 3, -2][i] * (1 - w) + [-2, 1.5, 2.5][i], o: P(t, 1.4 + i * 0.22, 0.4) * (1 - out) });
     });
-    words($('#hk'), t, 0.6, 5.6, 0.04);
-    words($('#ht'), t, 0.8, 5.65, 0.08);
-    words($('#hs'), t, 1.5, 5.7, 0.04);
+    words($('#hk'), t, 0.5, 5.6, 0.04);
+    words($('#ht'), t, 0.7, 5.65, 0.08);
+    words($('#hs'), t, 1.4, 5.7, 0.04);
 
     /* --- B: ventajas --- */
     const b2 = win(t, 6.1, 12.4, 0.6, 0.6);
@@ -171,20 +121,18 @@ K.scene({
     $('#b2').style.visibility = t > 6.0 && t < 13.1 ? 'visible' : 'hidden';
     words($('#b2h .kicker'), t, 6.1, null, 0.04);
     words($('#b2t'), t, 6.25, null, 0.06);
-    ['#v_a', '#v_b', '#v_c', '#v_d'].forEach((id, i) => { const w = P(t, 6.8 + i * 0.18, 0.9, 'out4'); set($(id), { y: (1 - w) * 60, o: P(t, 6.8 + i * 0.18, 0.5) }); });
-    // 01: la banda se enrolla
-    const roll = P(t, 8.0, 0.9, 'inOut');
-    svgT($('#gaBand'), { sx: 1 - roll * 0.7, sy: 1, cx: 200, cy: 130, o: 1 - P(t, 8.5, 0.4) });
-    svgT($('#gaRoll'), { s: 0.5 + 0.5 * P(t, 8.5, 0.6, 'back'), cx: 200, cy: 130, o: P(t, 8.5, 0.3) });
-    // 02: cae dentro de la mochila
-    const drop = P(t, 8.4, 0.8, 'in2');
-    svgT($('#gbBand'), { y: drop * 130, o: 1 - P(t, 9.1, 0.2) });
-    // 03: ejercicios en bucle
-    const sp = $$('#cyc span'); const k = Math.max(0, (t - 8.0) / 0.9);
-    sp.forEach((s, i) => { const ph = k - i; const v = clamp(ph) - clamp(ph - 1); const y = (1 - clamp(ph)) * 60 - clamp(ph - 1) * 60; const last = i === sp.length - 1 && ph > 1; set(s, { y: last ? 0 : y, o: last ? 1 : v }); });
-    // 04: casa
-    draw($('#house'), P(t, 8.6, 1.2, 'inOut'));
-    svgT($('#gdBand'), { y: (1 - P(t, 9.6, 0.6, 'out4')) * -30, o: P(t, 9.6, 0.4) });
+    ['#v_a', '#v_b', '#v_c', '#v_d'].forEach((id, i) => {
+      const w = P(t, 6.8 + i * 0.2, 0.9, 'out4');
+      set($(id), { y: (1 - w) * 60, o: P(t, 6.8 + i * 0.2, 0.5) });
+      $$('img', $(id)).forEach((im) => { if (!im.classList.contains('cyc')) set(im, { s: 1 + 0.06 * clamp((t - 6.8) / 6) }); });
+    });
+    // 03: tres fotos de entrenamiento en bucle
+    const cy = $$('#v_c .cyc');
+    const f = Math.max(0, (t - 7.0) / 1.6), cur = Math.floor(f) % 3, nxt = (cur + 1) % 3, fr = f - Math.floor(f);
+    cy.forEach((im, i) => {
+      im.style.zIndex = i === nxt ? 2 : i === cur ? 1 : 0;
+      set(im, { o: i === cur ? 1 : i === nxt ? clamp((fr - 0.8) / 0.2) : 0, s: 1.03 + 0.05 * (i === cur ? fr : 0) });
+    });
 
     /* --- C: gráfica de tensión --- */
     const b3 = win(t, 12.7, 18.4, 0.6, 0.6);
@@ -208,6 +156,9 @@ K.scene({
     $('#b4').style.visibility = t > 18.7 ? 'visible' : 'hidden';
     words($('#b4h .kicker'), t, 18.8, null, 0.04);
     words($('#b4t'), t, 18.95, null, 0.06);
+    const dp = P(t, 19.0, 1.1, 'out4');
+    set($('#dpile'), { y: (1 - dp) * 70 + Math.sin(t * 0.9) * 5, s: lerp(0.94, 1, dp), o: P(t, 19.0, 0.6) });
+    set($('#dpile img'), { s: 1 + 0.05 * clamp((t - 19) / 6) });
     verdictAnim($('#v1'), t, 19.6);
     verdictAnim($('#v2'), t, 20.2);
     words($('#b4n'), t, 21.6, null, 0.04);

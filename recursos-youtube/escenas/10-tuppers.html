@@ -23,6 +23,7 @@
   #d4h{left:120px;top:250px;width:900px}
   #d4h .title{font-size:80px;margin-top:14px}
   #verd{left:120px;top:620px}
+  #hero,#stack{display:none}
 </style>
 </head>
 <body>
@@ -45,6 +46,11 @@
       <g id="stack"></g>
     </svg>
 
+    <div class="pcard" id="tA" style="left:880px;top:200px;width:600px;height:500px"><div class="ly"><img src="img/tuppers/abierto.jpg" alt=""><div class="brand">Decathlon <b>·</b> Quechua</div><div class="feat">Recipiente hermético 1 L</div></div></div>
+    <div class="pcard" id="tB" style="left:1420px;top:170px;width:420px;height:252px"><div class="ly"><img src="img/tuppers/acero.jpg" alt=""><div class="brand">Acero · 0,35 y 0,65 L</div></div></div>
+    <div class="pcard" id="tC" style="left:1440px;top:470px;width:400px;height:333px"><div class="ly"><img src="img/tuppers/bolsa.jpg" alt=""><div class="brand">Bolsa isotérmica</div></div></div>
+    <div class="pcard" id="tD" style="left:1220px;top:400px;width:600px;height:500px"><div class="ly"><img src="img/tuppers/cerrado.jpg" alt=""><div class="brand">Listo para llevar</div></div></div>
+    <div class="pcard" id="tE" style="left:1220px;top:300px;width:600px;height:500px"><div class="ly"><img src="img/tuppers/bolsa.jpg" alt=""><div class="brand">Decathlon <b>·</b> Quechua</div></div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Organización de comidas</div>
       <div class="title" id="ht">Tuppers y<br>recipientes<br>herméticos</div>
@@ -190,6 +196,12 @@ K.scene({
       tp.setAttribute('opacity', (P(t, 14.4 + i * 0.3, 0.4) * (1 - cOut)).toFixed(3));
       tp.setAttribute('transform', `translate(0 ${((1 - w) * -70 + Math.sin(t * 1.2 + i) * 3).toFixed(1)})`);
     });
+
+    /* --- fotos de producto --- */
+    const pc = (id, a, b, d = 0.9) => { const w = win(t, a, b, d, 0.6, 'out4', 'in2'); set($(id), { y: (1 - w.i) * 70 + w.o * 30 + Math.sin(t * 0.9 + a) * 4, s: lerp(0.93, 1, w.i), o: w.v }); set($(id + ' img'), { s: 1 + 0.05 * clamp((t - a) / 6) }); };
+    pc('#tA', 0.4, 6.5); pc('#tB', 0.9, 6.5); pc('#tC', 1.3, 6.5);
+    pc('#tD', 14.4, 18.8);
+    pc('#tE', 19.3, null, 1.1);
 
     /* --- D: veredicto --- */
     $('#d4h').style.visibility = t > 19.2 ? 'visible' : 'hidden';

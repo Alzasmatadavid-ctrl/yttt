@@ -25,6 +25,7 @@
   #d4h{left:120px;top:250px;width:900px}
   #d4h .title{font-size:84px;margin-top:14px}
   #verd{left:120px;top:620px}
+  #kscale,#kbowl,#eggs,#alms,#oild{display:none}
 </style>
 </head>
 <body>
@@ -87,6 +88,10 @@
       </g>
     </svg>
 
+    <div class="photo" id="kc1" style="left:860px;top:200px;width:960px;height:576px"><img src="img/cocina/uso.jpg" alt=""><div class="brand">Joseph Joseph <b>·</b> SwitchScale</div></div>
+    <div class="pcard" id="kc2" style="left:1520px;top:660px;width:330px;height:275px"><div class="ly"><img src="img/cocina/producto.jpg" alt=""></div></div>
+    <div class="pcard" id="kc3" style="left:960px;top:300px;width:600px;height:500px"><div class="ly"><img src="img/cocina/quinoa.jpg" alt=""><div class="brand">Pesado al gramo</div></div></div>
+    <div class="photo" id="kc4" style="left:1180px;top:300px;width:640px;height:533px"><img src="img/cocina/display.jpg" alt=""><div class="brand">Joseph Joseph <b>·</b> SwitchScale</div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Nutrición sin adivinar</div>
       <div class="title" id="ht">Báscula<br>de cocina</div>
@@ -95,7 +100,7 @@
 
     <div class="abs" id="b2h"><div class="kicker" id="b2k">La diferencia</div><div class="title" id="b2t">A ojo vs <em>con báscula</em></div></div>
     <div class="lab2" id="l1" style="left:260px"><span class="chip coral">A ojo · ¿cuánto es?</span></div>
-    <div class="lab2" id="l2" style="left:960px"><span class="chip solid">Con báscula · 125 g</span></div>
+    <div class="lab2" id="l2" style="left:960px"><span class="chip solid">Con báscula · 280 g</span></div>
     <div class="abs sub" id="b2n" style="font-size:28px">Sobre todo en aceites, frutos secos y salsas: <em>a ojo es fácil equivocarse.</em></div>
 
     <div class="abs" id="b3h"><div class="kicker" id="b3k">Una herramienta para aprender</div><div class="title" id="b3t">Con el tiempo, <em>entrenas el ojo</em></div></div>
@@ -180,6 +185,19 @@ K.scene({
     $$('.pnode').forEach((g, i) => { const w = P(t, 13.6 + i * 0.6, 0.7, 'out4'); g.setAttribute('opacity', (w * (1 - cEnd)).toFixed(3)); g.setAttribute('transform', `translate(0 ${((1 - w) * 30).toFixed(1)})`); });
     ['#n0', '#n1', '#n2'].forEach((id, i) => set($(id), { y: (1 - P(t, 13.8 + i * 0.6, 0.7, 'out4')) * 24, o: P(t, 13.8 + i * 0.6, 0.5) * (1 - cEnd) }));
     $$('#chips3 .chip').forEach((c, i) => set(c, { s: 0.7 + 0.3 * P(t, 15.8 + i * 0.18, 0.6, 'back'), o: P(t, 15.8 + i * 0.18, 0.3) * (1 - cEnd) }));
+
+    /* --- fotos de producto --- */
+    const k1 = win(t, 0.3, 6.1, 1.1, 0.7, 'out4', 'in2');
+    set($('#kc1'), { y: (1 - k1.i) * 80 + k1.o * 40 + Math.sin(t * 0.8) * 4, s: lerp(0.94, 1, k1.i), o: k1.v });
+    set($('#kc1 img'), { s: 1.02 + 0.06 * clamp(t / 6) });
+    const k2 = win(t, 1.5, 6.1, 0.8, 0.6, 'back', 'in2');
+    set($('#kc2'), { y: (1 - P(t, 1.5, 0.8, 'out4')) * 50 + Math.sin(t * 1.1) * 5, s: lerp(0.7, 1, k2.i), r: 3 - 2 * k2.i, o: k2.v });
+    const k3 = win(t, 7.2, 12.3, 0.9, 0.6, 'out4', 'in2');
+    set($('#kc3'), { y: (1 - k3.i) * 60 + Math.sin(t * 0.9) * 4, s: lerp(0.94, 1, k3.i), o: k3.v });
+    set($('#kc3 img'), { s: 1 + 0.05 * clamp((t - 7.2) / 5) });
+    const k4 = P(t, 19.0, 1.2, 'out4');
+    set($('#kc4'), { y: (1 - k4) * 60 + Math.sin(t * 0.9) * 4, s: lerp(0.94, 1, k4), o: t > 18.9 ? k4 : 0 });
+    set($('#kc4 img'), { s: 1.02 + 0.05 * clamp((t - 19) / 6) });
 
     /* --- D: veredicto --- */
     $('#d4h').style.visibility = t > 18.8 ? 'visible' : 'hidden';

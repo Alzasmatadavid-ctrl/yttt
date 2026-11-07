@@ -42,7 +42,7 @@
   .part .q{position:absolute;right:26px;top:22px;font-family:'Playfair Display';font-style:italic;font-weight:700;font-size:56px;color:var(--blue);text-shadow:var(--glow)}
   .part .s{font-family:'Inter';font-size:21px;color:var(--ink2);margin-top:8px}
   #b3n{left:0;right:0;top:850px;text-align:center}
-  #verd{left:480px;top:740px}
+  #verd{left:480px;top:760px}
   #b4h{left:0;right:0;top:180px;text-align:center}
   #b4h .title{font-size:76px;margin-top:14px}
 </style>
@@ -51,9 +51,12 @@
 <div id="stage">
   <div class="glow spot" id="spot"></div>
   <div id="cam">
-    <div class="abs" id="floor3d"></div>
-    <div class="abs" id="sshadow"></div>
-    <div class="abs" id="scaleWrap"><div id="scale3d"></div></div>
+    <div class="pcard" id="hero" style="left:860px;top:220px;width:960px;height:576px"><div class="ly"><img src="img/basculas/s100_34.jpg" alt=""><div class="brand">Decathlon <b>·</b> Scale 100</div><div class="feat">Báscula de cristal</div></div></div>
+    <div class="card abs" id="readout" style="left:1460px;top:150px;width:360px;padding:26px 30px;background:linear-gradient(160deg,#16294f,#081227)">
+      <div class="label" style="font-size:16px">Lectura de ejemplo</div>
+      <div style="font-family:'Space Grotesk';font-weight:700;font-size:76px;color:#8CB4F5;text-shadow:0 0 18px rgba(109,156,255,.8);margin-top:6px"><span id="kg">0,0</span><span style="font-size:30px;margin-left:8px">kg</span></div>
+    </div>
+    <div class="pcard" id="dcard" style="left:770px;top:330px;width:380px;height:380px"><div class="ly"><img src="img/basculas/s100_top.jpg" alt=""></div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Seguimiento semanal</div>
       <div class="title" id="ht">Báscula<br>corporal</div>
@@ -83,7 +86,7 @@
     <!-- C: lo que el número no dice -->
     <div class="abs" id="b3">
       <div class="abs" id="b3h"><div class="kicker">Su gran limitación</div><div class="title" id="b3t">Un número que <em>lo mezcla todo</em></div></div>
-      <div class="abs" id="big"><span id="bign">78,4</span><small>kg</small></div>
+      <div class="abs" id="big"><span id="bign">68,5</span><small>kg</small></div>
       <div class="card part" id="pt0" style="left:205px"><div class="k">Grasa</div><div class="s">Lo que quieres perder</div><div class="q">?</div></div>
       <div class="card part" id="pt1" style="left:585px"><div class="k">Músculo</div><div class="s">Lo que quieres ganar</div><div class="q">?</div></div>
       <div class="card part" id="pt2" style="left:965px"><div class="k">Agua</div><div class="s">Varía cada día</div><div class="q">?</div></div>
@@ -102,11 +105,6 @@
 <script>
 const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, rng } = K;
 
-/* ---------- báscula con grosor (capas apiladas en 3D) ---------- */
-const s3 = $('#scale3d');
-let layers = '';
-for (let i = 14; i >= 1; i--) layers += `<div class="slab" style="transform:translateZ(${-i * 2.2}px);background:${i > 11 ? '#04070d' : '#0b1222'};box-shadow:inset 0 0 0 1.5px rgba(140,180,245,${i < 3 ? 0.22 : 0.06})"></div>`;
-s3.innerHTML = layers + `<div class="slab top"><div class="pad" style="left:110px;top:220px"></div><div class="pad" style="left:290px;top:220px"></div><div class="disp"><span id="kg">0,0</span><small>kg</small></div></div>`;
 
 /* ---------- datos ilustrativos: oscilación diaria + tendencia descendente ---------- */
 const R = rng(7), N = 56, pts = [];
@@ -131,24 +129,18 @@ K.scene({
     set($('#spot'), { x: Math.sin(t * 0.3) * 40, s: 1 + Math.sin(t * 0.5) * 0.03 });
 
     /* --- A: báscula en el suelo --- */
-    const a = win(t, 0.2, 5.6, 1.2, 0.8, 'out4', 'inOut');
-    const ry = lerp(-16, -8, P(t, 0, 6, 'sine'));
-    s3.style.transform = `rotateX(58deg) rotateZ(${ry.toFixed(2)}deg) translateZ(${((1 - a.i) * 140).toFixed(1)}px)`;
-    const bk = P(t, 19.0, 1.1, 'out4');
-    if (t < 18.9) {
-      set($('#scaleWrap'), { o: a.v, y: a.o * 40, s: 1.16 });
-      set($('#sshadow'), { o: a.v * (0.6 + 0.4 * a.i), s: lerp(1.5, 1.16, a.i) });
-    } else {
-      set($('#scaleWrap'), { x: -330, y: lerp(-40, -90, bk), s: 0.56, o: bk });
-      set($('#sshadow'), { x: -330, y: -170, s: 0.56, o: bk * 0.8 });
-    }
-    $('#floor3d').style.transform = `perspective(1200px) rotateX(64deg) translateY(${(-t * 20).toFixed(1)}px)`;
-    set($('#floor3d'), { o: (1 - P(t, 5.6, 0.8)) * P(t, 0, 1) + P(t, 18.6, 1) * 0.6 });
-    // el display cuenta hasta el peso de ejemplo
+    const a = win(t, 0.3, 5.6, 1.1, 0.7, 'out4', 'in2');
+    set($('#hero'), { y: (1 - a.i) * 80 + a.o * 40 + Math.sin(t * 0.8) * 4, s: lerp(0.94, 1, a.i), o: a.v });
+    set($('#hero img'), { s: 1 + 0.06 * clamp(t / 6) });
+    const ro = win(t, 1.3, 5.5, 0.8, 0.6, 'back', 'in2');
+    set($('#readout'), { y: (1 - P(t, 1.3, 0.8, 'out4')) * 30 + Math.sin(t * 1.1) * 4, s: lerp(0.8, 1, ro.i), o: ro.v });
+    // el número cuenta hasta el peso de ejemplo y parpadea al fijarse
     const c = P(t, 1.6, 1.6, 'out4');
     const flick = t > 3.2 && t < 3.9 ? (Math.floor(t * 8) % 2 ? 1 : 0.35) : 1;
-    $('#kg').textContent = (c * 78.4).toFixed(1).replace('.', ',');
-    $('#kg').parentElement.style.opacity = P(t, 1.2, 0.4) * flick;
+    $('#kg').textContent = (c * 68.5).toFixed(1).replace('.', ',');
+    $('#kg').parentElement.style.opacity = flick;
+    const bk = P(t, 19.0, 1.1, 'out4');
+    set($('#dcard'), { y: (1 - bk) * 50 + Math.sin(t * 0.9) * 4, s: lerp(0.9, 1, bk), o: t > 18.9 ? bk : 0 });
     words($('#hk'), t, 0.5, 5.4, 0.04);
     words($('#ht'), t, 0.7, 5.45, 0.08);
     words($('#hs'), t, 1.3, 5.5, 0.04);

@@ -47,6 +47,8 @@
     <svg class="abs" id="rack" viewBox="0 0 900 900"><g fill="#1b2c52"><rect x="120" y="80" width="38" height="820"/><rect x="560" y="80" width="38" height="820"/><rect x="100" y="80" width="520" height="26"/><rect x="40" y="330" width="660" height="16" rx="8" fill="#2a3e6c"/><rect x="0" y="270" width="40" height="140" rx="10" fill="#22355f"/><rect x="700" y="270" width="40" height="140" rx="10" fill="#22355f"/></g></svg>
   </div>
   <div id="cam">
+    <div class="pcard" id="tp1" style="left:1180px;top:170px;width:560px;height:700px"><div class="ly"><img src="img/tripode/movil.jpg" alt=""><div class="brand">Ulanzi <b>·</b> MT-44</div><div class="feat">Trípode extensible</div></div></div>
+    <div class="pcard" id="tp2" style="left:1620px;top:600px;width:240px;height:300px"><div class="ly"><img src="img/tripode/tripode.jpg" alt=""></div></div>
     <svg class="abs" id="art" viewBox="0 0 1920 1080">
       <defs>
         <linearGradient id="leg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3b465e"/><stop offset=".5" stop-color="#8a96ae"/><stop offset="1" stop-color="#2a3346"/></linearGradient>
@@ -54,35 +56,6 @@
         <radialGradient id="lens" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#4a6fc4"/><stop offset=".4" stop-color="#0d1630"/><stop offset="1" stop-color="#02050c"/></radialGradient>
         <filter id="tsh" x="-30%" y="-20%" width="160%" height="140%"><feDropShadow dx="0" dy="24" stdDeviation="20" flood-color="#000" flood-opacity=".6"/></filter>
       </defs>
-      <ellipse id="tshadow" cx="1360" cy="985" rx="260" ry="26" fill="#000" opacity=".55" style="filter:blur(14px)"/>
-      <g id="tri" filter="url(#tsh)">
-        <!-- patas -->
-        <path d="M1356 640 L1180 975" stroke="url(#leg)" stroke-width="22" stroke-linecap="round"/>
-        <path d="M1364 640 L1540 975" stroke="url(#leg)" stroke-width="22" stroke-linecap="round"/>
-        <path d="M1360 640 L1362 940" stroke="url(#leg)" stroke-width="18" stroke-linecap="round" opacity=".8"/>
-        <path d="M1356 640 L1262 820" stroke="#1a2131" stroke-width="30" stroke-linecap="round"/>
-        <path d="M1364 640 L1458 820" stroke="#1a2131" stroke-width="30" stroke-linecap="round"/>
-        <rect x="1250" y="806" width="26" height="22" rx="5" fill="#6D9CFF" transform="rotate(28 1262 817)"/>
-        <rect x="1446" y="806" width="26" height="22" rx="5" fill="#6D9CFF" transform="rotate(-28 1458 817)"/>
-        <circle cx="1180" cy="975" r="13" fill="#0c111c"/><circle cx="1540" cy="975" r="13" fill="#0c111c"/><circle cx="1362" cy="942" r="11" fill="#0c111c"/>
-        <!-- buje y columna -->
-        <rect x="1322" y="616" width="76" height="48" rx="14" fill="#1a2131" stroke="rgba(140,180,245,.25)"/>
-        <rect x="1348" y="520" width="24" height="100" rx="6" fill="url(#leg)"/>
-        <circle cx="1360" cy="512" r="26" fill="#1a2131" stroke="rgba(140,180,245,.3)" stroke-width="2"/>
-        <circle cx="1352" cy="504" r="8" fill="#8a96ae" opacity=".6"/>
-        <!-- móvil (vista trasera) con pinza -->
-        <g id="phone">
-          <rect x="1250" y="160" width="220" height="330" rx="34" fill="url(#ph)" stroke="rgba(140,180,245,.35)" stroke-width="2"/>
-          <rect x="1270" y="182" width="96" height="104" rx="24" fill="#0a0f1a" stroke="rgba(140,180,245,.25)"/>
-          <circle cx="1298" cy="210" r="17" fill="url(#lens)" stroke="#3a4560" stroke-width="3"/>
-          <circle cx="1298" cy="258" r="17" fill="url(#lens)" stroke="#3a4560" stroke-width="3"/>
-          <circle cx="1340" cy="234" r="15" fill="url(#lens)" stroke="#3a4560" stroke-width="3"/>
-          <rect x="1236" y="300" width="248" height="58" rx="12" fill="#1a2131" stroke="rgba(140,180,245,.3)" stroke-width="2"/>
-          <rect x="1236" y="310" width="20" height="38" rx="6" fill="#6D9CFF"/><rect x="1464" y="310" width="20" height="38" rx="6" fill="#6D9CFF"/>
-          <rect x="1346" y="358" width="28" height="140" rx="6" fill="#1a2131"/>
-          <path d="M1260 170 L1420 170" stroke="#fff" stroke-width="3" opacity=".12" stroke-linecap="round"/>
-        </g>
-      </g>
       <g id="recTag"><rect x="1500" y="196" width="190" height="56" rx="28" fill="rgba(6,16,36,.85)" stroke="rgba(140,180,245,.35)"/><circle id="recDot" cx="1530" cy="224" r="9" fill="#ff5a4f"/>
         <text x="1552" y="232" font-family="Space Grotesk" font-weight="700" font-size="22" letter-spacing="2" fill="#EAF5FD">REC</text><text id="recT" x="1610" y="232" font-family="Space Grotesk" font-weight="700" font-size="20" fill="#A9BFE8">00:03</text></g>
     </svg>
@@ -181,12 +154,13 @@ K.scene({
     const ai = P(t, 0.3, 1.3, 'out4'), aOut = P(t, 5.7, 0.8, 'inOut'), dBack = P(t, 18.8, 1.2, 'out4');
     set($('#amb'), { o: P(t, 0, 1) * (1 - 0.6 * aOut) + 0.6 * dBack * 0, x: Math.sin(t * 0.2) * 20 });
     const triO = ai * (1 - aOut) + dBack;
-    const triX = t < 18.8 ? aOut * 300 : lerp(200, 140, dBack);
-    svgT($('#tri'), { x: triX, y: (1 - ai) * 120 + 34, o: triO });
-    $('#tshadow').setAttribute('opacity', (0.55 * triO).toFixed(3));
-    $('#tshadow').setAttribute('transform', `translate(${triX.toFixed(1)} 34)`);
+    const triX = t < 18.8 ? aOut * 300 : lerp(120, 60, dBack);
+    set($('#tp1'), { x: triX, y: (1 - ai) * 100 + Math.sin(t * 0.8) * 4, s: lerp(0.94, 1, ai), o: triO });
+    set($('#tp1 img'), { s: 1 + 0.05 * clamp(t < 18.8 ? t / 6 : (t - 18.8) / 6) });
+    const t2 = t < 18.8 ? P(t, 1.3, 0.8, 'back') * (1 - aOut) : P(t, 19.6, 0.8, 'back');
+    set($('#tp2'), { x: t < 18.8 ? triX : triX - 90, y: (1 - t2) * 40 + Math.sin(t * 1.1) * 5, s: lerp(0.7, 1, t2), r: 3 - 2 * t2, o: Math.min(1, t2 * 1.4) });
     const rt = win(t, 1.8, 5.6, 0.5, 0.4);
-    svgT($('#recTag'), { y: (1 - rt.i) * 16 + 34, o: rt.v + (t > 18.8 ? P(t, 20, 0.5) : 0), x: t > 18.8 ? 140 : 0 });
+    svgT($('#recTag'), { y: (1 - rt.i) * 16 + 34, o: rt.v + (t > 18.8 ? P(t, 20, 0.5) : 0), x: t > 18.8 ? 60 : 0 });
     $('#recDot').setAttribute('opacity', Math.floor(t * 2) % 2 ? 0.3 : 1);
     $('#recT').textContent = '00:' + String(Math.floor(Math.max(0, t - 1.8)) % 60).padStart(2, '0');
     words($('#hk'), t, 0.5, 5.5, 0.04);

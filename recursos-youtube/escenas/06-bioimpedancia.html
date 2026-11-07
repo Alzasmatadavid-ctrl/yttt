@@ -43,7 +43,6 @@
   #b4h .title{font-size:84px;margin-top:14px}
   #tips{left:120px;top:470px;display:flex;gap:18px}
   #verd{left:120px;top:640px}
-  #mini{left:1300px;top:300px;width:480px;height:480px}
 </style>
 </head>
 <body>
@@ -51,6 +50,8 @@
   <div class="glow spot" id="spot"></div>
   <div id="cam">
     <div class="abs" id="head"><div class="kicker" id="hk">Convencional vs bioimpedancia</div><div class="title" id="ht">Mide el peso. <em>Estima</em> el resto.</div></div>
+    <div class="pcard" id="sL" style="left:380px;top:380px;width:440px;height:440px"><div class="ly"><img src="img/basculas/s100_top.jpg" alt=""><div class="brand">Scale 100</div></div></div>
+    <div class="pcard" id="sR" style="left:1100px;top:380px;width:440px;height:440px"><div class="ly"><img src="img/basculas/s500_top.jpg" alt=""><div class="brand">Scale 500</div></div></div>
     <svg class="abs" id="scales" viewBox="0 0 1920 1080">
       <defs>
         <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22324f"/><stop offset=".5" stop-color="#0f182b"/><stop offset="1" stop-color="#0a1120"/></linearGradient>
@@ -58,9 +59,9 @@
         <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1f5fc"/><stop offset=".45" stop-color="#97a3ba"/><stop offset=".7" stop-color="#dfe6f2"/><stop offset="1" stop-color="#6b768c"/></linearGradient>
         <filter id="sds" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="30" stdDeviation="26" flood-color="#000" flood-opacity=".6"/></filter>
       </defs>
-      <g id="sL"></g>
-      <g id="sR"></g>
-      <g id="arc"><path id="arcP" d="M1248 540 C1248 240 1392 240 1392 540" fill="none" stroke="#B79BF3" stroke-width="6" stroke-dasharray="12 12" style="filter:drop-shadow(0 0 8px rgba(183,155,243,.9))"/></g>
+      <g id="arc"><path id="arcP" d="M1212 520 C1212 230 1392 230 1392 520" fill="none" stroke="#B79BF3" stroke-width="6" stroke-dasharray="12 12" style="filter:drop-shadow(0 0 8px rgba(183,155,243,.9))"/>
+        <g id="rings" fill="none" stroke="#B79BF3" stroke-width="4" style="filter:drop-shadow(0 0 10px rgba(183,155,243,1))">
+          <circle cx="1212" cy="503" r="46"/><circle cx="1212" cy="685" r="46"/><circle cx="1392" cy="504" r="46"/><circle cx="1392" cy="685" r="46"/></g></g>
     </svg>
     <div class="abs" id="vs">vs</div>
     <div class="abs" id="cur"><div class="label" style="color:var(--lilac)">Corriente muy débil</div></div>
@@ -71,7 +72,7 @@
     <div class="abs" id="b2">
       <div class="card abs" id="ui">
         <div class="label" style="margin-bottom:14px">Lo que te muestra la pantalla</div>
-        <div class="row"><div class="n">Peso</div><div class="tagm m">MEDIDO</div><div class="val">78,4 kg</div></div>
+        <div class="row"><div class="n">Peso</div><div class="tagm m">MEDIDO</div><div class="val">62,5 kg</div></div>
         <div class="row"><div class="n">% de grasa</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
         <div class="row"><div class="n">Masa muscular</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
         <div class="row"><div class="n">Agua corporal</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
@@ -94,7 +95,7 @@
     <div class="abs" id="b4">
       <div class="abs" id="b4h"><div class="kicker">Conclusión</div><div class="title" id="b4t">Complementaria,<br><em>no absoluta</em></div></div>
       <div class="abs" id="tips"><span class="chip">Misma hora</span><span class="chip">Mismas condiciones</span><span class="chip solid">Mira la tendencia</span></div>
-      <svg class="abs" id="mini" viewBox="0 0 480 480"><use href="#scaleBIA"/></svg>
+      <div class="pcard" id="mini" style="left:1240px;top:240px;width:580px;height:348px"><div class="ly"><img src="img/basculas/s500_34.jpg" alt=""><div class="brand">Decathlon <b>·</b> Scale 500</div><div class="feat" style="background:#B79BF3">Bioimpedancia</div></div></div>
       <div id="verd"></div>
     </div>
   </div>
@@ -126,8 +127,6 @@ function scaleSVG(bia, id) {
     ${pads}${disp}
     <rect x="6" y="6" width="428" height="428" rx="60" fill="url(#refl)"/></g>`;
 }
-$('#sL').innerHTML = `<g transform="translate(380 380)">${scaleSVG(false, 'scaleCONV')}</g>`;
-$('#sR').innerHTML = `<g transform="translate(1100 380)">${scaleSVG(true, 'scaleBIA')}</g>`;
 
 verdict($('#verd'), 0, 'Útil como dato extra, si la usas siempre igual.', 'Bioimpedancia');
 
@@ -142,10 +141,10 @@ K.scene({
     words($('#ht'), t, 0.45, 6.65, 0.06);
     const outA = P(t, 6.8, 0.7, 'inOut');
     const iL = P(t, 0.8, 1.0, 'out4'), iR = P(t, 1.05, 1.0, 'out4');
-    svgT($('#sL'), { y: (1 - iL) * 80 + outA * 60, o: iL * (1 - outA) });
+    set($('#sL'), { y: (1 - iL) * 80 + outA * 60, o: iL * (1 - outA) });
     // la de bioimpedancia se queda y se desplaza a la izquierda en B
     const toB = P(t, 6.8, 1.1, 'inOut'), outB = P(t, 12.9, 0.7, 'inOut');
-    svgT($('#sR'), { x: lerp(0, -820, toB), y: (1 - iR) * 80, o: iR * (1 - outB) });
+    set($('#sR'), { x: lerp(0, -820, toB), y: (1 - iR) * 80, o: iR * (1 - outB) });
     set($('#vs'), { o: P(t, 1.6, 0.6) * (1 - outA) });
     // pulso de corriente
     const arcIn = P(t, 2.4, 0.8, 'inOut');
@@ -153,7 +152,7 @@ K.scene({
     arc.style.strokeDashoffset = (-t * 90).toFixed(1);
     svgT($('#arc'), { x: lerp(0, -820, toB), o: arcIn * (1 - outB) * (0.85 + 0.15 * Math.sin(t * 6)) });
     set($('#cur'), { x: lerp(0, -820, toB), o: P(t, 2.8, 0.5) * (1 - P(t, 12.6, 0.4)) });
-    $$('#sR .glowpads').forEach((g) => g.setAttribute('opacity', (arcIn * (0.4 + 0.6 * Math.abs(Math.sin(t * 3)))).toFixed(3)));
+    $('#rings').setAttribute('opacity', (0.4 + 0.6 * Math.abs(Math.sin(t * 3))).toFixed(3));
     [['#cL', 1.8], ['#cR', 2.05]].forEach(([id, t0]) => set($(id), { y: (1 - P(t, t0, 0.7, 'out4')) * 20, o: P(t, t0, 0.5) * (1 - outA) }));
 
     /* --- B: medido vs estimado --- */
@@ -201,6 +200,7 @@ K.scene({
     $$('#tips .chip').forEach((ch, i) => set(ch, { s: 0.7 + 0.3 * P(t, 20.4 + i * 0.18, 0.6, 'back'), o: P(t, 20.4 + i * 0.18, 0.3) }));
     const mi = P(t, 19.6, 1.2, 'out4');
     set($('#mini'), { y: (1 - mi) * 60 + Math.sin(t * 1.2) * 6, o: mi });
+    set($('#mini img'), { s: 1 + 0.05 * clamp((t - 19.6) / 6) });
     verdictAnim($('#verd'), t, 21.2);
   },
 });

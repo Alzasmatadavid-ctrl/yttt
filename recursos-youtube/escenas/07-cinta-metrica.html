@@ -35,18 +35,6 @@
         <filter id="tds" x="-10%" y="-50%" width="120%" height="200%"><feDropShadow dx="0" dy="20" stdDeviation="16" flood-color="#000" flood-opacity=".6"/></filter>
       </defs>
 
-      <!-- A: cinta extendida -->
-      <g id="tapeG">
-        <g clip-path="url(#tapeClip)" filter="url(#tds)"><g id="tape"></g></g>
-        <g id="case" filter="url(#tds)">
-          <circle cx="0" cy="0" r="132" fill="url(#caseG)" stroke="rgba(140,180,245,.3)" stroke-width="2"/>
-          <circle cx="0" cy="0" r="96" fill="none" stroke="rgba(140,180,245,.18)" stroke-width="10"/>
-          <circle cx="0" cy="0" r="40" fill="#0a1224" stroke="#6D9CFF" stroke-width="3"/>
-          <rect x="-24" y="-152" width="48" height="30" rx="10" fill="#6D9CFF"/>
-          <rect x="110" y="18" width="34" height="78" rx="8" fill="#0a1224" stroke="rgba(140,180,245,.3)" stroke-width="2"/>
-        </g>
-      </g>
-
       <!-- B: anatomía -->
       <g id="fig">
         <path id="body" fill="url(#bodyF)" stroke="#8CB4F5" stroke-width="2.5" style="filter:drop-shadow(0 0 14px rgba(109,156,255,.45))"/>
@@ -65,6 +53,9 @@
       </g>
     </svg>
 
+    <div class="pcard" id="hero" style="left:860px;top:250px;width:960px;height:576px"><div class="ly"><img src="img/cinta/extendida.jpg" alt=""><div class="brand">Trimcal <b>·</b> Body Measure Tape</div><div class="feat">Cinta corporal retráctil</div></div></div>
+    <div class="pcard" id="hero2" style="left:1560px;top:660px;width:280px;height:280px"><div class="ly"><img src="img/cinta/producto.jpg" alt=""></div></div>
+    <div class="pcard" id="dcard" style="left:1120px;top:330px;width:700px;height:420px"><div class="ly"><img src="img/cinta/extendida.jpg" alt=""><div class="brand">Trimcal <b>·</b> Body Measure Tape</div></div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">La herramienta más infravalorada</div>
       <div class="title" id="ht">Cinta<br>métrica</div>
@@ -92,17 +83,6 @@
 <script src="shared/kit.js"></script>
 <script>
 const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, bodyPath } = K;
-
-/* ---------- cinta con marcas ---------- */
-const CM = 24, TL = 1700;
-let tp = `<rect x="0" y="-34" width="${TL}" height="68" rx="4" fill="#EAF5FD"/><rect x="0" y="-34" width="${TL}" height="68" rx="4" fill="url(#scan)" opacity=".3"/>`;
-for (let i = 0; i <= TL / CM * 2; i++) {
-  const x = i * CM / 2, major = i % 2 === 0, cm = i / 2;
-  tp += `<line x1="${x}" y1="-34" x2="${x}" y2="${major ? -10 : -22}" stroke="#0a1630" stroke-width="${major ? 2.2 : 1.4}"/>`;
-  if (major && cm > 0) tp += `<text x="${x}" y="14" text-anchor="middle" font-family="Space Grotesk" font-weight="700" font-size="${cm % 10 === 0 ? 19 : 13}" fill="${cm % 10 === 0 ? '#1141A3' : '#0a1630'}">${cm}</text>`;
-}
-tp += `<rect x="${TL - 16}" y="-40" width="16" height="80" rx="3" fill="#6D9CFF"/>`;
-$('#tape').innerHTML = tp;
 
 /* ---------- figura y perímetros ---------- */
 const FX = 620, FY = 560, FS = 0.86;
@@ -151,25 +131,15 @@ K.scene({
   render(t) {
     set($('#spot'), { x: Math.sin(t * 0.3) * 50 + P(t, 12.6, 1.2, 'inOut') * 330, s: 1 + Math.sin(t * 0.5) * 0.03 });
 
-    /* --- A: la cinta se despliega --- */
-    const ext = P(t, 0.9, 1.6, 'out4');
-    const aOut = P(t, 4.6, 0.7, 'in2'), dBack = P(t, 18.9, 1.2, 'out4');
-    // posición de la carcasa: A abajo izquierda; D a la derecha
-    const caseX = 300, caseY = 760;
-    $('#tapeClipR').setAttribute('x', caseX); $('#tapeClipR').setAttribute('width', (ext * (TL + 20)).toFixed(1));
-    const scroll = -(t * 6) % CM;
-    if (t < 18.9) {
-      svgT($('#tape'), { x: caseX + 100 + scroll, y: caseY + 56 });
-      svgT($('#case'), { x: caseX, y: caseY, r: -ext * 200, o: 1 });
-      svgT($('#tapeG'), { y: aOut * 60, o: P(t, 0.3, 0.6) * (1 - aOut) });
-    } else {
-      // D: la cinta vuelve, más pequeña, a la derecha
-      svgT($('#tape'), { x: caseX + 100 + scroll, y: caseY + 56 });
-      svgT($('#case'), { x: caseX, y: caseY, r: -t * 20 });
-      $('#tapeG').setAttribute('transform', `translate(${lerp(1300, 1025, dBack).toFixed(1)} -10) scale(.75)`);
-      $('#tapeG').setAttribute('opacity', dBack.toFixed(3));
-      $('#tapeClipR').setAttribute('width', (P(t, 19.3, 1.4, 'out4') * 1300).toFixed(1));
-    }
+    /* --- A: producto --- */
+    const ai = win(t, 0.3, 4.6, 1.1, 0.7, 'out4', 'in2');
+    set($('#hero'), { y: (1 - ai.i) * 80 + ai.o * 40 + Math.sin(t * 0.8) * 4, s: lerp(0.94, 1, ai.i), o: ai.v });
+    set($('#hero img'), { s: 1 + 0.06 * clamp(t / 5) });
+    const a2 = win(t, 1.4, 4.6, 0.8, 0.6, 'back', 'in2');
+    set($('#hero2'), { y: (1 - P(t, 1.4, 0.8, 'out4')) * 50 + Math.sin(t * 1.1) * 5, s: lerp(0.7, 1, a2.i), r: 4 - 3 * a2.i, o: a2.v });
+    const dBack = P(t, 19.0, 1.2, 'out4');
+    set($('#dcard'), { y: (1 - dBack) * 60 + Math.sin(t * 0.9) * 4, s: lerp(0.94, 1, dBack), o: t > 18.9 ? dBack : 0 });
+    set($('#dcard img'), { s: 1 + 0.05 * clamp((t - 19) / 6) });
     words($('#hk'), t, 0.4, 4.4, 0.04);
     words($('#ht'), t, 0.6, 4.45, 0.08);
     words($('#hs'), t, 1.2, 4.5, 0.05);
