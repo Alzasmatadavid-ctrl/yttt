@@ -32,6 +32,7 @@
   #b4{left:0;top:0;width:1920px;height:1080px}
   .pc{position:absolute;top:290px;width:760px;height:340px;padding:44px 50px}
   #verd{left:480px;top:730px}
+  #hero,#b2 > svg{display:none}
 </style>
 </head>
 <body>
@@ -53,6 +54,10 @@
       <g id="strapB"></g>
       <g id="strapA"></g>
     </svg>
+    <div class="pcard" id="s2a" style="left:820px;top:150px;width:600px;height:600px"><div class="ly"><img src="img/straps/amarillo.jpg" alt=""><div class="brand">PBS <b>·</b> Straps Pro Athlete</div></div></div>
+    <div class="pcard" id="s2b" style="left:1360px;top:400px;width:440px;height:440px"><div class="ly"><img src="img/straps/rojo.jpg" alt=""><div class="brand">Rojo</div></div></div>
+    <div class="photo" id="s2c" style="left:140px;top:250px;width:430px;height:525px"><img src="img/straps/enrollar.jpg" alt=""><div class="brand">1 <b>·</b> Se enrolla en la barra</div></div>
+    <div class="photo" id="s2d" style="left:600px;top:290px;width:430px;height:525px"><img src="img/straps/uso_barra.jpg" alt=""><div class="brand">2 <b>·</b> Cierras la mano encima</div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Accesorio de agarre</div>
       <div class="title" id="ht">Straps</div>
@@ -119,7 +124,7 @@
 
 <script src="shared/kit.js"></script>
 <script>
-const { P, win, lerp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
 
 /* ---------- strap de tipo lazo ---------- */
 function strap(g, c) {
@@ -155,6 +160,16 @@ K.scene({
   stills: [3.6, 10.2, 16.8, 22.4],
   render(t) {
     set($('#spot'), { x: Math.sin(t * 0.35) * 60, s: 1 + Math.sin(t * 0.5) * 0.04 });
+    /* --- fotos PBS --- */
+    const sA = win(t, 0.2, 5.6, 1.2, 0.8, 'out4', 'in2');
+    set($('#s2a'), { y: (1 - sA.i) * -120 + Math.sin(t * 1.4) * 8 - sA.o * 40, r: (1 - sA.i) * -8 + Math.sin(t * 0.9) * 1.2 - 3, o: sA.v });
+    set($('#s2a img'), { s: 1 + 0.05 * clamp(t / 6) });
+    const sB = win(t, 0.6, 5.6, 1.2, 0.8, 'out4', 'in2');
+    set($('#s2b'), { y: (1 - sB.i) * -140 - Math.sin(t * 1.4) * 6 - sB.o * 60, r: (1 - sB.i) * 10 + 5 + Math.sin(t * 0.8 + 1), o: sB.v });
+    const u1 = win(t, 6.3, 12.4, 0.9, 0.6, 'out4', 'in2');
+    set($('#s2c'), { y: (1 - u1.i) * 60, s: lerp(0.94, 1, u1.i), o: u1.v }); set($('#s2c img'), { s: 1.02 + 0.06 * clamp((t - 6.3) / 6) });
+    const u2 = win(t, 6.8, 12.4, 0.9, 0.6, 'out4', 'in2');
+    set($('#s2d'), { y: (1 - u2.i) * 60, s: lerp(0.94, 1, u2.i), o: u2.v }); set($('#s2d img'), { s: 1.02 + 0.06 * clamp((t - 6.8) / 6) });
     // palabra gigante de fondo
     const bw = win(t, 0.1, 5.6, 1.4, 0.8);
     set($('#bigword'), { x: lerp(120, -120, t / 24), o: bw.v * 1 + P(t, 17.4, 1.2) * 0.6 * (1 - P(t, 23, 1)) });

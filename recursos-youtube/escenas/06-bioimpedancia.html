@@ -15,6 +15,7 @@
   .cap .v em{font-family:'Playfair Display';font-style:italic;color:var(--blue);text-shadow:var(--glow)}
   #vs{left:930px;top:560px;width:60px;text-align:center;font-family:'Playfair Display';font-style:italic;font-weight:700;font-size:56px;color:var(--muted)}
   #cur{left:1410px;top:318px;width:400px}
+  #arc,#cur{display:none}
   #b2{left:0;top:0;width:1920px;height:1080px}
   #ui{left:900px;top:250px;width:900px;padding:44px 50px}
   .row{display:grid;grid-template-columns:260px 160px 1fr;align-items:center;gap:20px;padding:22px 0;border-bottom:1.5px solid var(--line)}
@@ -51,7 +52,7 @@
   <div id="cam">
     <div class="abs" id="head"><div class="kicker" id="hk">Convencional vs bioimpedancia</div><div class="title" id="ht">Mide el peso. <em>Estima</em> el resto.</div></div>
     <div class="pcard" id="sL" style="left:380px;top:380px;width:440px;height:440px"><div class="ly"><img src="img/basculas/s100_top.jpg" alt=""><div class="brand">Scale 100</div></div></div>
-    <div class="pcard" id="sR" style="left:1100px;top:380px;width:440px;height:440px"><div class="ly"><img src="img/basculas/s500_top.jpg" alt=""><div class="brand">Scale 500</div></div></div>
+    <div class="pcard" id="sR" style="left:1100px;top:380px;width:440px;height:440px"><div class="ly"><img src="img/basculas/nova_frente.jpg" alt=""><div class="brand">RENPHO · MorphoScan</div><div class="feat" style="background:#B79BF3">Asas para las manos</div></div></div>
     <svg class="abs" id="scales" viewBox="0 0 1920 1080">
       <defs>
         <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22324f"/><stop offset=".5" stop-color="#0f182b"/><stop offset="1" stop-color="#0a1120"/></linearGradient>
@@ -66,13 +67,13 @@
     <div class="abs" id="vs">vs</div>
     <div class="abs" id="cur"><div class="label" style="color:var(--lilac)">Corriente muy débil</div></div>
     <div class="cap" id="cL" style="left:320px"><div class="label">Convencional</div><div class="v">Mide: <em>peso</em></div></div>
-    <div class="cap" id="cR" style="left:1040px"><div class="label">Bioimpedancia</div><div class="v">Mide: peso · Estima: <em>grasa y músculo</em></div></div>
+    <div class="cap" id="cR" style="left:1040px"><div class="label">Bioimpedancia</div><div class="v">Mide: peso · Estima: <em>grasa y músculo</em><br><span style="font-size:22px;color:var(--ink2)">Electrodos en pies y manos</span></div></div>
 
     <!-- B: medido vs estimado -->
     <div class="abs" id="b2">
       <div class="card abs" id="ui">
         <div class="label" style="margin-bottom:14px">Lo que te muestra la pantalla</div>
-        <div class="row"><div class="n">Peso</div><div class="tagm m">MEDIDO</div><div class="val">62,5 kg</div></div>
+        <div class="row"><div class="n">Peso</div><div class="tagm m">MEDIDO</div><div class="val">81,9 kg</div></div>
         <div class="row"><div class="n">% de grasa</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
         <div class="row"><div class="n">Masa muscular</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
         <div class="row"><div class="n">Agua corporal</div><div class="tagm e">ESTIMADO</div><div class="rng"><i></i></div></div>
@@ -95,7 +96,7 @@
     <div class="abs" id="b4">
       <div class="abs" id="b4h"><div class="kicker">Conclusión</div><div class="title" id="b4t">Complementaria,<br><em>no absoluta</em></div></div>
       <div class="abs" id="tips"><span class="chip">Misma hora</span><span class="chip">Mismas condiciones</span><span class="chip solid">Mira la tendencia</span></div>
-      <div class="pcard" id="mini" style="left:1240px;top:240px;width:580px;height:348px"><div class="ly"><img src="img/basculas/s500_34.jpg" alt=""><div class="brand">Decathlon <b>·</b> Scale 500</div><div class="feat" style="background:#B79BF3">Bioimpedancia</div></div></div>
+      <div class="pcard" id="mini" style="left:1240px;top:240px;width:580px;height:348px"><div class="ly"><img src="img/basculas/nova_34.jpg" alt=""><div class="brand">RENPHO <b>·</b> MorphoScan Nova</div><div class="feat" style="background:#B79BF3">8 electrodos · pies y manos</div></div></div>
       <div id="verd"></div>
     </div>
   </div>

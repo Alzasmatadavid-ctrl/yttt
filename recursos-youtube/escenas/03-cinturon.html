@@ -9,7 +9,7 @@
   #belt{left:0;top:0;width:1920px;height:1080px}
   #head{left:120px;top:190px;width:1200px}
   #head .title{font-size:104px;margin:16px 0 22px}
-  #head .sub{font-size:34px;max-width:900px}
+  #head .sub{font-size:34px;max-width:760px}
   #b2{left:0;top:0;width:1920px;height:1080px}
   #steps{left:1120px;top:330px;width:700px;display:flex;flex-direction:column;gap:46px}
   .step{display:flex;gap:28px;align-items:flex-start}
@@ -23,6 +23,7 @@
   .col{position:absolute;top:400px;width:760px}
   .col .list{gap:30px}
   #verd{left:480px;top:760px}
+  #belt{display:none}
 </style>
 </head>
 <body>
@@ -48,6 +49,10 @@
         <g id="buckle"></g>
       </g>
     </svg>
+    <div class="pcard" id="b3a" style="left:960px;top:300px;width:860px;height:516px"><div class="ly"><img src="img/cinturon/buffalo.jpg" alt=""><div class="brand">PBS <b>·</b> Pro Buffalo</div><div class="feat">Palanca · 13 mm</div></div></div>
+    <div class="pcard" id="b3b" style="left:120px;top:640px;width:560px;height:336px"><div class="ly"><img src="img/cinturon/ohio.jpg" alt=""><div class="brand">PBS <b>·</b> Ohio</div><div class="feat">Hebilla · 10 mm</div></div></div>
+    <div class="photo" id="b3c" style="left:520px;top:190px;width:420px;height:513px"><img src="img/cinturon/buffalo_puesto.jpg" alt=""><div class="brand">Bien ajustado</div></div>
+    <div class="photo" id="b3d" style="left:980px;top:190px;width:420px;height:513px"><img src="img/cinturon/ohio_gym.jpg" alt=""><div class="brand">PBS <b>·</b> Ohio</div></div>
     <div class="abs" id="head">
       <div class="kicker" id="hk">Soporte para cargas altas</div>
       <div class="title" id="ht">Cinturón de<br><em>powerlifting</em></div>
@@ -136,6 +141,14 @@ K.scene({
   stills: [3.8, 10.6, 16.4, 22.2],
   render(t) {
     set($('#spot'), { x: Math.sin(t * 0.3) * 50, s: 1 + Math.sin(t * 0.5) * 0.03 });
+    /* --- fotos PBS --- */
+    const bA = win(t, 0.3, 5.5, 1.1, 0.7, 'out4', 'in2');
+    set($('#b3a'), { y: (1 - bA.i) * 80 + bA.o * 40 + Math.sin(t * 0.8) * 4, s: lerp(0.94, 1, bA.i), o: bA.v }); set($('#b3a img'), { s: 1 + 0.06 * clamp(t / 6) });
+    const bB = win(t, 1.3, 5.5, 0.9, 0.6, 'out4', 'in2');
+    set($('#b3b'), { y: (1 - bB.i) * 60 + Math.sin(t * 1.1) * 4, s: lerp(0.9, 1, bB.i), o: bB.v }); set($('#b3b img'), { s: 1 + 0.05 * clamp(t / 6) });
+    const dc = P(t, 19.0, 1.1, 'out4'), dd = P(t, 19.25, 1.1, 'out4');
+    set($('#b3c'), { y: (1 - dc) * 60, s: lerp(0.94, 1, dc), o: t > 18.9 ? dc : 0 }); set($('#b3c img'), { s: 1.02 + 0.05 * clamp((t - 19) / 5) });
+    set($('#b3d'), { y: (1 - dd) * 60, s: lerp(0.94, 1, dd), o: t > 18.9 ? dd : 0 }); set($('#b3d img'), { s: 1.02 + 0.05 * clamp((t - 19) / 5) });
 
     /* --- A: el cinturón se despliega --- */
     const un = P(t, 0.2, 1.8, 'inOut');

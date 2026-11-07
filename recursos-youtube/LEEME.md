@@ -51,8 +51,8 @@ Tiempos aproximados en segundos, para que sepas dónde cortar.
 | # | Clip | Duración | Tramos | Veredicto |
 |---|---|---|---|---|
 | 01 | Zapatillas | 30 s | 0–3,6 presentación de los 3 tipos · 3,8–10 suela plana (Converse, Vans, Nike Metcon 10) · 10,2–16,5 talón elevado (Nike Romaleos 4, detalle del talón, Adidas Adipower 3) · 16,6–22,6 amortiguación (Nike Pegasus Premium, Nike Air Monarch IV) · 22,6–30 resumen y veredicto | Recomendable (suela plana) |
-| 02 | Straps | 24 s | 0–6 producto · 6–12,7 cómo funcionan y ejercicios de tirón · 12,6–17,4 ¿qué se cansa primero? · 17,4–24 ventajas, limitaciones y veredicto | Opcional |
-| 03 | Cinturón | 24 s | 0–5,8 producto · 5,9–12,8 cómo funciona (sección de la cintura) · 12,8–18,4 cuándo tiene sentido · 18,4–24 veredicto | Opcional |
+| 02 | Straps | 24 s | 0–6 straps PBS · 6–12,7 cómo se usan (fotos en la barra) y ejercicios de tirón · 12,6–17,4 ¿qué se cansa primero? · 17,4–24 ventajas, limitaciones y veredicto | Opcional |
+| 03 | Cinturón | 24 s | 0–5,8 cinturones PBS · 5,9–12,8 cómo funciona (sección de la cintura) · 12,8–18,4 cuándo tiene sentido · 18,4–24 fotos del cinturón puesto y veredicto | Opcional |
 | 04 | Bandas elásticas | 25 s | 0–6 bodegón de bandas · 6,1–12,8 cuatro ventajas · 12,7–18,6 tensión de la banda y limitaciones · 18,7–25 veredicto doble | Casa: recomendable · Gimnasio: opcional |
 | 05 | Báscula corporal | 25 s | 0–5,9 producto · 6–12,9 tendencia semanal · 12,9–18,8 un número que lo mezcla todo · 18,8–25 veredicto | Imprescindible |
 | 06 | Bioimpedancia | 26 s | 0–7 convencional vs bioimpedancia · 7,4–13 medido vs estimado · 13,3–19,3 qué altera la lectura · 19,4–26 conclusión y veredicto | Opcional |
@@ -64,29 +64,30 @@ Tiempos aproximados en segundos, para que sepas dónde cortar.
 
 ---
 
-## 4. Tratamiento visual de cada recurso
+## 4. Productos que aparecen y de dónde salen las fotos
 
-Cada herramienta tiene su propio formato para que no parezcan diez infografías iguales:
+Casi todo el material son **fotos reales de producto**. Las animaciones se mantienen solo
+donde explican algo (gráficas, esquemas, la figura con los perímetros, el visor de cámara).
 
-- **01 Zapatillas**: fotos reales de producto en tarjetas de estudio (Converse, Vans,
-  Nike y Adidas), un primer plano del talón de las Romaleos y un **esquema animado del
-  perfil de cada suela** con prueba de carga (la plana no se hunde, la de espuma sí).
-- **02 Straps**: anuncio de producto premium con tipografía gigante de fondo y barrido
-  de luz, más un corte técnico de cómo se enrollan en la barra.
-- **03 Cinturón**: composición editorial con el cinturón cruzando la pantalla y un
-  diagrama animado de la presión abdominal.
-- **04 Bandas**: bodegón cenital de colores, ventajas con mini-animaciones y una gráfica
-  de tensión frente al peso libre.
-- **05 Báscula corporal**: báscula en perspectiva sobre el suelo del baño, gráfica de
-  tendencia y el número "descompuesto" en sus partes.
-- **06 Bioimpedancia**: comparativa A frente a B con el pulso de corriente, una pantalla
-  tipo app (medido / estimado) y los factores que alteran la lectura.
-- **07 Cinta métrica**: cinta desplegándose y figura anatómica tipo holograma con los
-  cinco perímetros.
-- **08 Trípode**: ambiente de gimnasio desenfocado, interfaz de cámara y análisis de la
-  sentadilla tipo captura de movimiento.
-- **09 Báscula de cocina**: bodegón cenital sobre encimera con la báscula contando gramos.
-- **10 Tuppers**: plano cenital de comidas preparadas y planificador semanal.
+| # | Clip | Productos | Fuente de las fotos |
+|---|---|---|---|
+| 01 | Zapatillas | Converse Chuck Taylor, Vans Old Skool, Nike Metcon 10 · Nike Romaleos 4 (+ detalle del talón), Adidas Adipower 3 · Nike Pegasus Premium, Nike Air Monarch IV | Tus capturas (Nike) y webs oficiales / tiendas oficiales |
+| 02 | Straps | PBS Straps Pro Athlete (amarillo y rojo) + fotos en uso | pbsapparel.com |
+| 03 | Cinturón | PBS Pro Buffalo (palanca, 13 mm) y PBS Ohio (hebilla, 10 mm) + fotos puestos | pbsapparel.com |
+| 04 | Bandas | Domyos: lote de 4 bandas, minibandas, kit con asas, bolsa + fotos entrenando | Decathlon |
+| 05 | Báscula corporal | Scale 100 | Decathlon |
+| 06 | Bioimpedancia | Scale 100 (convencional) frente a RENPHO MorphoScan Nova (con asas para las manos, 8 electrodos) | Decathlon / RENPHO |
+| 07 | Cinta métrica | RENPHO Smart Tape Measure | RENPHO (se vende en Amazon) |
+| 08 | Trípode | ATUMTEK StickPro 157 cm con mando | ATUMTEK (se vende en Amazon) |
+| 09 | Báscula de cocina | Joseph Joseph SwitchScale | Joseph Joseph |
+| 10 | Tuppers | Recipiente hermético Quechua, tarros de acero y bolsa isotérmica | Decathlon |
+
+**Sobre Amazon:** Amazon bloquea el acceso automático a sus fichas, así que el trípode, la cinta
+y la báscula con asas son productos que se venden en Amazon (RENPHO y ATUMTEK están entre los más
+vendidos de su categoría), con las fotos oficiales tomadas de la web de cada marca.
+
+**Sobre Decathlon:** la web española también bloquea las descargas automáticas; las fotos son
+las oficiales del mismo catálogo, tomadas de las webs de Decathlon de otros países.
 
 El **sello de veredicto** (Opcional · Recomendable · Imprescindible) se repite al final de
 cada clip. Es el elemento "firma" que da coherencia a toda la serie.
@@ -107,12 +108,13 @@ pide. Ningún accesorio sustituye a la constancia.
 
 **Sobre los datos:** no aparece ningún porcentaje ni dato científico inventado.
 - Las gráficas llevan la etiqueta *"Ejemplo ilustrativo"* o *"Esquema ilustrativo"* y no tienen números en los ejes.
-- Los valores de las pantallas (`78,4 kg`, `125 g`) son ejemplos de lectura, no datos de nadie.
+- Los valores de peso que se muestran (`68,5 kg`, `81,9 kg`, `280 g`) son ejemplos de lectura, no datos de nadie.
 - Las afirmaciones son prudentes ("puede ayudarte", "estima", "es fácil equivocarse").
-- Solo aparecen marcas en el clip 01 (zapatillas), porque así lo pediste: Nike, Converse,
-  Vans y Adidas. Son fotos oficiales de producto y sus derechos son de cada marca. Usarlas
-  en un vídeo informativo es habitual, pero la decisión de publicarlas es tuya. Si prefieres
-  evitar cualquier riesgo, puedo devolverte la versión con zapatillas dibujadas.
+- Aparecen marcas y fotos oficiales de producto porque así lo pediste (ver tabla del
+  apartado 4). Sus derechos son de cada marca. Mostrarlas en un vídeo informativo es habitual,
+  pero la decisión de publicarlas es tuya. Si alguna marca te patrocina o eres afiliado
+  (por ejemplo, de Amazon o PBS), indícalo en el vídeo.
+- Los valores de las pantallas que se ven en las fotos son los de las propias fotos del fabricante.
 
 ---
 
