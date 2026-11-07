@@ -250,6 +250,8 @@ window.K = (function () {
       'italic 500 20px "Playfair Display"', 'italic 700 20px "Playfair Display"'];
     await Promise.all(fams.map((f) => document.fonts.load(f, 'ÁÉÍÓÚáéíóúñÑ¿¡ab')));
     await document.fonts.ready;
+    // espera a que las fotos estén decodificadas antes del primer fotograma
+    await Promise.all([...document.images].map((im) => (im.decode ? im.decode().catch(() => {}) : null)));
     if (def.setup) def.setup();
     window.__duration = def.duration;
     window.__stills = def.stills || [];

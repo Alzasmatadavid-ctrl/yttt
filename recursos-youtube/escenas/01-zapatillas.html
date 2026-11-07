@@ -5,40 +5,78 @@
 <title>01 · Zapatillas de entrenamiento</title>
 <link rel="stylesheet" href="shared/kit.css">
 <style>
-  .floor{position:absolute;left:0;right:0;top:810px;bottom:0;background:linear-gradient(180deg,rgba(17,65,163,.16),rgba(2,9,19,0) 70%)}
-  .floorline{position:absolute;left:0;right:0;top:809px;height:2px;background:linear-gradient(90deg,transparent,rgba(140,180,245,.35),transparent)}
-  .shoe{position:absolute;left:0;top:0;width:640px;height:300px;transform-origin:0 0}
-  .shoe svg{position:absolute;left:0;top:0}
-  .shoe .refl{top:280px;transform:scaleY(-1);opacity:.16;-webkit-mask-image:linear-gradient(to top,#000 0%,transparent 55%);mask-image:linear-gradient(to top,#000 0%,transparent 55%)}
-  .shoe .shadow{position:absolute;left:30px;top:262px;width:600px;height:40px;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.75),rgba(0,0,0,0))}
-  .ann text{font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
-  #head{left:120px;top:196px;width:1300px}
-  #head .title{font-size:86px;margin-top:22px}
-  .panel{position:absolute;left:1180px;top:330px;width:640px}
-  .pname{font-family:'Montserrat';font-weight:800;font-size:62px;line-height:1.02;letter-spacing:-.02em;margin:18px 0 34px}
-  .panel .list{gap:20px;margin-bottom:34px}
+  .spot{left:160px;top:120px;width:1500px;height:950px;background:radial-gradient(closest-side,rgba(17,65,163,.4),rgba(17,65,163,0))}
+  /* tarjeta de producto tipo estudio */
+  .pcard{position:absolute;border-radius:30px;overflow:hidden;transform-origin:50% 50%;
+    background:radial-gradient(120% 90% at 50% 35%,#fbfcfe 0%,#eef1f6 55%,#dfe4ec 100%);
+    box-shadow:0 40px 90px rgba(0,0,0,.55),0 0 0 1.5px rgba(234,245,253,.35) inset}
+  .pcard .ly{position:absolute;inset:0}
+  .pcard img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply;transform-origin:50% 55%}
+  .pcard img.cover{object-fit:cover;mix-blend-mode:normal}
+  .brand{position:absolute;left:22px;top:20px;padding:10px 16px;border-radius:22px;background:rgba(2,9,19,.88);color:#EAF5FD;
+    font-family:'Space Grotesk';font-weight:700;font-size:17px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+  .brand b{color:#8CB4F5;font-weight:700}
+  .feat{position:absolute;left:22px;bottom:20px;padding:10px 16px;border-radius:22px;background:#6D9CFF;color:#020913;
+    font-family:'Space Grotesk';font-weight:700;font-size:17px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+  .feat.coral{background:#FF8A7A}
+  #head{left:120px;top:190px;width:1500px}
+  #head .title{font-size:80px;margin-top:20px}
+  .clab{position:absolute;width:520px;text-align:center}
+  #hero{left:120px;top:230px;width:1000px;height:600px}
+  #prof{left:120px;top:860px;width:1000px;height:150px}
+  .panel{position:absolute;left:1180px;top:260px;width:640px}
+  .pname{font-family:'Montserrat';font-weight:800;font-size:58px;line-height:1.03;letter-spacing:-.02em;margin:18px 0 32px}
+  .panel .list{gap:20px;margin-bottom:32px}
   .panel .li{font-size:30px}
-  #sumhead{left:0;right:0;top:236px;text-align:center}
-  #sumhead .title{font-size:80px}
-  .tag{position:absolute;top:680px;width:500px;text-align:center}
-  .tag .chip{font-size:18px}
-  #verd{left:480px;top:796px}
-  .spot{left:260px;top:120px;width:1400px;height:900px;background:radial-gradient(closest-side,rgba(17,65,163,.38),rgba(17,65,163,0))}
+  #sumhead{left:0;right:0;top:186px;text-align:center}
+  #sumhead .title{font-size:76px}
+  #verd{left:480px;top:800px}
 </style>
 </head>
 <body>
 <div id="stage">
   <div class="glow spot" id="spot"></div>
-  <div class="floor" id="floor"></div><div class="floorline" id="floorline"></div>
   <div id="cam">
     <div class="abs" id="head">
       <div class="kicker" id="hk">Calzado para entrenar</div>
-      <div class="title" id="ht">No todas las zapatillas<br>sirven para <em>entrenar fuerza</em></div>
+      <div class="title" id="ht">No todas las zapatillas sirven<br>para <em>entrenar fuerza</em></div>
     </div>
 
-    <div class="shoe" id="sA"></div>
-    <div class="shoe" id="sB"></div>
-    <div class="shoe" id="sC"></div>
+    <!-- tarjetas de categoría (presentación y resumen) -->
+    <div class="pcard" id="k0" style="width:520px;height:312px"><div class="ly"><img src="img/zapatillas/metcon10.jpg" alt=""><div class="brand">Nike <b>·</b> Metcon 10</div></div><div class="ly" id="k0b"><img src="img/zapatillas/converse.jpg" alt=""><div class="brand">Converse <b>·</b> Chuck Taylor</div></div></div>
+    <div class="pcard" id="k1" style="width:520px;height:312px"><div class="ly"><img src="img/zapatillas/romaleos4.jpg" alt=""><div class="brand">Nike <b>·</b> Romaleos 4</div></div></div>
+    <div class="pcard" id="k2" style="width:520px;height:312px"><div class="ly"><img src="img/zapatillas/pegasus.jpg" alt=""><div class="brand">Nike <b>·</b> Pegasus Premium</div></div></div>
+    <div class="clab" id="c0"><span class="chip solid">Plana y estable</span></div>
+    <div class="clab" id="c1"><span class="chip">Talón elevado</span></div>
+    <div class="clab" id="c2"><span class="chip coral">Amortiguación</span></div>
+
+    <!-- tarjeta principal: secuencia de productos -->
+    <div class="pcard" id="hero">
+      <div class="ly hl" data-a="4.0" data-b="6.1"><img src="img/zapatillas/converse.jpg" alt=""><div class="brand">Converse <b>·</b> Chuck Taylor All Star</div><div class="feat">Suela plana y firme</div></div>
+      <div class="ly hl" data-a="6.1" data-b="8.1"><img src="img/zapatillas/vans.jpg" alt=""><div class="brand">Vans <b>·</b> Old Skool</div><div class="feat">Suela plana y firme</div></div>
+      <div class="ly hl" data-a="8.1" data-b="10.2"><img src="img/zapatillas/metcon10.jpg" alt=""><div class="brand">Nike <b>·</b> Metcon 10</div><div class="feat">Base estable para el gimnasio</div></div>
+      <div class="ly hl" data-a="10.2" data-b="12.7"><img src="img/zapatillas/romaleos4.jpg" alt=""><div class="brand">Nike <b>·</b> Romaleos 4</div><div class="feat">Talón elevado</div></div>
+      <div class="ly hl" data-a="12.7" data-b="14.5"><img class="cover" src="img/zapatillas/romaleos4_talon.jpg" alt=""><div class="brand">Detalle <b>·</b> Romaleos 4</div><div class="feat">Talón rígido: no se hunde</div></div>
+      <div class="ly hl" data-a="14.5" data-b="16.6"><img src="img/zapatillas/adipower3.jpg" alt=""><div class="brand">Adidas <b>·</b> Adipower Weightlifting 3</div><div class="feat">Talón elevado</div></div>
+      <div class="ly hl" data-a="16.6" data-b="19.7"><img src="img/zapatillas/pegasus.jpg" alt=""><div class="brand">Nike <b>·</b> Pegasus Premium</div><div class="feat coral">Espuma gruesa y blanda</div></div>
+      <div class="ly hl" data-a="19.7" data-b="22.8"><img src="img/zapatillas/monarch.jpg" alt=""><div class="brand">Nike <b>·</b> Air Monarch IV</div><div class="feat coral">Suela acolchada</div></div>
+    </div>
+
+    <!-- esquema del perfil de la suela -->
+    <svg class="abs" id="prof" viewBox="0 0 1000 150">
+      <text x="0" y="22" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="4" fill="#6a7fa6">PERFIL DE LA SUELA · ESQUEMA</text>
+      <path d="M0 132 H1000" stroke="rgba(140,180,245,.25)" stroke-width="2"/>
+      <g id="pf0"><path d="M150 106 H860 Q872 106 872 118 V132 H138 V118 Q138 106 150 106 Z" fill="rgba(109,156,255,.18)" stroke="#6D9CFF" stroke-width="3"/>
+        <text class="pl" x="880" y="100" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="3" fill="#6D9CFF">NO SE HUNDE</text></g>
+      <g id="pf1"><path d="M150 108 H560 L640 62 H860 Q872 62 872 74 V132 H138 V120 Q138 108 150 108 Z" fill="rgba(109,156,255,.18)" stroke="#6D9CFF" stroke-width="3"/>
+        <path class="ref" d="M560 108 H872" stroke="#8CB4F5" stroke-width="2" stroke-dasharray="6 6"/>
+        <g class="upa"><path d="M760 104 V70 M748 82 L760 66 L772 82" fill="none" stroke="#EAF5FD" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/></g>
+        <text class="pl" x="880" y="56" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="3" fill="#6D9CFF">TALÓN ELEVADO</text></g>
+      <g id="pf2"><path id="foam" d="M170 84 C300 80 600 70 840 62 Q880 62 880 84 V122 Q880 132 860 132 H260 C200 132 150 124 138 108 C132 96 146 86 170 84 Z" fill="rgba(255,138,122,.16)" stroke="#FF8A7A" stroke-width="3"/>
+        <text class="pl" x="896" y="60" font-family="Space Grotesk" font-weight="700" font-size="16" letter-spacing="3" fill="#FF8A7A">SE HUNDE</text></g>
+      <g id="load"><path d="M760 -6 V44" stroke="#EAF5FD" stroke-width="4"/><path d="M746 30 L760 50 L774 30" fill="none" stroke="#EAF5FD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+        <text x="700" y="8" text-anchor="end" font-family="Space Grotesk" font-weight="700" font-size="15" letter-spacing="3" fill="#EAF5FD">CARGA</text></g>
+    </svg>
 
     <div class="panel" id="pA">
       <div class="kicker">Tipo 01</div>
@@ -54,15 +92,12 @@
     </div>
     <div class="panel" id="pC">
       <div class="kicker">Tipo 03</div>
-      <div class="pname">Running con<br>amortiguación</div>
+      <div class="pname">Running y<br>acolchadas</div>
       <div class="plist"></div>
       <div class="chip coral pchip">Ideal · Correr y cardio</div>
     </div>
 
     <div class="abs" id="sumhead"><div class="title" id="st">Cada suela, <em>su función</em></div></div>
-    <div class="tag" id="tA"><span class="chip solid">Fuerza general</span></div>
-    <div class="tag" id="tB"><span class="chip">Sentadilla · Halterofilia</span></div>
-    <div class="tag" id="tC"><span class="chip coral">Correr · Cardio</span></div>
     <div id="verd"></div>
   </div>
   <div class="grain"></div><div class="vig"></div>
@@ -70,165 +105,78 @@
 
 <script src="shared/kit.js"></script>
 <script>
-const { P, win, lerp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
+const { P, win, lerp, clamp, $, $$, set, svgT, draw, words, verdict, verdictAnim, list, listAnim } = K;
 
-/* ---------- Dibujo de las tres zapatillas (vista lateral, puntera a la derecha) ---------- */
-const SHOES = {
-  A: { // suela plana y estable
-    defs: `
-      <linearGradient id="A-up" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4560"/><stop offset=".55" stop-color="#232b3d"/><stop offset="1" stop-color="#161c2a"/></linearGradient>
-      <linearGradient id="A-sole" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f8ff"/><stop offset="1" stop-color="#c3cde0"/></linearGradient>
-      <linearGradient id="A-rim" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8CB4F5" stop-opacity="0"/><stop offset=".4" stop-color="#8CB4F5" stop-opacity=".9"/><stop offset="1" stop-color="#8CB4F5" stop-opacity="0"/></linearGradient>`,
-    sole: 'M46 234 H592 C616 234 632 246 633 262 C634 274 627 280 613 280 H52 C40 280 34 273 34 260 C34 244 38 234 46 234 Z',
-    art: `
-      <path d="M40 240 C33 198 36 152 50 126 C58 112 76 105 96 109 C120 115 150 125 176 121 C186 105 198 93 214 93 C228 93 238 105 242 119 C300 141 380 169 460 193 C530 213 592 221 622 240 Z" fill="url(#A-up)"/>
-      <path d="M40 240 C36 204 38 168 54 142 L112 152 C102 182 104 212 118 240 Z" fill="#141a27" opacity=".85"/>
-      <path d="M498 238 C506 216 540 205 590 216" fill="none" stroke="#4a5674" stroke-width="3"/>
-      <path d="M52 128 C70 112 100 112 122 120 C142 127 160 128 176 122" fill="none" stroke="#56627f" stroke-width="9" stroke-linecap="round"/>
-      <path d="M176 121 C186 105 198 93 214 93 C228 93 238 105 242 119 L236 128 C224 118 200 116 182 128 Z" fill="#2b3449"/>
-      <path d="M120 206 C220 200 330 210 440 232" fill="none" stroke="#6D9CFF" stroke-width="7" stroke-linecap="round"/>
-      <path d="M62 150 C78 146 96 148 112 152" fill="none" stroke="#5a6684" stroke-width="2" stroke-dasharray="5 5"/>
-      <g fill="#0d1220" stroke="#6b7898" stroke-width="2">${[0,1,2,3,4].map(i=>{const x=244+i*44,y=128+i*14.5;return `<circle cx="${x}" cy="${y}" r="5"/>`}).join('')}</g>
-      <g stroke="#e8eef9" stroke-width="7" stroke-linecap="round">${[0,1,2,3].map(i=>{const x=250+i*44,y=126+i*14.5;return `<path d="M${x} ${y} L${x+34} ${y+18}"/>`}).join('')}</g>
-      <path d="M50 126 C58 112 76 105 96 109 C120 115 150 125 176 121 C186 105 198 93 214 93 C228 93 238 105 242 119 C300 141 380 169 460 193 C530 213 592 221 622 240" fill="none" stroke="url(#A-rim)" stroke-width="2.5" opacity=".6"/>
-      <path d="${'M46 234 H592 C616 234 632 246 633 262 C634 274 627 280 613 280 H52 C40 280 34 273 34 260 C34 244 38 234 46 234 Z'}" fill="url(#A-sole)"/>
-      <path d="M34 266 H633 C632 275 626 280 613 280 H52 C41 280 34 275 34 266 Z" fill="#1d2433"/>
-      <path d="M44 250 H620" stroke="#9aa7c2" stroke-width="1.6" stroke-dasharray="6 6"/>`,
-  },
-  B: { // halterofilia, talón elevado
-    defs: `
-      <linearGradient id="B-up" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a74ea"/><stop offset=".5" stop-color="#1650C9"/><stop offset="1" stop-color="#0c3290"/></linearGradient>
-      <linearGradient id="B-heel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3044"/><stop offset="1" stop-color="#0d111c"/></linearGradient>
-      <linearGradient id="B-strap" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f8ff"/><stop offset="1" stop-color="#b9c6de"/></linearGradient>`,
-    sole: 'M44 196 H244 C256 196 266 204 272 214 L292 246 C296 250 300 252 306 252 H598 C620 252 633 261 633 269 C633 276 627 280 615 280 H48 C40 280 34 274 34 266 V206 C34 200 38 196 44 196 Z',
-    art: `
-      <path d="M40 204 C33 162 38 112 54 86 C62 73 80 67 100 71 C124 77 150 87 176 83 C186 67 200 57 216 57 C232 57 242 71 246 87 C310 121 390 167 470 201 C540 229 598 241 624 258 L300 258 L258 204 Z" fill="url(#B-up)"/>
-      <path d="M40 204 C34 168 38 128 52 100 L106 112 C96 146 98 178 112 204 Z" fill="#0b2c7e" opacity=".8"/>
-      <path d="M54 90 C72 74 104 74 126 84 C146 92 162 92 176 84" fill="none" stroke="#5b8cf5" stroke-width="9" stroke-linecap="round"/>
-      <g fill="#081a4a" stroke="#8CB4F5" stroke-width="2">${[0,1,2,3,4].map(i=>{const x=262+i*40,y=104+i*18;return `<circle cx="${x}" cy="${y}" r="5"/>`}).join('')}</g>
-      <g stroke="#e8eef9" stroke-width="7" stroke-linecap="round">${[0,1,2,3].map(i=>{const x=268+i*40,y=102+i*18;return `<path d="M${x} ${y} L${x+30} ${y+22}"/>`}).join('')}</g>
-      <path d="M196 104 L246 88 L372 218 L318 240 Z" fill="url(#B-strap)"/>
-      <path d="M204 108 L242 96 L360 216 L322 232 Z" fill="none" stroke="#8a98b6" stroke-width="1.6" stroke-dasharray="5 4"/>
-      <rect x="190" y="92" width="34" height="22" rx="5" fill="none" stroke="#c9d3e6" stroke-width="5" transform="rotate(-18 207 103)"/>
-      <path d="M508 254 C514 232 548 222 598 236" fill="none" stroke="#6b97f0" stroke-width="3"/>
-      <path d="M44 196 H244 C256 196 266 204 272 214 L292 246 C296 250 300 252 306 252 H598 C620 252 633 261 633 269 C633 276 627 280 615 280 H48 C40 280 34 274 34 266 V206 C34 200 38 196 44 196 Z" fill="url(#B-heel)"/>
-      <path d="M34 224 H262 M34 252 H290" stroke="#3a4359" stroke-width="2"/>
-      <path d="M300 266 H632" stroke="#2c3346" stroke-width="2"/>
-      <path d="M44 200 H244" stroke="#5f6b88" stroke-width="2" opacity=".8"/>`,
-  },
-  C: { // running con amortiguación
-    defs: `
-      <linearGradient id="C-up" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef3fb"/><stop offset=".6" stop-color="#c9d5ea"/><stop offset="1" stop-color="#9eaecb"/></linearGradient>
-      <linearGradient id="C-mid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#e1d6fb"/><stop offset="1" stop-color="#9c7af0"/></linearGradient>
-      <pattern id="C-mesh" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="5" cy="5" r="1.6" fill="#7f8fae" opacity=".45"/></pattern>`,
-    sole: 'M52 194 C140 198 260 212 380 220 C470 226 560 226 610 230 C628 234 636 244 634 254 C630 264 620 268 600 269 C540 273 480 280 420 280 H70 C52 280 40 272 36 258 C32 238 34 208 52 194 Z',
-    art: `
-      <g class="upper">
-      <path d="M48 202 C40 168 44 130 60 110 C70 98 88 94 104 98 C126 104 150 114 176 110 C188 94 204 84 220 86 C234 88 242 100 244 114 C310 140 400 174 480 198 C548 218 600 220 626 236 L600 242 L60 216 Z" fill="url(#C-up)"/>
-      <path d="M48 202 C40 168 44 130 60 110 C70 98 88 94 104 98 C126 104 150 114 176 110 C188 94 204 84 220 86 C234 88 242 100 244 114 C310 140 400 174 480 198 C548 218 600 220 626 236 L600 242 L60 216 Z" fill="url(#C-mesh)"/>
-      <path d="M44 206 C40 176 42 150 54 128 L96 136 C88 160 90 186 100 210 Z" fill="#8450EA" opacity=".85"/>
-      <path d="M56 112 C46 92 50 78 62 76 C70 76 72 90 70 104" fill="none" stroke="#8450EA" stroke-width="6" stroke-linecap="round"/>
-      <path d="M62 112 C78 100 104 100 126 108 C146 116 162 116 176 110" fill="none" stroke="#f7f9fe" stroke-width="10" stroke-linecap="round"/>
-      <g fill="#5d6b8a">${[0,1,2,3,4].map(i=>{const x=250+i*42,y=120+i*16;return `<circle cx="${x}" cy="${y}" r="4"/>`}).join('')}</g>
-      <g stroke="#8450EA" stroke-width="6" stroke-linecap="round">${[0,1,2,3].map(i=>{const x=256+i*42,y=118+i*16;return `<path d="M${x} ${y} L${x+32} ${y+20}"/>`}).join('')}</g>
-      <path d="M150 190 C240 170 330 182 420 206" fill="none" stroke="#8450EA" stroke-width="5" stroke-linecap="round" opacity=".9"/>
-      </g>
-      <g class="mid">
-      <path d="M52 194 C140 198 260 212 380 220 C470 226 560 226 610 230 C628 234 636 244 634 254 C630 264 620 268 600 269 C540 273 480 280 420 280 H70 C52 280 40 272 36 258 C32 238 34 208 52 194 Z" fill="url(#C-mid)"/>
-      <path d="M48 226 C150 232 280 244 420 248 C500 250 570 248 620 248" fill="none" stroke="#ffffff" stroke-width="2.5" opacity=".8"/>
-      <path d="M44 246 C150 252 280 260 420 262" fill="none" stroke="#8450EA" stroke-width="2" opacity=".5"/>
-      <path d="M70 280 H200 M330 279 C400 279 470 276 540 272" stroke="#2a2440" stroke-width="7" stroke-linecap="round"/>
-      </g>`,
-  },
-};
-
-function buildShoe(id) {
-  const s = SHOES[id];
-  const el = $('#s' + id);
-  el.innerHTML = `
-    <div class="shadow"></div>
-    <svg class="refl" width="640" height="280" viewBox="0 0 640 280"><use href="#art${id}"/></svg>
-    <svg width="640" height="300" viewBox="0 0 640 300">
-      <defs>${s.defs}</defs>
-      <g id="art${id}"><g class="body">${s.art}</g></g>
-      <path class="soleline" d="${s.sole}" fill="none" stroke="#6D9CFF" stroke-width="4" style="filter:drop-shadow(0 0 6px rgba(109,156,255,.9))"/>
-      <g class="ann"></g>
-    </svg>`;
-}
-['A','B','C'].forEach(buildShoe);
-
-/* anotaciones */
-function arrowDown(x, y, color = '#EAF5FD') {
-  return `<g class="load"><path d="M${x} ${y-130} V${y-14}" stroke="${color}" stroke-width="5"/><path d="M${x-16} ${y-34} L${x} ${y-8} L${x+16} ${y-34}" fill="none" stroke="${color}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
-    <text x="${x}" y="${y-146}" text-anchor="middle" font-size="15" fill="${color}">Carga</text></g>`;
-}
-$('#sA .ann').innerHTML = `
-  <g class="a1"><path class="l" d="M500 282 V334 H470" fill="none" stroke="#6D9CFF" stroke-width="2"/><circle cx="500" cy="282" r="5" fill="#6D9CFF"/>
-    <text x="462" y="340" text-anchor="end" font-size="15" fill="#8CB4F5">Suela fina y plana</text></g>
-  ${arrowDown(150, 120)}
-  <g class="a2"><text x="170" y="52" font-size="15" fill="#6D9CFF">No se hunde</text></g>`;
-$('#sB .ann').innerHTML = `
-  <path class="ref" d="M34 252 H300" stroke="#8CB4F5" stroke-width="2" stroke-dasharray="7 6"/>
-  <g class="up"><path d="M150 248 V206" stroke="#6D9CFF" stroke-width="4"/><path d="M138 216 L150 200 L162 216" fill="none" stroke="#6D9CFF" stroke-width="4" stroke-linejoin="round"/></g>
-  <g class="a1"><path class="l" d="M60 226 L20 172 H-60" fill="none" stroke="#6D9CFF" stroke-width="2"/><circle cx="60" cy="226" r="5" fill="#6D9CFF"/>
-    <text x="-60" y="164" font-size="15" fill="#8CB4F5">Talón elevado</text></g>
-  <g class="a2"><path class="l" d="M450 282 V334 H480" fill="none" stroke="#6D9CFF" stroke-width="2"/><circle cx="450" cy="282" r="5" fill="#6D9CFF"/>
-    <text x="488" y="340" font-size="15" fill="#8CB4F5">Suela rígida</text></g>`;
-$('#sC .ann').innerHTML = `
-  ${arrowDown(150, 104, '#FF8A7A')}
-  <g class="a1"><path class="l" d="M240 262 V334 H270" fill="none" stroke="#FF8A7A" stroke-width="2"/><circle cx="240" cy="262" r="5" fill="#FF8A7A"/>
-    <text x="278" y="340" font-size="15" fill="#FF8A7A">Espuma gruesa y blanda</text></g>
-  <g class="a2"><text x="170" y="36" font-size="15" fill="#FF8A7A">Se hunde bajo carga</text></g>`;
-
-list($('#pA .plist'), [['pro','Base firme para empujar'],['pro','Sirve para casi todo el trabajo de fuerza'],['con','Poca amortiguación para correr']]);
-list($('#pB .plist'), [['pro','Puede ayudarte a bajar más erguido en sentadilla'],['pro','Útil si te falta movilidad de tobillo'],['con','Muy específica y más cara']]);
-list($('#pC .plist'), [['pro','Amortigua el impacto al correr'],['con','Se hunde con cargas pesadas'],['con','Menos estabilidad al levantar']]);
+list($('#pA .plist'), [['pro', 'Base firme para empujar'], ['pro', 'Sirve para casi todo el trabajo de fuerza'], ['con', 'Poca amortiguación para correr']]);
+list($('#pB .plist'), [['pro', 'Puede ayudarte a bajar más erguido en sentadilla'], ['pro', 'Útil si te falta movilidad de tobillo'], ['con', 'Muy específica y más cara']]);
+list($('#pC .plist'), [['pro', 'Amortiguan el impacto al correr'], ['con', 'La espuma se hunde con cargas pesadas'], ['con', 'Menos estabilidad al levantar']]);
 verdict($('#verd'), 1, 'Para la mayoría, basta con una suela plana y estable.', 'Zapatilla de suela plana');
 
-/* posiciones: [x, y, escala] — suelo en y=810 (hero) / 690 (resumen) */
-const GROUND = 810;
-const lineup = (cx, s = 0.78, g = GROUND) => [cx - 320 * s, g - 280 * s, s];
-const HERO = [150, GROUND - 280 * 1.5, 1.5];
-const POS = {
-  A: { line: lineup(400), sum: lineup(400, 0.7, 648) },
-  B: { line: lineup(960), sum: lineup(960, 0.7, 648) },
-  C: { line: lineup(1520), sum: lineup(1520, 0.7, 648) },
-};
-const mix = (a, b, p) => [lerp(a[0], b[0], p), lerp(a[1], b[1], p), lerp(a[2], b[2], p)];
-const place = (el, p, o = 1, blur = 0) => set(el, { x: p[0], y: p[1], s: p[2], o, blur });
+/* filas de tarjetas: presentación (abajo) y resumen (arriba) */
+const ROWX = [120, 700, 1280], INTRO_Y = 486, SUM_Y = 330;
+const kards = ['#k0', '#k1', '#k2'], labs = ['#c0', '#c1', '#c2'];
 
 K.scene({
-  num: 1, name: 'Zapatillas', duration: 28,
-  stills: [2.8, 8.0, 13.2, 18.0, 25.8],
+  num: 1, name: 'Zapatillas', duration: 30,
+  stills: [3.0, 5.2, 13.6, 18.4, 27.6],
   render(t) {
-    // luz que respira
-    const fl = 1 - 0.75 * P(t, 20.8, 1.0, 'inOut'); set($('#floor'), { o: fl }); set($('#floorline'), { o: fl });
-    set($('#spot'), { x: Math.sin(t * 0.4) * 40, s: 1 + Math.sin(t * 0.6) * 0.03 });
+    set($('#spot'), { x: Math.sin(t * 0.35) * 50, s: 1 + Math.sin(t * 0.5) * 0.03 });
 
-    /* --- A: presentación --- */
-    words($('#hk'), t, 0.3, 3.2, 0.04);
-    words($('#ht'), t, 0.45, 3.25, 0.05);
+    /* --- presentación --- */
+    words($('#hk'), t, 0.3, 3.4, 0.04);
+    words($('#ht'), t, 0.45, 3.45, 0.05);
+    const sumIn = t > 22.6;
+    kards.forEach((id, i) => {
+      const el = $(id), lab = $(labs[i]);
+      if (!sumIn) {
+        const w = win(t, 0.9 + i * 0.18, 3.5, 0.9, 0.5, 'out4', 'in2');
+        el.style.left = ROWX[i] + 'px'; el.style.top = INTRO_Y + 'px';
+        set(el, { y: (1 - w.i) * 80, s: lerp(1, 0.92, w.o), o: w.v });
+        lab.style.left = ROWX[i] + 'px'; lab.style.top = (INTRO_Y + 340) + 'px';
+        set(lab, { o: win(t, 1.5 + i * 0.18, 3.4, 0.5, 0.4).v, y: 0 });
+      } else {
+        const w = P(t, 22.9 + i * 0.18, 0.9, 'out4');
+        el.style.left = ROWX[i] + 'px'; el.style.top = SUM_Y + 'px';
+        set(el, { y: (1 - w) * 80, s: 1, o: w * (i === 0 ? 1 : lerp(1, 0.6, P(t, 24.6, 0.6))) });
+        lab.style.left = ROWX[i] + 'px'; lab.style.top = (SUM_Y + 336) + 'px';
+        set(lab, { o: P(t, 23.7 + i * 0.15, 0.5), y: (1 - P(t, 23.7 + i * 0.15, 0.6, 'out4')) * 16 });
+      }
+    });
+    // en el resumen, la tarjeta "plana" alterna Metcon y Converse
+    set($('#k0b'), { o: sumIn ? clamp(0.5 + 0.5 * Math.sin((t - 24) * 1.4) * 1.6) : 0 });
 
-    /* --- zapatilla A --- */
-    const ent = (t0) => P(t, t0, 1.1, 'out4');
-    let pa;
-    if (t < 3.6) { const e = ent(0.9); pa = mix([POS.A.line[0] + 260, POS.A.line[1], POS.A.line[2]], POS.A.line, e); place($('#sA'), pa, P(t, 0.9, 0.6)); }
-    else if (t < 9.1) { pa = mix(POS.A.line, HERO, P(t, 3.6, 1.1, 'inOut')); place($('#sA'), pa); }
-    else if (t < 20.8) { const o = P(t, 9.1, 0.7, 'in2'); place($('#sA'), mix(HERO, [HERO[0] - 300, HERO[1], HERO[2]], o), 1 - o, o * 6); }
-    else { const e = P(t, 20.9, 1.1, 'out4'); place($('#sA'), mix([POS.A.sum[0] - 300, POS.A.sum[1], POS.A.sum[2]], POS.A.sum, e), e); }
+    /* --- tarjeta principal --- */
+    const hw = win(t, 3.8, 22.6, 0.9, 0.6, 'out4', 'in2');
+    set($('#hero'), { y: (1 - hw.i) * 70, s: lerp(0.96, 1, hw.i) * lerp(1, 0.96, hw.o), o: hw.v });
+    $('#hero').style.visibility = t > 3.7 && t < 23.3 ? 'visible' : 'hidden';
+    $$('#hero .hl').forEach((ly) => {
+      const a = +ly.dataset.a, b = +ly.dataset.b;
+      const fi = a <= 4.0 ? 1 : P(t, a - 0.2, 0.45, 'inOut'), fo = P(t, b - 0.2, 0.45, 'inOut');
+      ly.style.opacity = (fi * (1 - fo)).toFixed(3);
+      const k = clamp((t - a) / (b - a));
+      set($('img', ly), { s: 1 + 0.06 * k, x: -14 * k });
+      set($('.brand', ly), { x: (1 - P(t, a, 0.6, 'out4')) * -20 });
+      set($('.feat', ly), { y: (1 - P(t, a + 0.35, 0.6, 'out4')) * 16, o: P(t, a + 0.35, 0.4) });
+    });
 
-    /* --- zapatilla B --- */
-    if (t < 3.6) { const e = ent(1.1); place($('#sB'), mix([POS.B.line[0] + 260, POS.B.line[1], POS.B.line[2]], POS.B.line, e), P(t, 1.1, 0.6)); }
-    else if (t < 9.2) { const o = P(t, 3.6, 0.6, 'in2'); place($('#sB'), mix(POS.B.line, [POS.B.line[0] + 220, POS.B.line[1], POS.B.line[2]], o), 1 - o, o * 6); }
-    else if (t < 14.9) { const e = P(t, 9.2, 1.1, 'out4'); place($('#sB'), mix([HERO[0] + 500, HERO[1], HERO[2]], HERO, e), P(t, 9.2, 0.5)); }
-    else if (t < 20.8) { const o = P(t, 14.9, 0.7, 'in2'); place($('#sB'), mix(HERO, [HERO[0] - 300, HERO[1], HERO[2]], o), 1 - o, o * 6); }
-    else { const e = P(t, 21.05, 1.1, 'out4'); place($('#sB'), mix([POS.B.sum[0], POS.B.sum[1] + 120, POS.B.sum[2]], POS.B.sum, e), e); }
-
-    /* --- zapatilla C --- */
-    if (t < 3.6) { const e = ent(1.3); place($('#sC'), mix([POS.C.line[0] + 260, POS.C.line[1], POS.C.line[2]], POS.C.line, e), P(t, 1.3, 0.6)); }
-    else if (t < 14.9) { const o = P(t, 3.6, 0.6, 'in2'); place($('#sC'), mix(POS.C.line, [POS.C.line[0] + 220, POS.C.line[1], POS.C.line[2]], o), 1 - o, o * 6); }
-    else if (t < 20.7) { const e = P(t, 14.9, 1.1, 'out4'); place($('#sC'), mix([HERO[0] + 500, HERO[1], HERO[2]], HERO, e), P(t, 14.9, 0.5)); }
-    else { place($('#sC'), mix(HERO, POS.C.sum, P(t, 20.7, 1.2, 'inOut'))); }
+    /* --- esquema del perfil de suela --- */
+    const pw = win(t, 4.4, 22.4, 0.7, 0.5);
+    set($('#prof'), { o: pw.v });
+    const seg = (a, b) => win(t, a, b, 0.5, 0.4);
+    const s0 = seg(4.4, 10.1), s1 = seg(10.4, 16.5), s2 = seg(16.8, 22.4);
+    svgT($('#pf0'), { o: s0.v }); svgT($('#pf1'), { o: s1.v }); svgT($('#pf2'), { o: s2.v });
+    // prueba de carga: plana (sin cambio) y espuma (se hunde)
+    const ld0 = win(t, 6.4, 9.8, 0.5, 0.3), ld2 = win(t, 17.6, 22.2, 0.5, 0.3);
+    const cyc = (a) => P(t, a, 0.35, 'out') * (1 - P(t, a + 0.5, 0.55, 'out'));
+    const c = Math.max(cyc(18.1), cyc(19.4), cyc(20.7));
+    const ld = Math.max(ld0.v, ld2.v), drop = t < 12 ? P(t, 6.4, 0.5, 'out4') : P(t, 17.6, 0.5, 'out4');
+    svgT($('#load'), { y: (1 - drop) * -30 + c * 12 + (t > 12 ? 0 : 50) , o: ld });
+    svgT($('#foam'), { sy: 1 - c * 0.3, cy: 132 });
+    svgT($('#pf0 .pl'), { o: P(t, 6.9, 0.4) });
+    svgT($('#pf2 .pl'), { o: P(t, 18.2, 0.4) });
+    draw($('#pf1 .ref'), P(t, 11.0, 0.7));
+    svgT($('#pf1 .upa'), { y: (1 - P(t, 11.5, 0.6, 'out4')) * 16, o: P(t, 11.5, 0.4) });
+    svgT($('#pf1 .pl'), { o: P(t, 11.8, 0.4) });
 
     /* --- paneles --- */
     const panel = (id, a, b) => {
@@ -237,53 +185,18 @@ K.scene({
       words($('.kicker', el), t, a, b, 0.04);
       words($('.pname', el), t, a + 0.1, b, 0.06);
       listAnim($('.plist', el), t, a + 0.6, b, 0.3);
-      const c = win(t, a + 1.5, b, 0.6, 0.4);
-      set($('.pchip', el), { y: (1 - c.i) * 20, o: c.v });
+      const cc = win(t, a + 1.5, b, 0.6, 0.4);
+      set($('.pchip', el), { y: (1 - cc.i) * 20, o: cc.v });
       el.style.visibility = t > a - 0.05 && t < b + 0.6 ? 'visible' : 'hidden';
     };
-    panel('#pA', 4.3, 8.8);
-    panel('#pB', 9.9, 14.6);
-    panel('#pC', 15.6, 20.4);
+    panel('#pA', 4.4, 9.8);
+    panel('#pB', 10.5, 16.1);
+    panel('#pC', 16.9, 22.2);
 
-    /* --- anotaciones A: suela + prueba de carga --- */
-    const aA = $('#sA .ann');
-    draw($('.a1 .l', aA), P(t, 5.0, 0.6)); set($('.a1', aA), { o: win(t, 4.95, 8.7).v });
-    const ldA = win(t, 6.2, 8.7, 0.5, 0.3), dropA = P(t, 6.2, 0.5, 'out4');
-    svgT($('.load', aA), { y: (1 - dropA) * -40, o: ldA.v });
-    svgT($('.a2', aA), { y: (1 - P(t, 6.7, 0.5)) * 10, o: win(t, 6.7, 8.7, 0.4, 0.3).v });
-
-    /* --- anotaciones B: talón elevado --- */
-    const aB = $('#sB .ann');
-    draw($('.ref', aB), P(t, 10.6, 0.7)); $('.ref', aB).style.opacity = 1 - P(t, 14.4, 0.4);
-    const up = win(t, 11.1, 14.4, 0.6, 0.4);
-    svgT($('.up', aB), { y: (1 - up.i) * 20, o: up.v });
-    draw($('.a1 .l', aB), P(t, 11.4, 0.6)); svgT($('.a1', aB), { o: win(t, 11.35, 14.4).v });
-    draw($('.a2 .l', aB), P(t, 12.1, 0.6)); svgT($('.a2', aB), { o: win(t, 12.05, 14.4).v });
-
-    /* --- anotaciones C: compresión de la espuma --- */
-    const aC = $('#sC .ann');
-    const ldC = win(t, 16.7, 20.3, 0.5, 0.3), dropC = P(t, 16.7, 0.5, 'out4');
-    // dos ciclos de compresión
-    const cyc = (a) => P(t, a, 0.35, 'out') * (1 - P(t, a + 0.45, 0.55, 'out'));
-    const c = Math.max(cyc(17.15), cyc(18.5));
-    svgT($('.load', aC), { y: (1 - dropC) * -40 + c * 14, o: ldC.v });
-    svgT($('#sC .mid'), { sy: 1 - c * 0.2, cy: 280 });
-    svgT($('#sC .upper'), { x: 0, y: c * 14, r: -c * 1.6, cx: 620, cy: 236 });
-    draw($('.a1 .l', aC), P(t, 17.4, 0.6)); svgT($('.a1', aC), { o: win(t, 17.35, 20.3).v });
-    svgT($('.a2', aC), { y: (1 - P(t, 17.3, 0.5)) * 10, o: win(t, 17.3, 20.3, 0.4, 0.3).v });
-
-    /* --- E: resumen --- */
-    words($('#st'), t, 21.0, null, 0.06);
-    ['A', 'B', 'C'].forEach((k, i) => {
-      const tag = $('#t' + k), x = POS[k].sum[0] + 320 * 0.7 - 250;
-      const w = win(t, 22.0 + i * 0.15, null, 0.6);
-      tag.style.left = x + 'px'; set(tag, { y: (1 - w.i) * 20, o: w.v });
-      const sl = $('#s' + k + ' .soleline');
-      draw(sl, P(t, 22.1 + i * 0.15, 0.9, 'inOut')); sl.style.opacity = t > 21.9 ? 1 : 0;
-      // en el resumen solo la plana conserva el brillo completo
-      if (t > 22.6) $('#s' + k).style.opacity = k === 'A' ? 1 : lerp(1, 0.55, P(t, 23.2, 0.6));
-    });
-    verdictAnim($('#verd'), t, 23.0);
+    /* --- resumen y veredicto --- */
+    $('#sumhead').style.visibility = sumIn ? 'visible' : 'hidden';
+    words($('#st'), t, 22.9, null, 0.06);
+    verdictAnim($('#verd'), t, 25.0);
   },
 });
 </script>

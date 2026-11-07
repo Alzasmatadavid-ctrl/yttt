@@ -17,7 +17,7 @@ Playfair Display cursiva, y etiquetas y datos en Space Grotesk.
 | `videos/` | 11 vídeos MP4 (1920×1080, 30 fps, H.264) | Arrastrarlos directamente a tu editor |
 | `fotogramas/` | Capturas PNG de los momentos clave de cada clip | Miniaturas, imágenes fijas o pantallas congeladas largas |
 | `overlays/` | PNG con **fondo transparente**: sellos de veredicto y etiquetas de capítulo | Ponerlos encima de tus propias tomas (tú hablando a cámara, B-roll en el gimnasio) |
-| `escenas/` | El "código fuente" de cada animación (HTML) | Cambiar textos o veredictos y volver a exportar |
+| `escenas/` | El "código fuente" de cada animación (HTML) y las fotos de producto (`escenas/img/`) | Cambiar textos o veredictos y volver a exportar |
 | `render/` | El programa que convierte las escenas en vídeo | Solo si se vuelven a exportar |
 
 ---
@@ -50,7 +50,7 @@ Tiempos aproximados en segundos, para que sepas dónde cortar.
 
 | # | Clip | Duración | Tramos | Veredicto |
 |---|---|---|---|---|
-| 01 | Zapatillas | 28 s | 0–3,5 presentación de los 3 tipos · 3,6–9 suela plana · 9,2–14,8 halterofilia · 14,9–20,6 running (prueba de carga) · 20,7–28 comparativa y veredicto | Recomendable (suela plana) |
+| 01 | Zapatillas | 30 s | 0–3,6 presentación de los 3 tipos · 3,8–10 suela plana (Converse, Vans, Nike Metcon 10) · 10,2–16,5 talón elevado (Nike Romaleos 4, detalle del talón, Adidas Adipower 3) · 16,6–22,6 amortiguación (Nike Pegasus Premium, Nike Air Monarch IV) · 22,6–30 resumen y veredicto | Recomendable (suela plana) |
 | 02 | Straps | 24 s | 0–6 producto · 6–12,7 cómo funcionan y ejercicios de tirón · 12,6–17,4 ¿qué se cansa primero? · 17,4–24 ventajas, limitaciones y veredicto | Opcional |
 | 03 | Cinturón | 24 s | 0–5,8 producto · 5,9–12,8 cómo funciona (sección de la cintura) · 12,8–18,4 cuándo tiene sentido · 18,4–24 veredicto | Opcional |
 | 04 | Bandas elásticas | 25 s | 0–6 bodegón de bandas · 6,1–12,8 cuatro ventajas · 12,7–18,6 tensión de la banda y limitaciones · 18,7–25 veredicto doble | Casa: recomendable · Gimnasio: opcional |
@@ -68,9 +68,9 @@ Tiempos aproximados en segundos, para que sepas dónde cortar.
 
 Cada herramienta tiene su propio formato para que no parezcan diez infografías iguales:
 
-- **01 Zapatillas**: presentación de producto con reflejo en el suelo, vista lateral
-  técnica con anotaciones y una **prueba de carga** (la suela plana no se hunde, la de
-  running sí).
+- **01 Zapatillas**: fotos reales de producto en tarjetas de estudio (Converse, Vans,
+  Nike y Adidas), un primer plano del talón de las Romaleos y un **esquema animado del
+  perfil de cada suela** con prueba de carga (la plana no se hunde, la de espuma sí).
 - **02 Straps**: anuncio de producto premium con tipografía gigante de fondo y barrido
   de luz, más un corte técnico de cómo se enrollan en la barra.
 - **03 Cinturón**: composición editorial con el cinturón cruzando la pantalla y un
@@ -109,7 +109,10 @@ pide. Ningún accesorio sustituye a la constancia.
 - Las gráficas llevan la etiqueta *"Ejemplo ilustrativo"* o *"Esquema ilustrativo"* y no tienen números en los ejes.
 - Los valores de las pantallas (`78,4 kg`, `125 g`) son ejemplos de lectura, no datos de nadie.
 - Las afirmaciones son prudentes ("puede ayudarte", "estima", "es fácil equivocarse").
-- No aparece ninguna marca comercial.
+- Solo aparecen marcas en el clip 01 (zapatillas), porque así lo pediste: Nike, Converse,
+  Vans y Adidas. Son fotos oficiales de producto y sus derechos son de cada marca. Usarlas
+  en un vídeo informativo es habitual, pero la decisión de publicarlas es tuya. Si prefieres
+  evitar cualquier riesgo, puedo devolverte la versión con zapatillas dibujadas.
 
 ---
 
