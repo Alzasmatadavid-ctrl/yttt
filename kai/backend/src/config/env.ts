@@ -130,6 +130,18 @@ export function inferredProduction(source: Record<string, string | undefined>): 
   return !source.NODE_ENV?.trim() && looksLikePublicServer(source.APP_URL, source.DATABASE_URL);
 }
 
+/**
+ * Dirección pública que publica el propio hosting cuando APP_URL no está definida: Render la da en
+ * RENDER_EXTERNAL_URL y Railway en RAILWAY_PUBLIC_DOMAIN (sin «https://»). Así, en el despliegue de un clic
+ * no hay que copiarla a mano. Un APP_URL definido (por ejemplo, tu propio dominio) siempre tiene prioridad.
+ */
+export function platformAppUrl(source: Record<string, string | undefined>): string | undefined {
+  const render = source.RENDER_EXTERNAL_URL?.trim();
+  if (render) return render;
+  const railway = source.RAILWAY_PUBLIC_DOMAIN?.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return railway ? `https://${railway}` : undefined;
+}
+
 const INFERRED_PRODUCTION_NOTE =
   'NODE_ENV no está definido, pero APP_URL usa https con un dominio público o DATABASE_URL apunta a otro servidor, así que KAI arranca en modo producción. Si de verdad es un entorno de pruebas, pon NODE_ENV=development en el .env.';
 
@@ -137,6 +149,12 @@ let productionWasInferred = false;
 
 function loadEnv(): Env {
   const source = { ...process.env };
+  if (!source.APP_URL?.trim()) {
+    const hosted = platformAppUrl(source);
+    if (hosted) source.APP_URL = hosted;
+    // Vacía y sin hosting que la publique: se usa el valor por defecto (en tu ordenador).
+    else delete source.APP_URL;
+  }
   if (inferredProduction(source)) {
     source.NODE_ENV = 'production';
     // Para que todo el proceso (y cualquier librería) vea el mismo modo.

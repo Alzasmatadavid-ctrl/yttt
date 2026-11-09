@@ -102,7 +102,7 @@ Cuando veas `ready`, abre <http://localhost:5173> en el navegador. Para pararlo:
 1. **Activa la IA real** → [docs/INTEGRACIONES.md · Claude](docs/INTEGRACIONES.md#1-inteligencia-artificial-claude)
 2. **Conecta WhatsApp, Instagram y anuncios** → [docs/INTEGRACIONES.md · Meta](docs/INTEGRACIONES.md#2-meta-whatsapp-instagram-y-lead-ads)
 3. **Conecta tu calendario** → [docs/INTEGRACIONES.md · Google Calendar / Calendly](docs/INTEGRACIONES.md#3-google-calendar)
-4. **Publícalo en internet** → [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md)
+4. **Publícalo en internet** → [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md) (la forma más fácil: el botón «Deploy to Render», que lo crea todo con un clic)
 5. **Cómo está construido** → [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)
 
 ---

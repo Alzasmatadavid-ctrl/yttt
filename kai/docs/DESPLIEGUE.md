@@ -2,7 +2,30 @@
 
 Para que WhatsApp, Instagram, Calendly y tus clientes puedan usar KAI, tiene que estar en un servidor con una dirección pública (`https://…`). KAI se publica como **una sola aplicación** (la web y el servidor juntos, con el `Dockerfile` incluido) más una **base de datos PostgreSQL**.
 
-## Opción recomendada: Railway
+## Opción más fácil: Render con un clic (recomendada)
+
+**Por qué:** un solo botón crea el servidor de KAI y su base de datos. Render solo te pide tres datos: tu clave de Claude, tu email de administración y una contraseña. La clave de cifrado se genera sola, la base de datos se conecta sola y KAI toma su dirección pública (`https://….onrender.com`) de Render sin que la copies. La configuración está en el archivo `render.yaml` de la raíz del repositorio.
+
+**Coste orientativo:** unos 13 $/mes (servidor unos 7 $ y base de datos unos 6 $, más el almacenamiento). Compruébalo en <https://render.com/pricing> antes de confirmar. Los dos son de pago a propósito: los planes gratuitos se «duermen» y KAI dejaría de enviar recordatorios.
+
+1. **Ten KAI en la rama principal de GitHub.** Si KAI todavía está en una petición de cambios, fusiónala antes (botón **Merge pull request**). El botón de Render usa la rama principal.
+2. **Pulsa el botón:**
+
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Alzasmatadavid-ctrl/yttt)
+
+   Regístrate en Render con tu cuenta de GitHub. Si el repositorio es privado, Render te pedirá instalar su app de GitHub y darle acceso a ese repositorio.
+3. **Rellena los tres datos** que te pide Render:
+   - `ANTHROPIC_API_KEY`: tu clave de la consola de Claude (empieza por `sk-ant-`).
+   - `ADMIN_EMAIL`: el email de tu cuenta de administración.
+   - `ADMIN_PASSWORD`: mínimo 12 caracteres, con letras y números.
+
+   Pulsa **Apply** (o **Deploy Blueprint**).
+4. **Espera de 5 a 10 minutos** a que el servicio `kai` diga **Live**. Abre la dirección que aparece arriba del servicio (`https://kai-….onrender.com`) y añade `/api/health`: debe responder `{"ok":true,…}`.
+5. **Entra en KAI** con `ADMIN_EMAIL` y `ADMIN_PASSWORD` y sigue desde el [paso 4 de Railway](#paso-4--despliega-y-comprueba) (el punto 3 en adelante es igual).
+
+Para añadir más adelante las claves de Meta, Google o Resend: Render → servicio `kai` → **Environment** → **Add Environment Variable** y guarda; Render vuelve a publicar KAI solo. Si usas tu propio dominio (**Settings → Custom Domains**), añade también `APP_URL=https://app.tudominio.com`. Cada vez que se sube un cambio a la rama principal dentro de la carpeta `kai`, Render publica la nueva versión.
+
+## Alternativa: Railway
 
 **Por qué:** despliega el `Dockerfile` directamente desde GitHub, incluye PostgreSQL en el mismo proyecto, el servidor está siempre encendido (necesario para los recordatorios y seguimientos) y da HTTPS automático. Coste orientativo: desde unos 5–10 $/mes con poco tráfico.
 
@@ -44,6 +67,7 @@ RESEND_API_KEY=re_...
   Guárdala en un gestor de contraseñas: si la pierdes, habrá que reconectar todas las integraciones.
 - Añade también las de Meta, Google y Resend cuando las tengas ([INTEGRACIONES.md](INTEGRACIONES.md)).
 - No hace falta `PORT`: Railway la pone sola.
+- `APP_URL` también puedes omitirla: KAI usa el dominio que genera Railway. Ponla solo si usas tu propio dominio.
 - `ADMIN_EMAIL` y `ADMIN_PASSWORD` crean tu cuenta de administración al arrancar. Registrarse en la web con ese email **no** da acceso al panel. Si ya tenías una cuenta normal con ese email y quieres que sea la de administración, añade `ADMIN_PROMOTE_EXISTING=true` para un arranque y luego quítala.
 - Sin `EMAIL_PROVIDER=resend` y `RESEND_API_KEY`, en producción **no se envía ningún email** (recuperar contraseña, invitaciones). Las invitaciones se pueden copiar como enlace desde **Ajustes → Equipo**.
 - `TRUST_PROXY` puede quedarse vacío en Railway y Render: KAI confía solo en sus proxies internos para saber la IP real de cada visitante (la necesita para los límites de intentos). Si pones Cloudflare delante, añade sus rangos de IP (ver `.env.example`).
