@@ -1,0 +1,357 @@
+/* ───────────── Onboarding del entrenador ───────────── */
+.onb-sidebar-head {
+  padding: 0 8px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.onb-steps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.onb-steps-list .wizard-step {
+  width: 100%;
+}
+.onb-steps-list .wizard-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.onb-steps-list .wizard-step:not(:disabled):not(.current):hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.onb-sidebar-foot {
+  margin-top: auto;
+  padding: 16px 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.onb-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.onb-link svg {
+  width: 15px;
+  height: 15px;
+}
+
+.onb-body {
+  margin-inline: auto;
+  min-height: 100vh;
+}
+.onb-mobile-bar {
+  display: none;
+}
+@media (max-width: 900px) {
+  .onb-mobile-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+}
+.onb-eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.onb-eyebrow svg {
+  width: 16px;
+  height: 16px;
+}
+.onb-heading {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 28px);
+  margin-top: 8px;
+}
+.onb-heading:focus,
+.onb-heading:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.onb-lead {
+  color: var(--text-2);
+  margin-top: 8px;
+  max-width: 640px;
+  font-size: 14.5px;
+}
+.onb-content {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.onb-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 32px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.onb-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* En móvil «Atrás» se queda solo con la flecha (el texto sigue disponible para lectores de pantalla)
+   para que «Lo haré más tarde» y «Continuar» quepan en la misma fila. */
+@media (max-width: 480px) {
+  .onb-actions .onb-back {
+    position: relative;
+    padding-inline: 11px;
+  }
+  .onb-actions .onb-back-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* Sugerencias rápidas */
+.onb-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Listas editables (qué incluye el servicio) */
+.onb-list-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Importe con símbolo */
+.onb-amount {
+  position: relative;
+  max-width: 220px;
+}
+.onb-amount.input-group > .input {
+  padding-left: 12px;
+  padding-right: 34px;
+  font-size: 18px;
+  height: 46px;
+  font-weight: 600;
+}
+.onb-amount .input-suffix {
+  font-size: 16px;
+}
+
+.onb-option-title {
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.onb-option-big {
+  padding: 18px;
+  gap: 8px;
+}
+.onb-option-big svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* Disponibilidad */
+.onb-day {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 10px 14px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.onb-day:last-child {
+  border-bottom: 0;
+}
+.onb-day-name {
+  padding-top: 7px;
+}
+.onb-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* Ancho suficiente para «10:00» y también para «10:00 AM» (navegadores en inglés), sin desbordar en móvil. */
+.onb-range .input {
+  flex: 0 1 140px;
+  width: 140px;
+  min-width: 104px;
+}
+@media (max-width: 720px) {
+  .onb-day {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .onb-day-name {
+    padding-top: 0;
+  }
+  /* Cada franja en una sola línea: desde · a · hasta · quitar. */
+  .onb-range {
+    flex-wrap: nowrap;
+  }
+  .onb-range .input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: 150px;
+  }
+  .onb-range .btn {
+    flex-shrink: 0;
+  }
+}
+
+/* Reglas y objeciones */
+.onb-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.onb-item.is-off {
+  background: transparent;
+}
+.onb-item.is-off .onb-item-title {
+  color: var(--text-3);
+}
+.onb-item-title {
+  font-weight: 620;
+}
+.onb-rule-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+@media (max-width: 720px) {
+  .onb-rule-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Tono */
+.onb-slider-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.onb-slider-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.onb-preview-input {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.onb-preview-input .field {
+  flex: 1;
+  min-width: 220px;
+}
+
+/* Canales y calendario */
+.onb-connect {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.onb-connect-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+.onb-connect-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Celebración */
+.onb-done {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background:
+    radial-gradient(700px 420px at 50% 0%, var(--accent-soft), transparent 70%),
+    var(--bg);
+}
+.onb-done-card {
+  width: min(560px, 100%);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.onb-done-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 10px var(--accent-soft);
+  margin-bottom: 8px;
+}
+.onb-done-icon svg {
+  width: 34px;
+  height: 34px;
+}
+.onb-done-card h1 {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+}
+.onb-done-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 8px;
+}

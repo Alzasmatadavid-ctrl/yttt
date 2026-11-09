@@ -1,0 +1,39 @@
+{
+  "name": "@kai/backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
+    "start": "node --env-file-if-exists=../.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=../.env src/database/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=../.env src/database/seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.5",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
+    "luxon": "^3.7.2",
+    "pg": "^8.23.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.6",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "5.9",
+    "vitest": "^5.0.3"
+  }
+}
