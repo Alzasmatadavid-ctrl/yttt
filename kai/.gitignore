@@ -12,4 +12,4 @@ coverage/
 .scratch/
 
 # Pruebas temporales de las revisiones (los revisores las borran al terminar)
-backend/test/tmp-*.test.ts
+backend/test/tmp-*
