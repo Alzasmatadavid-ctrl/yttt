@@ -35,6 +35,24 @@ menubar, message, message-scroller, native-select, navigation-menu, pagination, 
 progress, questionnaire, radio-group, resizable, scroll-area, select, sheet, sidebar, skeleton,
 slider, spinner, switch, table, tabs, textarea, toast, toggle, toggle-group, tooltip.
 
+## Motionsites.ai (biblioteca de prompts de diseño)
+
+Motionsites **no** es un catálogo de componentes: es una biblioteca de más de 500 prompts
+de diseño (secciones hero, landings completas, fondos y degradados animados) pensada para
+generar webs con IA. Se conecta como servidor MCP remoto:
+
+- URL: `https://motionsites.ai/api/mcp` (ya está en `.mcp.json` como `motionsites`).
+- Pide iniciar sesión con la cuenta de Motionsites de David (OAuth, sin clave API).
+  Claude no puede iniciar esa sesión por él.
+- En Claude Code en su ordenador: escribir `/mcp`, elegir `motionsites` y luego *Authenticate*.
+- En claude.ai (web, escritorio y sesiones en la nube): añadirlo como conector personalizado en
+  https://claude.ai/customize/connectors y abrir una sesión nueva.
+- Cuenta gratuita: 3 prompts. Planes de pago: los 500+.
+
+Uso recomendado: buscar en Motionsites la estructura y la dirección visual de una sección
+(por ejemplo, el hero) y construirla con componentes de las librerías de arriba, adaptando
+siempre los textos al método Kaizen. Nunca copies textos de ejemplo de un prompt tal cual.
+
 ## Limitación importante
 
 `index.html` es una exportación **empaquetada** (todo comprimido dentro de un solo archivo),

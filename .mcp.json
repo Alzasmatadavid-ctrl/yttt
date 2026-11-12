@@ -7,6 +7,10 @@
     "magicui": {
       "command": "npx",
       "args": ["-y", "@magicuidesign/mcp@latest"]
+    },
+    "motionsites": {
+      "type": "http",
+      "url": "https://motionsites.ai/api/mcp"
     }
   }
 }
