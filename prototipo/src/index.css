@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Kaizen · escenas oscuras de cine que se alternan con escenas claras en hueso; un único acento rojo */
+:root {
+  --carbon: #0b0b0c;
+  --carbon-2: #141416;
+  --hueso: #edebe6;
+  --hueso-2: #f7f6f2;
+  --tinta: #f5f5f2;
+  --gris: #9a9a96;
+  --gris-oscuro: #5c5c57;
+  --rojo: #e63b2e;
+
+  /* Variables que usan los componentes de Neobrutalism (pensadas para superficies claras) */
+  --background: var(--hueso-2);
+  --secondary-background: #ffffff;
+  --foreground: var(--carbon);
+  --main: var(--rojo);
+  --main-foreground: var(--carbon);
+  --border: var(--carbon);
+  --ring: var(--carbon);
+  --overlay: rgba(0, 0, 0, 0.8);
+  --shadow: 4px 4px 0px 0px var(--border);
+  /* Variable que usa el acordeón de Unlumen UI */
+  --surface: #ffffff;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-carbon: var(--carbon);
+  --color-carbon-2: var(--carbon-2);
+  --color-hueso: var(--hueso);
+  --color-hueso-2: var(--hueso-2);
+  --color-tinta: var(--tinta);
+  --color-gris: var(--gris);
+  --color-gris-oscuro: var(--gris-oscuro);
+  --color-rojo: var(--rojo);
+
+  --font-display: "Anton", "Impact", "Arial Narrow", sans-serif;
+  --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-main: var(--main);
+  --color-background: var(--background);
+  --color-secondary-background: var(--secondary-background);
+  --color-foreground: var(--foreground);
+  --color-main-foreground: var(--main-foreground);
+  --color-border: var(--border);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --spacing-boxShadowX: 4px;
+  --spacing-boxShadowY: 4px;
+  --spacing-reverseBoxShadowX: -4px;
+  --spacing-reverseBoxShadowY: -4px;
+  --radius-base: 4px;
+  --shadow-shadow: var(--shadow);
+  --font-weight-base: 500;
+  --font-weight-heading: 700;
+
+  --animate-shimmer-slide: shimmer-slide var(--speed) ease-in-out infinite alternate;
+  --animate-spin-around: spin-around calc(var(--speed) * 2) infinite linear;
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
+  @keyframes shimmer-slide {
+    to {
+      transform: translate(calc(100cqw - 100%), 0);
+    }
+  }
+  @keyframes spin-around {
+    0% {
+      transform: translateZ(0) rotate(0);
+    }
+    15%,
+    35% {
+      transform: translateZ(0) rotate(90deg);
+    }
+    65%,
+    85% {
+      transform: translateZ(0) rotate(270deg);
+    }
+    100% {
+      transform: translateZ(0) rotate(360deg);
+    }
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes marquee-vertical {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(calc(-100% - var(--gap)));
+    }
+  }
+}
+
+/* Estilos base sin capa: así ganan a los estilos que añade la plataforma al publicar */
+html {
+  scroll-behavior: smooth;
+}
+body {
+  background: var(--carbon);
+  color: var(--tinta);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+/* Franja bajo la barra de estado del móvil */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 60;
+  background: var(--carbon);
+}
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+:focus-visible {
+  outline: 2px solid var(--rojo);
+  outline-offset: 3px;
+}
+
+
+/* Contenedor de cada banda: margen lateral que respeta las zonas seguras del móvil */
+.wrap {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.escena {
+  padding-block: 64px;
+}
+@media (min-width: 768px) {
+  .escena {
+    padding-block: 112px;
+  }
+}
+
+.titular {
+  font-family: var(--font-display);
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 0.94;
+  letter-spacing: 0.004em;
+}
+.titular-hero {
+  font-size: clamp(46px, 8.2vw, 108px);
+}
+.titular-seccion {
+  font-size: clamp(38px, 6.2vw, 84px);
+}
+.serif-i {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-size: 1.08em;
+  line-height: 0.8;
+}
+.eyebrow {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.texto {
+  max-width: 62ch;
+}
+.btn-kaizen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 54px;
+  padding-inline: 26px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 480px) {
+  .btn-kaizen {
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    padding-inline: 18px;
+  }
+}
+
+/* Modo "Ver piezas": marca cada componente con su librería */
+.pieza {
+  position: relative;
+}
+.pieza-tag {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: 8px;
+  left: 8px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #0b0b0c;
+  color: #f5f5f2;
+  border: 1px solid var(--dot);
+  font: 600 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pieza-tag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot);
+}
+.pieza::after {
+  content: "";
+  display: none;
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--dot);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 25;
+}
+html[data-piezas="on"] .pieza-tag {
+  display: inline-flex;
+}
+html[data-piezas="on"] .pieza::after {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-marquee,
+  .animate-shimmer-slide,
+  .animate-spin-around {
+    animation: none !important;
+  }
+}
